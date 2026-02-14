@@ -137,7 +137,6 @@ export const App: React.FC = () => {
       <div 
         className="sidebar-divider"
         onMouseDown={handleMouseDown}
-        style={{ cursor: isDragging ? 'col-resize' : 'col-resize' }}
       />
       <div className="main-content">
         <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />

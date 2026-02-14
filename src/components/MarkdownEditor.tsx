@@ -358,7 +358,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       newText = content.substring(0, lineStart) + currentLine.substring(prefix.length) + content.substring(actualLineEnd);
       newCursorPos = start - prefix.length;
     } else {
-      // Remove any existing heading first
+      // Remove any existing heading first (markdown supports heading levels 1-6)
       let cleanLine = currentLine;
       const headingMatch = currentLine.match(/^#{1,6} /);
       if (headingMatch) {

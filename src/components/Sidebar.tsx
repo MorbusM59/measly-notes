@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Note, SearchResult, CategoryHierarchy, CategoryData } from '../shared/types';
+import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
 import { DateFilter } from './DateFilter';
 import './Sidebar.css';
 
