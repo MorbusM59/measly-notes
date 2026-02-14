@@ -102,6 +102,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
           onClick={() => onSelectNote(result.note)}
         >
           <div className="note-title">{result.note.title}</div>
+          {result.snippet && (
+            <div className="note-snippet">{result.snippet}</div>
+          )}
           <div className="note-date">{new Date(result.note.updatedAt).toLocaleDateString()}</div>
         </div>
       ))}

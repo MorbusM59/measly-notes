@@ -91,6 +91,18 @@
   opacity: 0.7;
 }
 
+.note-snippet {
+  font-size: 12px;
+  color: #666;
+  margin: 4px 0;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.note-item.selected .note-snippet {
+  color: rgba(255, 255, 255, 0.8);
+}
+
 .pagination {
   display: flex;
   align-items: center;
