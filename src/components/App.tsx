@@ -8,6 +8,9 @@ import './App.css';
 export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
+  const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
+  const [selectedYears, setSelectedYears] = useState<Set<number | 'older'>>(new Set());
 
   useEffect(() => {
     // Global keyboard shortcut: Ctrl+Enter to create new note
@@ -43,15 +46,44 @@ export const App: React.FC = () => {
     setRefreshKey(k => k + 1);
   };
 
+  const handleSidebarRefresh = () => {
+    setSidebarRefreshTrigger(t => t + 1);
+  };
+
+  const handleMonthToggle = (month: number) => {
+    const newMonths = new Set(selectedMonths);
+    if (newMonths.has(month)) {
+      newMonths.delete(month);
+    } else {
+      newMonths.add(month);
+    }
+    setSelectedMonths(newMonths);
+  };
+
+  const handleYearToggle = (year: number | 'older') => {
+    const newYears = new Set(selectedYears);
+    if (newYears.has(year)) {
+      newYears.delete(year);
+    } else {
+      newYears.add(year);
+    }
+    setSelectedYears(newYears);
+  };
+
   return (
     <div className="app">
       <Sidebar
         key={refreshKey}
         selectedNote={selectedNote}
         onSelectNote={handleSelectNote}
+        refreshTrigger={sidebarRefreshTrigger}
+        selectedMonths={selectedMonths}
+        selectedYears={selectedYears}
+        onMonthToggle={handleMonthToggle}
+        onYearToggle={handleYearToggle}
       />
       <div className="main-content">
-        <TagInput note={selectedNote} />
+        <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
         <MarkdownEditor note={selectedNote} onNoteUpdate={handleNoteUpdate} />
       </div>
     </div>

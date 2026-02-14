@@ -24,6 +24,7 @@ const electronAPI: IElectronAPI = {
   
   // Category view operations
   getNotesByPrimaryTag: () => ipcRenderer.invoke('get-notes-by-primary-tag'),
+  getCategoryHierarchy: () => ipcRenderer.invoke('get-category-hierarchy'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

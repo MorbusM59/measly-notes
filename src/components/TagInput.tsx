@@ -4,9 +4,10 @@ import './TagInput.css';
 
 interface TagInputProps {
   note: Note | null;
+  onTagsChanged?: () => void;
 }
 
-export const TagInput: React.FC<TagInputProps> = ({ note }) => {
+export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const [inputValue, setInputValue] = useState('');
   const [noteTags, setNoteTags] = useState<NoteTag[]>([]);
   const [suggestedTags, setSuggestedTags] = useState<Tag[]>([]);
@@ -53,6 +54,11 @@ export const TagInput: React.FC<TagInputProps> = ({ note }) => {
     await loadNoteTags();
     await loadSuggestedTags();
     inputRef.current?.focus();
+    
+    // Notify parent to refresh sidebar
+    if (onTagsChanged) {
+      onTagsChanged();
+    }
   };
 
   const handleRemoveTag = async (tagId: number) => {
@@ -60,6 +66,11 @@ export const TagInput: React.FC<TagInputProps> = ({ note }) => {
     await window.electronAPI.removeTagFromNote(note.id, tagId);
     await loadNoteTags();
     await loadSuggestedTags();
+    
+    // Notify parent to refresh sidebar
+    if (onTagsChanged) {
+      onTagsChanged();
+    }
   };
 
   const handleAddSuggestedTag = async (tagName: string) => {
@@ -68,6 +79,11 @@ export const TagInput: React.FC<TagInputProps> = ({ note }) => {
     await window.electronAPI.addTagToNote(note.id, tagName, position);
     await loadNoteTags();
     await loadSuggestedTags();
+    
+    // Notify parent to refresh sidebar
+    if (onTagsChanged) {
+      onTagsChanged();
+    }
   };
 
   const handleDragStart = (index: number) => {
@@ -93,6 +109,11 @@ export const TagInput: React.FC<TagInputProps> = ({ note }) => {
     
     setDraggedIndex(null);
     await loadNoteTags();
+    
+    // Notify parent to refresh sidebar
+    if (onTagsChanged) {
+      onTagsChanged();
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {

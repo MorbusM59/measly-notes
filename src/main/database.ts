@@ -251,3 +251,88 @@ export function getNotesByPrimaryTag(): { [tagName: string]: Note[] } {
   
   return result;
 }
+
+export function getCategoryHierarchy() {
+  // Get all notes with their tags at positions 0, 1, and 2
+  const stmt = db.prepare(`
+    SELECT 
+      n.id, n.title, n.filePath, n.createdAt, n.updatedAt,
+      t0.name as primaryTag,
+      t1.name as secondaryTag,
+      t2.name as tertiaryTag
+    FROM notes n
+    LEFT JOIN note_tags nt0 ON n.id = nt0.noteId AND nt0.position = 0
+    LEFT JOIN tags t0 ON nt0.tagId = t0.id
+    LEFT JOIN note_tags nt1 ON n.id = nt1.noteId AND nt1.position = 1
+    LEFT JOIN tags t1 ON nt1.tagId = t1.id
+    LEFT JOIN note_tags nt2 ON n.id = nt2.noteId AND nt2.position = 2
+    LEFT JOIN tags t2 ON nt2.tagId = t2.id
+    WHERE t0.name IS NOT NULL
+    ORDER BY t0.name, t1.name, t2.name, n.updatedAt DESC
+  `);
+  
+  const rows = stmt.all() as Array<{
+    id: number;
+    title: string;
+    filePath: string;
+    createdAt: string;
+    updatedAt: string;
+    primaryTag: string;
+    secondaryTag: string | null;
+    tertiaryTag: string | null;
+  }>;
+  
+  const hierarchy: any = {};
+  
+  rows.forEach(row => {
+    const note: Note = {
+      id: row.id,
+      title: row.title,
+      filePath: row.filePath,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    };
+    
+    const primary = row.primaryTag;
+    const secondary = row.secondaryTag;
+    const tertiary = row.tertiaryTag;
+    
+    // Initialize primary tag if needed
+    if (!hierarchy[primary]) {
+      hierarchy[primary] = {
+        notes: [],
+        secondary: {}
+      };
+    }
+    
+    // Note has only primary tag
+    if (!secondary) {
+      hierarchy[primary].notes.push(note);
+      return;
+    }
+    
+    // Initialize secondary tag if needed
+    if (!hierarchy[primary].secondary[secondary]) {
+      hierarchy[primary].secondary[secondary] = {
+        notes: [],
+        tertiary: {}
+      };
+    }
+    
+    // Note has primary + secondary but no tertiary
+    if (!tertiary) {
+      hierarchy[primary].secondary[secondary].notes.push(note);
+      return;
+    }
+    
+    // Initialize tertiary tag if needed
+    if (!hierarchy[primary].secondary[secondary].tertiary[tertiary]) {
+      hierarchy[primary].secondary[secondary].tertiary[tertiary] = [];
+    }
+    
+    // Note has all three tags
+    hierarchy[primary].secondary[secondary].tertiary[tertiary].push(note);
+  });
+  
+  return hierarchy;
+}

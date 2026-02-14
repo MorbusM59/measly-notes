@@ -3,7 +3,7 @@ import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote, 
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
   addTagToNote, removeTagFromNote, reorderNoteTags, getNoteTags, 
-  getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag
+  getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy
 } from './main/database';
 import { initFileSystem, saveNoteContent, loadNoteContent, deleteNoteFile } from './main/fileSystem';
 import { SearchResult } from './shared/types';
@@ -165,6 +165,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('get-notes-by-primary-tag', async () => {
     return getNotesByPrimaryTag();
+  });
+
+  ipcMain.handle('get-category-hierarchy', async () => {
+    return getCategoryHierarchy();
   });
 
   createWindow();

@@ -1,26 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { Note, SearchResult } from '../shared/types';
+import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
+import { DateFilter } from './DateFilter';
 import './Sidebar.css';
 
 interface SidebarProps {
   onSelectNote: (note: Note) => void;
   selectedNote: Note | null;
   onNotesUpdate?: () => void;
+  refreshTrigger?: number;
+  selectedMonths?: Set<number>;
+  selectedYears?: Set<number | 'older'>;
+  onMonthToggle?: (month: number) => void;
+  onYearToggle?: (year: number | 'older') => void;
 }
 
 type ViewMode = 'date' | 'category';
 type SearchMode = 'none' | 'text' | 'tag';
 
-export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ 
+  onSelectNote, 
+  selectedNote, 
+  refreshTrigger,
+  selectedMonths = new Set(),
+  selectedYears = new Set(),
+  onMonthToggle,
+  onYearToggle
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
   const [viewMode, setViewMode] = useState<ViewMode>('date');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [dateNotes, setDateNotes] = useState<Note[]>([]);
-  const [categoryNotes, setCategoryNotes] = useState<{ [tagName: string]: Note[] }>({});
+  const [categoryHierarchy, setCategoryHierarchy] = useState<CategoryHierarchy>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [totalNotes, setTotalNotes] = useState(0);
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [collapsedPrimary, setCollapsedPrimary] = useState<Set<string>>(new Set());
+  const [collapsedSecondary, setCollapsedSecondary] = useState<Set<string>>(new Set());
   const notesPerPage = 20;
 
   // Load notes based on view mode
@@ -29,10 +44,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
       if (viewMode === 'date') {
         loadDateNotes();
       } else {
-        loadCategoryNotes();
+        loadCategoryHierarchy();
       }
     }
-  }, [viewMode, currentPage, searchMode]);
+  }, [viewMode, currentPage, searchMode, refreshTrigger]);
 
   const loadDateNotes = async () => {
     const result = await window.electronAPI.getNotesPage(currentPage, notesPerPage);
@@ -40,9 +55,82 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
     setTotalNotes(result.total);
   };
 
-  const loadCategoryNotes = async () => {
-    const notes = await window.electronAPI.getNotesByPrimaryTag();
-    setCategoryNotes(notes);
+  const loadCategoryHierarchy = async () => {
+    const hierarchy = await window.electronAPI.getCategoryHierarchy();
+    setCategoryHierarchy(hierarchy);
+  };
+
+  // Filter notes by date
+  const filterNotesByDate = (note: Note): boolean => {
+    const hasMonthFilter = selectedMonths.size > 0;
+    const hasYearFilter = selectedYears.size > 0;
+    
+    // If no filters are active, show all notes
+    if (!hasMonthFilter && !hasYearFilter) {
+      return true;
+    }
+    
+    const noteDate = new Date(note.updatedAt);
+    const noteMonth = noteDate.getMonth() + 1; // JavaScript months are 0-indexed
+    const noteYear = noteDate.getFullYear();
+    
+    // Check month filter
+    const monthMatch = !hasMonthFilter || selectedMonths.has(noteMonth);
+    
+    // Check year filter
+    let yearMatch = !hasYearFilter;
+    if (hasYearFilter) {
+      if (selectedYears.has(noteYear)) {
+        yearMatch = true;
+      } else if (selectedYears.has('older') && noteYear <= 2021) {
+        yearMatch = true;
+      }
+    }
+    
+    return monthMatch && yearMatch;
+  };
+
+  // Filter notes list
+  const getFilteredNotes = (notes: Note[]): Note[] => {
+    return notes.filter(filterNotesByDate);
+  };
+
+  // Filter category hierarchy
+  const getFilteredHierarchy = (hierarchy: CategoryHierarchy): CategoryHierarchy => {
+    const filtered: CategoryHierarchy = {};
+    
+    Object.entries(hierarchy).forEach(([primaryTag, primaryData]) => {
+      const filteredPrimary = {
+        notes: getFilteredNotes(primaryData.notes),
+        secondary: {} as CategoryHierarchy[string]['secondary']
+      };
+      
+      Object.entries(primaryData.secondary).forEach(([secondaryTag, secondaryData]) => {
+        const filteredSecondary = {
+          notes: getFilteredNotes(secondaryData.notes),
+          tertiary: {} as CategoryHierarchy[string]['secondary'][string]['tertiary']
+        };
+        
+        Object.entries(secondaryData.tertiary).forEach(([tertiaryTag, notes]) => {
+          const filteredTertiary = getFilteredNotes(notes);
+          if (filteredTertiary.length > 0) {
+            filteredSecondary.tertiary[tertiaryTag] = filteredTertiary;
+          }
+        });
+        
+        // Only include secondary if it has notes or tertiary groups
+        if (filteredSecondary.notes.length > 0 || Object.keys(filteredSecondary.tertiary).length > 0) {
+          filteredPrimary.secondary[secondaryTag] = filteredSecondary;
+        }
+      });
+      
+      // Only include primary if it has notes or secondary groups
+      if (filteredPrimary.notes.length > 0 || Object.keys(filteredPrimary.secondary).length > 0) {
+        filtered[primaryTag] = filteredPrimary;
+      }
+    });
+    
+    return filtered;
   };
 
   const handleSearch = async () => {
@@ -77,14 +165,46 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
     setSearchResults([]);
   };
 
-  const toggleCategory = (category: string) => {
-    const newCollapsed = new Set(collapsedCategories);
-    if (newCollapsed.has(category)) {
-      newCollapsed.delete(category);
+  const togglePrimaryCategory = (category: string) => {
+    const newCollapsed = new Set(collapsedPrimary);
+    
+    // Close all other primary categories
+    if (!newCollapsed.has(category)) {
+      // Open this one, close all others
+      newCollapsed.clear();
+      setCollapsedSecondary(new Set());  // Also clear secondary collapsed state
     } else {
+      // Close this one
       newCollapsed.add(category);
     }
-    setCollapsedCategories(newCollapsed);
+    
+    setCollapsedPrimary(newCollapsed);
+  };
+
+  const toggleSecondaryCategory = (primaryTag: string, secondaryTag: string) => {
+    const key = `${primaryTag}:${secondaryTag}`;
+    const newCollapsed = new Set(collapsedSecondary);
+    
+    // Close all other secondary categories within this primary
+    const primaryPrefix = `${primaryTag}:`;
+    const toRemove: string[] = [];
+    
+    newCollapsed.forEach(k => {
+      if (k.startsWith(primaryPrefix) && k !== key) {
+        toRemove.push(k);
+      }
+    });
+    
+    toRemove.forEach(k => newCollapsed.delete(k));
+    
+    // Toggle this one
+    if (newCollapsed.has(key)) {
+      newCollapsed.delete(key);
+    } else {
+      newCollapsed.add(key);
+    }
+    
+    setCollapsedSecondary(newCollapsed);
   };
 
   const totalPages = Math.ceil(totalNotes / notesPerPage);
@@ -111,79 +231,153 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
     </div>
   );
 
-  const renderDateView = () => (
-    <div className="date-view">
-      <div className="notes-list">
-        {dateNotes.map(note => (
-          <div
-            key={note.id}
-            className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-            onClick={() => onSelectNote(note)}
-          >
-            <div className="note-title">{note.title}</div>
-            <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
-          </div>
-        ))}
-      </div>
-      
-      {totalPages > 1 && (
-        <div className="pagination">
-          <button
-            className="page-btn"
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-          >
-            &lt;
-          </button>
-          <span className="page-info">
-            {((currentPage - 1) * notesPerPage) + 1}-
-            {Math.min(currentPage * notesPerPage, totalNotes)} of {totalNotes}
-          </span>
-          <button
-            className="page-btn"
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-          >
-            &gt;
-          </button>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderCategoryView = () => (
-    <div className="category-view">
-      {Object.entries(categoryNotes).map(([tagName, notes]) => (
-        <div key={tagName} className="category-group">
-          <div
-            className="category-header"
-            onClick={() => toggleCategory(tagName)}
-          >
-            <span className="category-arrow">
-              {collapsedCategories.has(tagName) ? '▶' : '▼'}
-            </span>
-            <span className="category-name">{tagName}</span>
-            <span className="category-count">({notes.length})</span>
-          </div>
-          
-          {!collapsedCategories.has(tagName) && (
-            <div className="category-notes">
-              {notes.map(note => (
-                <div
-                  key={note.id}
-                  className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-                  onClick={() => onSelectNote(note)}
-                >
-                  <div className="note-title">{note.title}</div>
-                  <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
-                </div>
-              ))}
+  const renderDateView = () => {
+    const filteredNotes = getFilteredNotes(dateNotes);
+    
+    return (
+      <div className="date-view">
+        <div className="notes-list">
+          {filteredNotes.map(note => (
+            <div
+              key={note.id}
+              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+              onClick={() => onSelectNote(note)}
+            >
+              <div className="note-title">{note.title}</div>
+              <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
             </div>
-          )}
+          ))}
         </div>
-      ))}
+        
+        {totalPages > 1 && (
+          <div className="pagination">
+            <button
+              className="page-btn"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            >
+              &lt;
+            </button>
+            <span className="page-info">
+              {((currentPage - 1) * notesPerPage) + 1}-
+              {Math.min(currentPage * notesPerPage, totalNotes)} of {totalNotes}
+            </span>
+            <button
+              className="page-btn"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            >
+              &gt;
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderCategoryView = () => {
+    const filteredHierarchy = getFilteredHierarchy(categoryHierarchy);
+    
+    return (
+      <div className="category-view">
+        {Object.entries(filteredHierarchy).map(([primaryTag, primaryData]) => {
+        const isPrimaryCollapsed = collapsedPrimary.has(primaryTag);
+        const primaryNoteCount = primaryData.notes.length + 
+          Object.values(primaryData.secondary).reduce((sum, secData) => {
+            return sum + secData.notes.length + 
+              Object.values(secData.tertiary).reduce((tSum, tNotes) => tSum + tNotes.length, 0);
+          }, 0);
+        
+        return (
+          <div key={primaryTag} className="category-group">
+            <div
+              className="category-header primary"
+              onClick={() => togglePrimaryCategory(primaryTag)}
+            >
+              <span className="category-arrow">
+                {isPrimaryCollapsed ? '▶' : '▼'}
+              </span>
+              <span className="category-name">{primaryTag}</span>
+              <span className="category-count">({primaryNoteCount})</span>
+            </div>
+            
+            {!isPrimaryCollapsed && (
+              <div className="category-content">
+                {/* Secondary tags accordion */}
+                {Object.entries(primaryData.secondary).map(([secondaryTag, secondaryData]) => {
+                  const secKey = `${primaryTag}:${secondaryTag}`;
+                  const isSecondaryCollapsed = collapsedSecondary.has(secKey);
+                  const secNoteCount = secondaryData.notes.length + 
+                    Object.values(secondaryData.tertiary).reduce((sum, tNotes) => sum + tNotes.length, 0);
+                  
+                  return (
+                    <div key={secKey} className="secondary-group">
+                      <div
+                        className="category-header secondary"
+                        onClick={() => toggleSecondaryCategory(primaryTag, secondaryTag)}
+                      >
+                        <span className="category-arrow">
+                          {isSecondaryCollapsed ? '▶' : '▼'}
+                        </span>
+                        <span className="category-name">{secondaryTag}</span>
+                        <span className="category-count">({secNoteCount})</span>
+                      </div>
+                      
+                      {!isSecondaryCollapsed && (
+                        <div className="secondary-content">
+                          {/* Notes with primary + secondary but no tertiary */}
+                          {secondaryData.notes.map(note => (
+                            <div
+                              key={note.id}
+                              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+                              onClick={() => onSelectNote(note)}
+                            >
+                              <div className="note-title">{note.title}</div>
+                              <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                            </div>
+                          ))}
+                          
+                          {/* Tertiary tags (visual dividers, not accordion) */}
+                          {Object.entries(secondaryData.tertiary).map(([tertiaryTag, notes]) => (
+                            <div key={tertiaryTag} className="tertiary-group">
+                              <div className="tertiary-header">{tertiaryTag}</div>
+                              {notes.map(note => (
+                                <div
+                                  key={note.id}
+                                  className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+                                  onClick={() => onSelectNote(note)}
+                                >
+                                  <div className="note-title">{note.title}</div>
+                                  <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                
+                {/* Notes with only primary tag (at the end) */}
+                {primaryData.notes.map(note => (
+                  <div
+                    key={note.id}
+                    className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+                    onClick={() => onSelectNote(note)}
+                  >
+                    <div className="note-title">{note.title}</div>
+                    <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
+};
 
   return (
     <div className="sidebar">
@@ -219,6 +413,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
          viewMode === 'date' ? renderDateView() : 
          renderCategoryView()}
       </div>
+      
+      {searchMode === 'none' && (
+        <DateFilter
+          selectedMonths={selectedMonths}
+          selectedYears={selectedYears}
+          onMonthToggle={onMonthToggle}
+          onYearToggle={onYearToggle}
+        />
+      )}
     </div>
   );
 };
