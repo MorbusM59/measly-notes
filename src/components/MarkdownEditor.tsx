@@ -27,6 +27,26 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         setContent(noteContent);
         lastSavedContentRef.current = noteContent;
         lastSavedTitleRef.current = note.title;
+        
+        // Focus textarea and position cursor after content is loaded
+        setTimeout(() => {
+          const textarea = textareaRef.current;
+          if (textarea) {
+            // Switch to edit mode if in view mode
+            setShowPreview(false);
+            
+            // Focus the textarea
+            textarea.focus();
+            
+            // Position cursor after "# " for new notes
+            if (noteContent === '# ') {
+              textarea.setSelectionRange(2, 2);
+            } else {
+              // For existing notes, position at end
+              textarea.setSelectionRange(noteContent.length, noteContent.length);
+            }
+          }
+        }, 0);
       });
     } else {
       setContent('');
