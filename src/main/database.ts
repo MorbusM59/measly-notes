@@ -47,6 +47,11 @@ export function updateNote(id: number): void {
   stmt.run(now, id);
 }
 
+export function updateNoteFilePath(id: number, filePath: string): void {
+  const stmt = db.prepare('UPDATE notes SET filePath = ? WHERE id = ?');
+  stmt.run(filePath, id);
+}
+
 export function deleteNote(id: number): void {
   const stmt = db.prepare('DELETE FROM notes WHERE id = ?');
   stmt.run(id);
