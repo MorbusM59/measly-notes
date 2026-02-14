@@ -14,7 +14,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [content, setContent] = useState('');
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [viewStyle, setViewStyle] = useState<string>('elegant');
+  const [viewStyle, setViewStyle] = useState<string>('clean');
+  const [fontSize, setFontSize] = useState<string>('m');
+  const [spacing, setSpacing] = useState<string>('cozy');
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -75,17 +77,36 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [note]);
 
-  // Load and persist view style
+  // Load and persist view style, font size, and spacing
   useEffect(() => {
     const savedStyle = localStorage.getItem('markdown-view-style');
+    const savedFontSize = localStorage.getItem('markdown-font-size');
+    const savedSpacing = localStorage.getItem('markdown-spacing');
+    
     if (savedStyle) {
       setViewStyle(savedStyle);
+    }
+    if (savedFontSize) {
+      setFontSize(savedFontSize);
+    }
+    if (savedSpacing) {
+      setSpacing(savedSpacing);
     }
   }, []);
 
   const handleStyleChange = (style: string) => {
     setViewStyle(style);
     localStorage.setItem('markdown-view-style', style);
+  };
+
+  const handleFontSizeChange = (size: string) => {
+    setFontSize(size);
+    localStorage.setItem('markdown-font-size', size);
+  };
+
+  const handleSpacingChange = (spacingValue: string) => {
+    setSpacing(spacingValue);
+    localStorage.setItem('markdown-spacing', spacingValue);
   };
 
   // Check if cursor is on first line
@@ -507,14 +528,39 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         )}
         
         {showPreview && (
-          <div className="style-selector">
-            <select value={viewStyle} onChange={(e) => handleStyleChange(e.target.value)}>
-              <option value="elegant">Elegant & Formal</option>
-              <option value="business">Clean Business</option>
-              <option value="friendly">Friendly & Playful</option>
-              <option value="technical">Monospace / Technical</option>
-            </select>
-          </div>
+          <>
+            <div className="style-selector">
+              <label className="selector-label">Style:</label>
+              <select value={viewStyle} onChange={(e) => handleStyleChange(e.target.value)}>
+                <option value="clean">Clean</option>
+                <option value="narrow">Narrow</option>
+                <option value="print">Print</option>
+                <option value="modern">Modern</option>
+                <option value="cute">Cute</option>
+                <option value="hand">Hand</option>
+                <option value="script">Script</option>
+              </select>
+            </div>
+            <div className="style-selector">
+              <label className="selector-label">Size:</label>
+              <select value={fontSize} onChange={(e) => handleFontSizeChange(e.target.value)}>
+                <option value="xs">XS</option>
+                <option value="s">S</option>
+                <option value="m">M</option>
+                <option value="l">L</option>
+                <option value="xl">XL</option>
+              </select>
+            </div>
+            <div className="style-selector">
+              <label className="selector-label">Spacing:</label>
+              <select value={spacing} onChange={(e) => handleSpacingChange(e.target.value)}>
+                <option value="tight">Tight</option>
+                <option value="compact">Compact</option>
+                <option value="cozy">Cozy</option>
+                <option value="wide">Wide</option>
+              </select>
+            </div>
+          </>
         )}
         
         {isOnFirstLine && (
@@ -534,7 +580,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 Start typing your note here..."
           />
         ) : (
-          <div className={`markdown-preview style-${viewStyle}`}>
+          <div className={`markdown-preview style-${viewStyle} size-${fontSize} spacing-${spacing}`}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {content}
             </ReactMarkdown>
