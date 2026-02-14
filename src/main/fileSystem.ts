@@ -1,8 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { app } from 'electron';
+import { getNotesDir } from './paths';
 
-const notesDir = path.join(app.getPath('userData'), 'notes');
+const notesDir = getNotesDir();
 
 export async function initFileSystem(): Promise<void> {
   try {

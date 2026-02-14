@@ -1,13 +1,18 @@
 import Database from 'better-sqlite3';
-import * as path from 'path';
-import { app } from 'electron';
+import * as fs from 'fs';
 import { Note, Tag, NoteTag, SearchResult } from '../shared/types';
+import { getDataDir, getDbPath } from './paths';
 
-const dbPath = path.join(app.getPath('userData'), 'notes.db');
-const db = new Database(dbPath);
+let db: Database.Database;
 
 // Initialize database schema
 export function initDatabase(): void {
+  // Ensure data directory exists
+  fs.mkdirSync(getDataDir(), { recursive: true });
+  
+  // Initialize database
+  db = new Database(getDbPath());
+  
   db.exec(`
     CREATE TABLE IF NOT EXISTS notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
