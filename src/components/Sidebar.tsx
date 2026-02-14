@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
+import { DateFilter } from './DateFilter';
 import './Sidebar.css';
 
 interface SidebarProps {
@@ -7,12 +8,24 @@ interface SidebarProps {
   selectedNote: Note | null;
   onNotesUpdate?: () => void;
   refreshTrigger?: number;
+  selectedMonths?: Set<number>;
+  selectedYears?: Set<number | 'older'>;
+  onMonthToggle?: (month: number) => void;
+  onYearToggle?: (year: number | 'older') => void;
 }
 
 type ViewMode = 'date' | 'category';
 type SearchMode = 'none' | 'text' | 'tag';
 
-export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote, refreshTrigger }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ 
+  onSelectNote, 
+  selectedNote, 
+  refreshTrigger,
+  selectedMonths = new Set(),
+  selectedYears = new Set(),
+  onMonthToggle = () => {},
+  onYearToggle = () => {}
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
   const [viewMode, setViewMode] = useState<ViewMode>('date');
@@ -45,6 +58,79 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote, re
   const loadCategoryHierarchy = async () => {
     const hierarchy = await window.electronAPI.getCategoryHierarchy();
     setCategoryHierarchy(hierarchy);
+  };
+
+  // Filter notes by date
+  const filterNotesByDate = (note: Note): boolean => {
+    const hasMonthFilter = selectedMonths.size > 0;
+    const hasYearFilter = selectedYears.size > 0;
+    
+    // If no filters are active, show all notes
+    if (!hasMonthFilter && !hasYearFilter) {
+      return true;
+    }
+    
+    const noteDate = new Date(note.updatedAt);
+    const noteMonth = noteDate.getMonth() + 1; // JavaScript months are 0-indexed
+    const noteYear = noteDate.getFullYear();
+    
+    // Check month filter
+    const monthMatch = !hasMonthFilter || selectedMonths.has(noteMonth);
+    
+    // Check year filter
+    let yearMatch = !hasYearFilter;
+    if (hasYearFilter) {
+      if (selectedYears.has(noteYear)) {
+        yearMatch = true;
+      } else if (selectedYears.has('older') && noteYear <= 2021) {
+        yearMatch = true;
+      }
+    }
+    
+    return monthMatch && yearMatch;
+  };
+
+  // Filter notes list
+  const getFilteredNotes = (notes: Note[]): Note[] => {
+    return notes.filter(filterNotesByDate);
+  };
+
+  // Filter category hierarchy
+  const getFilteredHierarchy = (hierarchy: CategoryHierarchy): CategoryHierarchy => {
+    const filtered: CategoryHierarchy = {};
+    
+    Object.entries(hierarchy).forEach(([primaryTag, primaryData]) => {
+      const filteredPrimary = {
+        notes: getFilteredNotes(primaryData.notes),
+        secondary: {} as CategoryHierarchy[string]['secondary']
+      };
+      
+      Object.entries(primaryData.secondary).forEach(([secondaryTag, secondaryData]) => {
+        const filteredSecondary = {
+          notes: getFilteredNotes(secondaryData.notes),
+          tertiary: {} as CategoryHierarchy[string]['secondary'][string]['tertiary']
+        };
+        
+        Object.entries(secondaryData.tertiary).forEach(([tertiaryTag, notes]) => {
+          const filteredTertiary = getFilteredNotes(notes);
+          if (filteredTertiary.length > 0) {
+            filteredSecondary.tertiary[tertiaryTag] = filteredTertiary;
+          }
+        });
+        
+        // Only include secondary if it has notes or tertiary groups
+        if (filteredSecondary.notes.length > 0 || Object.keys(filteredSecondary.tertiary).length > 0) {
+          filteredPrimary.secondary[secondaryTag] = filteredSecondary;
+        }
+      });
+      
+      // Only include primary if it has notes or secondary groups
+      if (filteredPrimary.notes.length > 0 || Object.keys(filteredPrimary.secondary).length > 0) {
+        filtered[primaryTag] = filteredPrimary;
+      }
+    });
+    
+    return filtered;
   };
 
   const handleSearch = async () => {
@@ -145,49 +231,56 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote, re
     </div>
   );
 
-  const renderDateView = () => (
-    <div className="date-view">
-      <div className="notes-list">
-        {dateNotes.map(note => (
-          <div
-            key={note.id}
-            className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-            onClick={() => onSelectNote(note)}
-          >
-            <div className="note-title">{note.title}</div>
-            <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
-          </div>
-        ))}
-      </div>
-      
-      {totalPages > 1 && (
-        <div className="pagination">
-          <button
-            className="page-btn"
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-          >
-            &lt;
-          </button>
-          <span className="page-info">
-            {((currentPage - 1) * notesPerPage) + 1}-
-            {Math.min(currentPage * notesPerPage, totalNotes)} of {totalNotes}
-          </span>
-          <button
-            className="page-btn"
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-          >
-            &gt;
-          </button>
+  const renderDateView = () => {
+    const filteredNotes = getFilteredNotes(dateNotes);
+    
+    return (
+      <div className="date-view">
+        <div className="notes-list">
+          {filteredNotes.map(note => (
+            <div
+              key={note.id}
+              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+              onClick={() => onSelectNote(note)}
+            >
+              <div className="note-title">{note.title}</div>
+              <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+            </div>
+          ))}
         </div>
-      )}
-    </div>
-  );
+        
+        {totalPages > 1 && (
+          <div className="pagination">
+            <button
+              className="page-btn"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            >
+              &lt;
+            </button>
+            <span className="page-info">
+              {((currentPage - 1) * notesPerPage) + 1}-
+              {Math.min(currentPage * notesPerPage, totalNotes)} of {totalNotes}
+            </span>
+            <button
+              className="page-btn"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            >
+              &gt;
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
-  const renderCategoryView = () => (
-    <div className="category-view">
-      {Object.entries(categoryHierarchy).map(([primaryTag, primaryData]) => {
+  const renderCategoryView = () => {
+    const filteredHierarchy = getFilteredHierarchy(categoryHierarchy);
+    
+    return (
+      <div className="category-view">
+        {Object.entries(filteredHierarchy).map(([primaryTag, primaryData]) => {
         const isPrimaryCollapsed = collapsedPrimary.has(primaryTag);
         const primaryNoteCount = primaryData.notes.length + 
           Object.values(primaryData.secondary).reduce((sum, secData) => {
@@ -284,6 +377,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote, re
       })}
     </div>
   );
+};
 
   return (
     <div className="sidebar">
@@ -319,6 +413,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote, re
          viewMode === 'date' ? renderDateView() : 
          renderCategoryView()}
       </div>
+      
+      {searchMode === 'none' && (
+        <DateFilter
+          selectedMonths={selectedMonths}
+          selectedYears={selectedYears}
+          onMonthToggle={onMonthToggle}
+          onYearToggle={onYearToggle}
+        />
+      )}
     </div>
   );
 };
