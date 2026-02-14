@@ -1,10 +1,9 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { app } from 'electron';
-
-const notesDir = path.join(app.getPath('userData'), 'notes');
+import { getNotesDir } from './paths';
 
 export async function initFileSystem(): Promise<void> {
+  const notesDir = getNotesDir();
   try {
     await fs.access(notesDir);
   } catch {
@@ -13,6 +12,7 @@ export async function initFileSystem(): Promise<void> {
 }
 
 export async function saveNoteContent(noteId: number, content: string): Promise<string> {
+  const notesDir = getNotesDir();
   const filePath = path.join(notesDir, `${noteId}.md`);
   await fs.writeFile(filePath, content, 'utf-8');
   return filePath;
