@@ -45,6 +45,9 @@ app.whenReady().then(async () => {
     const filePath = await saveNoteContent(note.id, '');
     updateNoteFilePath(note.id, filePath);
     const updatedNote = getNoteById(note.id);
+    if (!updatedNote) {
+      throw new Error(`Failed to retrieve note ${note.id} after creation`);
+    }
     return updatedNote;
   });
 
