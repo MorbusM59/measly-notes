@@ -19,6 +19,25 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef('');
   const lastSavedTitleRef = useRef('');
+  
+  // Expose forceSave method via window for App to call
+  useEffect(() => {
+    (window as any).forceSaveCurrentNote = async () => {
+      if (note && content) {
+        // Clear any pending auto-save
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
+          autoSaveTimeoutRef.current = null;
+        }
+        // Save immediately
+        await autoSave();
+      }
+    };
+    
+    return () => {
+      delete (window as any).forceSaveCurrentNote;
+    };
+  }, [note, content]);
 
   // Load note content when note changes
   useEffect(() => {

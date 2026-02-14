@@ -195,6 +195,17 @@
   font-weight: 600;
 }
 
+.category-header.primary.uncategorized {
+  background: #f8f8f8;
+  font-style: italic;
+  color: #666;
+  cursor: default;
+}
+
+.category-header.primary.uncategorized .category-arrow {
+  visibility: hidden;
+}
+
 .category-header.secondary {
   background: #f8f8f8;
   padding-left: 32px;

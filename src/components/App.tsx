@@ -11,6 +11,7 @@ export const App: React.FC = () => {
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [selectedYears, setSelectedYears] = useState<Set<number | 'older'>>(new Set());
+  const [viewMode, setViewMode] = useState<'date' | 'category'>('date');
 
   useEffect(() => {
     // Global keyboard shortcut: Ctrl+Enter to create new note
@@ -26,6 +27,11 @@ export const App: React.FC = () => {
   }, []);
 
   const handleCreateNote = async () => {
+    // Force save the current note before creating a new one
+    if ((window as any).forceSaveCurrentNote) {
+      await (window as any).forceSaveCurrentNote();
+    }
+    
     // Create note with default title and pre-filled content
     const note = await window.electronAPI.createNote('Untitled');
     
@@ -81,6 +87,8 @@ export const App: React.FC = () => {
         selectedYears={selectedYears}
         onMonthToggle={handleMonthToggle}
         onYearToggle={handleYearToggle}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
       <div className="main-content">
         <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />

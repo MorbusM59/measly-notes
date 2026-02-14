@@ -38,6 +38,11 @@ export interface CategoryHierarchy {
   };
 }
 
+export interface CategoryData {
+  hierarchy: CategoryHierarchy;
+  uncategorizedNotes: Note[];
+}
+
 export interface IElectronAPI {
   createNote: (title: string) => Promise<Note>;
   saveNote: (id: number, content: string) => Promise<void>;
@@ -61,7 +66,7 @@ export interface IElectronAPI {
   
   // Category view operations
   getNotesByPrimaryTag: () => Promise<{ [tagName: string]: Note[] }>;
-  getCategoryHierarchy: () => Promise<CategoryHierarchy>;
+  getCategoryHierarchy: () => Promise<CategoryData>;
 }
 
 declare global {

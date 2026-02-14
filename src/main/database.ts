@@ -267,7 +267,6 @@ export function getCategoryHierarchy() {
     LEFT JOIN tags t1 ON nt1.tagId = t1.id
     LEFT JOIN note_tags nt2 ON n.id = nt2.noteId AND nt2.position = 2
     LEFT JOIN tags t2 ON nt2.tagId = t2.id
-    WHERE t0.name IS NOT NULL
     ORDER BY t0.name, t1.name, t2.name, n.updatedAt DESC
   `);
   
@@ -277,12 +276,13 @@ export function getCategoryHierarchy() {
     filePath: string;
     createdAt: string;
     updatedAt: string;
-    primaryTag: string;
+    primaryTag: string | null;
     secondaryTag: string | null;
     tertiaryTag: string | null;
   }>;
   
   const hierarchy: any = {};
+  const uncategorizedNotes: Note[] = [];
   
   rows.forEach(row => {
     const note: Note = {
@@ -296,6 +296,12 @@ export function getCategoryHierarchy() {
     const primary = row.primaryTag;
     const secondary = row.secondaryTag;
     const tertiary = row.tertiaryTag;
+    
+    // Note has no tags - add to uncategorized
+    if (!primary) {
+      uncategorizedNotes.push(note);
+      return;
+    }
     
     // Initialize primary tag if needed
     if (!hierarchy[primary]) {
@@ -334,5 +340,10 @@ export function getCategoryHierarchy() {
     hierarchy[primary].secondary[secondary].tertiary[tertiary].push(note);
   });
   
-  return hierarchy;
+  // Sort uncategorized notes by date descending (most recent first)
+  uncategorizedNotes.sort((a, b) => {
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  });
+  
+  return { hierarchy, uncategorizedNotes };
 }
