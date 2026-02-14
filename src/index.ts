@@ -42,7 +42,7 @@ app.whenReady().then(async () => {
   // Register IPC handlers
   ipcMain.handle('create-note', async (_, title: string) => {
     const note = createNote(title, '');
-    const filePath = await saveNoteContent(note.id, '');
+    await saveNoteContent(note.id, '');
     // Update note with file path
     const updatedNote = getNoteById(note.id);
     return updatedNote;

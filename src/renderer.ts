@@ -3,5 +3,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './components/App';
 
-const root = createRoot(document.getElementById('root')!);
-root.render(React.createElement(App));
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  const root = createRoot(rootElement);
+  root.render(React.createElement(App));
+}
