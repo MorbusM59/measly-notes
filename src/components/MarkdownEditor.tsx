@@ -15,6 +15,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [viewStyle, setViewStyle] = useState<string>('elegant');
+  const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef('');
@@ -136,6 +137,91 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [note, content, extractTitle, onNoteUpdate]);
 
+  // Check active formatting at current selection
+  const checkFormatting = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const active = new Set<string>();
+
+    // Only check if there's a selection or cursor position
+    if (start === end && start === 0) {
+      setActiveFormats(active);
+      return;
+    }
+
+    // Check for bold (**)
+    if (start >= 2 && end <= content.length - 2) {
+      if (content.substring(start - 2, start) === '**' && content.substring(end, end + 2) === '**') {
+        active.add('bold');
+      }
+    }
+
+    // Check for italic (*) - but not if it's part of **
+    if (start >= 1 && end <= content.length - 1) {
+      const beforeChar = content.substring(start - 1, start);
+      const afterChar = content.substring(end, end + 1);
+      const beforeBefore = start >= 2 ? content.substring(start - 2, start - 1) : '';
+      const afterAfter = end <= content.length - 2 ? content.substring(end + 1, end + 2) : '';
+      
+      if (beforeChar === '*' && afterChar === '*' && beforeBefore !== '*' && afterAfter !== '*') {
+        active.add('italic');
+      }
+    }
+
+    // Check for strikethrough (~~)
+    if (start >= 2 && end <= content.length - 2) {
+      if (content.substring(start - 2, start) === '~~' && content.substring(end, end + 2) === '~~') {
+        active.add('strikethrough');
+      }
+    }
+
+    // Check for inline code (`)
+    if (start >= 1 && end <= content.length - 1) {
+      if (content.substring(start - 1, start) === '`' && content.substring(end, end + 1) === '`') {
+        active.add('code');
+      }
+    }
+
+    // Check for code block (```)
+    const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = content.indexOf('\n', end);
+    const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
+    
+    if (lineStart >= 4) {
+      const prevLine = content.lastIndexOf('\n', lineStart - 2);
+      const prevLineContent = content.substring(prevLine + 1, lineStart - 1);
+      if (prevLineContent.trim() === '```') {
+        const nextLineStart = actualLineEnd + 1;
+        const nextLineEnd = content.indexOf('\n', nextLineStart);
+        const nextLineContent = content.substring(nextLineStart, nextLineEnd === -1 ? content.length : nextLineEnd);
+        if (nextLineContent.trim() === '```') {
+          active.add('codeblock');
+        }
+      }
+    }
+
+    // Check for heading (# at start of line)
+    const currentLineContent = content.substring(lineStart, actualLineEnd);
+    if (currentLineContent.startsWith('# ')) {
+      active.add('h1');
+    } else if (currentLineContent.startsWith('## ')) {
+      active.add('h2');
+    } else if (currentLineContent.startsWith('### ')) {
+      active.add('h3');
+    } else if (currentLineContent.startsWith('> ')) {
+      active.add('blockquote');
+    } else if (currentLineContent.match(/^- /)) {
+      active.add('bullet');
+    } else if (currentLineContent.match(/^\d+\. /)) {
+      active.add('number');
+    }
+
+    setActiveFormats(active);
+  }, [content]);
+
   // Markdown formatting functions
   const wrapSelection = (before: string, after: string = before) => {
     const textarea = textareaRef.current;
@@ -144,7 +230,28 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const selectedText = content.substring(start, end);
-    const newText = content.substring(0, start) + before + selectedText + after + content.substring(end);
+    
+    // Check if the selection is already wrapped
+    const isWrapped = start >= before.length && 
+                     end <= content.length - after.length &&
+                     content.substring(start - before.length, start) === before &&
+                     content.substring(end, end + after.length) === after;
+    
+    let newText: string;
+    let newSelectionStart: number;
+    let newSelectionEnd: number;
+    
+    if (isWrapped) {
+      // Remove formatting
+      newText = content.substring(0, start - before.length) + selectedText + content.substring(end + after.length);
+      newSelectionStart = start - before.length;
+      newSelectionEnd = end - before.length;
+    } else {
+      // Add formatting
+      newText = content.substring(0, start) + before + selectedText + after + content.substring(end);
+      newSelectionStart = start + before.length;
+      newSelectionEnd = end + before.length;
+    }
     
     setContent(newText);
     handleContentChange(newText);
@@ -152,7 +259,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     // Restore focus and selection
     setTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(start + before.length, end + before.length);
+      textarea.setSelectionRange(newSelectionStart, newSelectionEnd);
+      checkFormatting();
     }, 0);
   };
 
@@ -187,12 +295,32 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const selectedLines = content.substring(lineStart, actualLineEnd);
     const lines = selectedLines.split('\n');
     
-    const newLines = lines.map((line, index) => {
+    // Check if all lines already have the prefix
+    const allHavePrefix = lines.every(line => {
       if (numbered) {
-        return `${index + 1}. ${line}`;
+        return line.match(/^\d+\. /);
       }
-      return `${prefix}${line}`;
+      return line.startsWith(prefix);
     });
+    
+    let newLines: string[];
+    if (allHavePrefix) {
+      // Remove prefix
+      newLines = lines.map(line => {
+        if (numbered) {
+          return line.replace(/^\d+\. /, '');
+        }
+        return line.startsWith(prefix) ? line.substring(prefix.length) : line;
+      });
+    } else {
+      // Add prefix
+      newLines = lines.map((line, index) => {
+        if (numbered) {
+          return `${index + 1}. ${line}`;
+        }
+        return `${prefix}${line}`;
+      });
+    }
     
     const newText = content.substring(0, lineStart) + newLines.join('\n') + content.substring(actualLineEnd);
     
@@ -201,6 +329,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     
     setTimeout(() => {
       textarea.focus();
+      checkFormatting();
     }, 0);
   };
 
@@ -212,16 +341,42 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     
     // Find the start of the current line
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = content.indexOf('\n', start);
+    const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
+    const currentLine = content.substring(lineStart, actualLineEnd);
+    
     const prefix = '#'.repeat(level) + ' ';
     
-    const newText = content.substring(0, lineStart) + prefix + content.substring(lineStart);
+    // Check if line already has this heading level
+    const hasHeading = currentLine.startsWith(prefix);
+    
+    let newText: string;
+    let newCursorPos: number;
+    
+    if (hasHeading) {
+      // Remove heading
+      newText = content.substring(0, lineStart) + currentLine.substring(prefix.length) + content.substring(actualLineEnd);
+      newCursorPos = start - prefix.length;
+    } else {
+      // Remove any existing heading first
+      let cleanLine = currentLine;
+      const headingMatch = currentLine.match(/^#{1,6} /);
+      if (headingMatch) {
+        cleanLine = currentLine.substring(headingMatch[0].length);
+      }
+      
+      // Add new heading
+      newText = content.substring(0, lineStart) + prefix + cleanLine + content.substring(actualLineEnd);
+      newCursorPos = headingMatch ? start - headingMatch[0].length + prefix.length : start + prefix.length;
+    }
     
     setContent(newText);
     handleContentChange(newText);
     
     setTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(start + prefix.length, start + prefix.length);
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      checkFormatting();
     }, 0);
   };
 
@@ -249,16 +404,19 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     const handleSelectionChange = () => {
       checkCursorPosition();
+      checkFormatting();
     };
 
     textarea.addEventListener('click', handleSelectionChange);
     textarea.addEventListener('keyup', handleSelectionChange);
+    textarea.addEventListener('select', handleSelectionChange);
 
     return () => {
       textarea.removeEventListener('click', handleSelectionChange);
       textarea.removeEventListener('keyup', handleSelectionChange);
+      textarea.removeEventListener('select', handleSelectionChange);
     };
-  }, [checkCursorPosition]);
+  }, [checkCursorPosition, checkFormatting]);
 
   // Trigger auto-save when moving off first line
   useEffect(() => {
@@ -303,43 +461,43 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         
         {!showPreview && (
           <div className="markdown-toolbar">
-            <button className="toolbar-btn-icon" onClick={() => wrapSelection('**')} title="Bold">
+            <button className={`toolbar-btn-icon ${activeFormats.has('bold') ? 'active' : ''}`} onClick={() => wrapSelection('**')} title="Bold">
               <strong>B</strong>
             </button>
-            <button className="toolbar-btn-icon" onClick={() => wrapSelection('*')} title="Italic">
+            <button className={`toolbar-btn-icon ${activeFormats.has('italic') ? 'active' : ''}`} onClick={() => wrapSelection('*')} title="Italic">
               <em>I</em>
             </button>
-            <button className="toolbar-btn-icon" onClick={() => wrapSelection('~~')} title="Strikethrough">
+            <button className={`toolbar-btn-icon ${activeFormats.has('strikethrough') ? 'active' : ''}`} onClick={() => wrapSelection('~~')} title="Strikethrough">
               <span style={{ textDecoration: 'line-through' }}>S</span>
             </button>
             <span className="toolbar-divider">|</span>
-            <button className="toolbar-btn-icon" onClick={() => insertHeading(1)} title="Heading 1">
+            <button className={`toolbar-btn-icon ${activeFormats.has('h1') ? 'active' : ''}`} onClick={() => insertHeading(1)} title="Heading 1">
               H1
             </button>
-            <button className="toolbar-btn-icon" onClick={() => insertHeading(2)} title="Heading 2">
+            <button className={`toolbar-btn-icon ${activeFormats.has('h2') ? 'active' : ''}`} onClick={() => insertHeading(2)} title="Heading 2">
               H2
             </button>
-            <button className="toolbar-btn-icon" onClick={() => insertHeading(3)} title="Heading 3">
+            <button className={`toolbar-btn-icon ${activeFormats.has('h3') ? 'active' : ''}`} onClick={() => insertHeading(3)} title="Heading 3">
               H3
             </button>
             <span className="toolbar-divider">|</span>
             <button className="toolbar-btn-icon" onClick={() => wrapSelection('[', '](url)')} title="Link">
               🔗
             </button>
-            <button className="toolbar-btn-icon" onClick={() => wrapSelection('`')} title="Inline Code">
+            <button className={`toolbar-btn-icon ${activeFormats.has('code') ? 'active' : ''}`} onClick={() => wrapSelection('`')} title="Inline Code">
               {'<>'}
             </button>
-            <button className="toolbar-btn-icon" onClick={() => wrapSelection('```\n', '\n```')} title="Code Block">
+            <button className={`toolbar-btn-icon ${activeFormats.has('codeblock') ? 'active' : ''}`} onClick={() => wrapSelection('```\n', '\n```')} title="Code Block">
               {'{ }'}
             </button>
             <span className="toolbar-divider">|</span>
-            <button className="toolbar-btn-icon" onClick={() => prependToLines('- ')} title="Bulleted List">
+            <button className={`toolbar-btn-icon ${activeFormats.has('bullet') ? 'active' : ''}`} onClick={() => prependToLines('- ')} title="Bulleted List">
               ≡
             </button>
-            <button className="toolbar-btn-icon" onClick={() => prependToLines('', true)} title="Numbered List">
+            <button className={`toolbar-btn-icon ${activeFormats.has('number') ? 'active' : ''}`} onClick={() => prependToLines('', true)} title="Numbered List">
               #
             </button>
-            <button className="toolbar-btn-icon" onClick={() => prependToLines('> ')} title="Blockquote">
+            <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">
               "
             </button>
             <button className="toolbar-btn-icon" onClick={() => insertAtCursor('\n---\n')} title="Horizontal Rule">

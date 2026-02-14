@@ -74,6 +74,12 @@
   background: #d8d8d8;
 }
 
+.toolbar-btn-icon.active {
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
 .toolbar-divider {
   color: #ccc;
   margin: 0 4px;
