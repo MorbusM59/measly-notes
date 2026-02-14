@@ -1,0 +1,403 @@
+/* Google Fonts Import */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@400;500;600;700&family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* Base styles for all themes */
+.markdown-preview {
+  padding: 20px;
+  line-height: 1.6;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* Elegant & Formal Theme */
+.markdown-preview.style-elegant {
+  font-family: 'Playfair Display', 'Georgia', serif;
+  font-size: 17px;
+  line-height: 1.8;
+  color: #2c2c2c;
+}
+
+.markdown-preview.style-elegant h1 {
+  font-size: 2.5em;
+  font-weight: 700;
+  margin: 1.2em 0 0.6em 0;
+  padding-bottom: 0.4em;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+  letter-spacing: -0.02em;
+}
+
+.markdown-preview.style-elegant h2 {
+  font-size: 2em;
+  font-weight: 600;
+  margin: 1.1em 0 0.5em 0;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.markdown-preview.style-elegant h3 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 1em 0 0.4em 0;
+  color: #444;
+}
+
+.markdown-preview.style-elegant h4,
+.markdown-preview.style-elegant h5,
+.markdown-preview.style-elegant h6 {
+  font-weight: 600;
+  margin: 0.9em 0 0.3em 0;
+  color: #555;
+}
+
+.markdown-preview.style-elegant p {
+  margin: 1em 0;
+}
+
+.markdown-preview.style-elegant code {
+  background: rgba(0, 0, 0, 0.04);
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 0.88em;
+}
+
+.markdown-preview.style-elegant pre {
+  background: rgba(0, 0, 0, 0.03);
+  padding: 18px;
+  border-radius: 8px;
+  overflow-x: auto;
+  border-left: 3px solid rgba(0, 0, 0, 0.1);
+}
+
+.markdown-preview.style-elegant pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-preview.style-elegant blockquote {
+  border-left: 4px solid rgba(0, 0, 0, 0.12);
+  padding-left: 20px;
+  margin-left: 0;
+  color: #666;
+  font-style: italic;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 12px 20px;
+  border-radius: 0 6px 6px 0;
+}
+
+.markdown-preview.style-elegant hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.1), transparent);
+  margin: 2em 0;
+}
+
+.markdown-preview.style-elegant ul,
+.markdown-preview.style-elegant ol {
+  padding-left: 2.5em;
+  margin: 1em 0;
+}
+
+.markdown-preview.style-elegant li {
+  margin: 0.5em 0;
+}
+
+/* Clean Business Theme */
+.markdown-preview.style-business {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+.markdown-preview.style-business h1 {
+  font-size: 2.2em;
+  font-weight: 700;
+  margin: 1em 0 0.5em 0;
+  padding-bottom: 0.3em;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.08);
+  letter-spacing: -0.015em;
+}
+
+.markdown-preview.style-business h2 {
+  font-size: 1.75em;
+  font-weight: 600;
+  margin: 0.9em 0 0.4em 0;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.markdown-preview.style-business h3 {
+  font-size: 1.4em;
+  font-weight: 600;
+  margin: 0.8em 0 0.3em 0;
+  color: #2a2a2a;
+}
+
+.markdown-preview.style-business h4,
+.markdown-preview.style-business h5,
+.markdown-preview.style-business h6 {
+  font-weight: 600;
+  margin: 0.7em 0 0.3em 0;
+  color: #3a3a3a;
+}
+
+.markdown-preview.style-business p {
+  margin: 0.8em 0;
+}
+
+.markdown-preview.style-business code {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 0.9em;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.markdown-preview.style-business pre {
+  background: rgba(0, 0, 0, 0.04);
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.markdown-preview.style-business pre code {
+  background: none;
+  padding: 0;
+  border: none;
+}
+
+.markdown-preview.style-business blockquote {
+  border-left: 3px solid rgba(0, 0, 0, 0.15);
+  padding-left: 18px;
+  margin-left: 0;
+  color: #555;
+  background: rgba(0, 0, 0, 0.025);
+  padding: 10px 18px;
+}
+
+.markdown-preview.style-business hr {
+  border: none;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.1);
+  margin: 1.5em 0;
+}
+
+.markdown-preview.style-business ul,
+.markdown-preview.style-business ol {
+  padding-left: 2em;
+  margin: 0.8em 0;
+}
+
+.markdown-preview.style-business li {
+  margin: 0.3em 0;
+}
+
+/* Friendly & Playful Theme */
+.markdown-preview.style-friendly {
+  font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 17px;
+  line-height: 1.7;
+  color: #2d2d2d;
+}
+
+.markdown-preview.style-friendly h1 {
+  font-size: 2.4em;
+  font-weight: 700;
+  margin: 1em 0 0.5em 0;
+  color: #444;
+  background: rgba(100, 150, 255, 0.05);
+  padding: 0.3em 0.5em;
+  border-radius: 8px;
+}
+
+.markdown-preview.style-friendly h2 {
+  font-size: 1.9em;
+  font-weight: 600;
+  margin: 0.9em 0 0.4em 0;
+  color: #4a4a4a;
+  background: rgba(100, 150, 255, 0.03);
+  padding: 0.2em 0.4em;
+  border-radius: 6px;
+}
+
+.markdown-preview.style-friendly h3 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 0.8em 0 0.3em 0;
+  color: #555;
+}
+
+.markdown-preview.style-friendly h4,
+.markdown-preview.style-friendly h5,
+.markdown-preview.style-friendly h6 {
+  font-weight: 600;
+  margin: 0.7em 0 0.3em 0;
+  color: #666;
+}
+
+.markdown-preview.style-friendly p {
+  margin: 1em 0;
+}
+
+.markdown-preview.style-friendly code {
+  background: rgba(100, 150, 255, 0.08);
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 0.9em;
+}
+
+.markdown-preview.style-friendly pre {
+  background: rgba(100, 150, 255, 0.05);
+  padding: 18px;
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.markdown-preview.style-friendly pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-preview.style-friendly blockquote {
+  border-left: 4px solid rgba(100, 150, 255, 0.3);
+  padding-left: 20px;
+  margin-left: 0;
+  color: #666;
+  background: rgba(100, 150, 255, 0.03);
+  padding: 12px 20px;
+  border-radius: 0 8px 8px 0;
+}
+
+.markdown-preview.style-friendly hr {
+  border: none;
+  height: 2px;
+  background: linear-gradient(to right, transparent, rgba(100, 150, 255, 0.2), transparent);
+  margin: 2em 0;
+  border-radius: 2px;
+}
+
+.markdown-preview.style-friendly ul,
+.markdown-preview.style-friendly ol {
+  padding-left: 2.2em;
+  margin: 1em 0;
+}
+
+.markdown-preview.style-friendly li {
+  margin: 0.4em 0;
+}
+
+/* Monospace / Technical Theme */
+.markdown-preview.style-technical {
+  font-family: 'JetBrains Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+.markdown-preview.style-technical h1 {
+  font-size: 2em;
+  font-weight: 600;
+  margin: 1em 0 0.4em 0;
+  color: #0a0a0a;
+  border-left: 4px solid rgba(0, 0, 0, 0.2);
+  padding-left: 12px;
+}
+
+.markdown-preview.style-technical h2 {
+  font-size: 1.6em;
+  font-weight: 600;
+  margin: 0.9em 0 0.3em 0;
+  color: #1a1a1a;
+  border-left: 3px solid rgba(0, 0, 0, 0.15);
+  padding-left: 10px;
+}
+
+.markdown-preview.style-technical h3 {
+  font-size: 1.3em;
+  font-weight: 500;
+  margin: 0.8em 0 0.3em 0;
+  color: #2a2a2a;
+  border-left: 2px solid rgba(0, 0, 0, 0.1);
+  padding-left: 8px;
+}
+
+.markdown-preview.style-technical h4,
+.markdown-preview.style-technical h5,
+.markdown-preview.style-technical h6 {
+  font-weight: 500;
+  margin: 0.7em 0 0.3em 0;
+  color: #3a3a3a;
+}
+
+.markdown-preview.style-technical p {
+  margin: 0.8em 0;
+}
+
+.markdown-preview.style-technical code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.95em;
+}
+
+.markdown-preview.style-technical pre {
+  background: rgba(0, 0, 0, 0.04);
+  padding: 14px;
+  border-radius: 4px;
+  overflow-x: auto;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.markdown-preview.style-technical pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-preview.style-technical blockquote {
+  border-left: 3px solid rgba(0, 0, 0, 0.2);
+  padding-left: 16px;
+  margin-left: 0;
+  color: #555;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 8px 16px;
+}
+
+.markdown-preview.style-technical hr {
+  border: none;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.15);
+  margin: 1.5em 0;
+}
+
+.markdown-preview.style-technical ul,
+.markdown-preview.style-technical ol {
+  padding-left: 2em;
+  margin: 0.8em 0;
+}
+
+.markdown-preview.style-technical li {
+  margin: 0.3em 0;
+}
+
+/* Common table styles for all themes */
+.markdown-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-preview th {
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
