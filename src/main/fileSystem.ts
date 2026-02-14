@@ -13,7 +13,7 @@ export async function initFileSystem(): Promise<void> {
 }
 
 export async function saveNoteContent(noteId: number, content: string): Promise<string> {
-  const filePath = path.join(notesDir, `${noteId}.txt`);
+  const filePath = path.join(notesDir, `${noteId}.md`);
   await fs.writeFile(filePath, content, 'utf-8');
   return filePath;
 }
