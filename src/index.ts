@@ -42,7 +42,7 @@ const createWindow = (): void => {
 
 // Initialize app
 app.whenReady().then(async () => {
-  initDatabase();
+  await initDatabase();
   await initFileSystem();
   
   // Register IPC handlers

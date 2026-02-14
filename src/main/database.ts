@@ -1,15 +1,15 @@
 import Database from 'better-sqlite3';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import { Note, Tag, NoteTag, SearchResult } from '../shared/types';
 import { getDataDir, getDbPath } from './paths';
 
 let db: Database.Database;
 
 // Initialize database schema
-export function initDatabase(): void {
+export async function initDatabase(): Promise<void> {
   // Ensure data directory exists
   try {
-    fs.mkdirSync(getDataDir(), { recursive: true });
+    await fs.mkdir(getDataDir(), { recursive: true });
   } catch (error) {
     throw new Error(`Failed to create data directory: ${error instanceof Error ? error.message : String(error)}`);
   }
