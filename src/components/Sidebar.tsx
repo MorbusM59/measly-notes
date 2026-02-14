@@ -14,6 +14,7 @@ interface SidebarProps {
   onYearToggle?: (year: number | 'older') => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  width?: number;
 }
 
 type ViewMode = 'date' | 'category';
@@ -28,7 +29,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onMonthToggle,
   onYearToggle,
   viewMode: externalViewMode = 'date',
-  onViewModeChange
+  onViewModeChange,
+  width = 320
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
@@ -420,7 +422,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 };
 
   return (
-    <div className="sidebar">
+    <div className="sidebar" style={{ width: `${width}px` }}>
       <div className="search-box">
         <input
           type="text"
