@@ -8,7 +8,11 @@ let db: Database.Database;
 // Initialize database schema
 export function initDatabase(): void {
   // Ensure data directory exists
-  fs.mkdirSync(getDataDir(), { recursive: true });
+  try {
+    fs.mkdirSync(getDataDir(), { recursive: true });
+  } catch (error) {
+    throw new Error(`Failed to create data directory: ${error instanceof Error ? error.message : String(error)}`);
+  }
   
   // Initialize database
   db = new Database(getDbPath());
