@@ -90,3 +90,6 @@ typings/
 
 # Electron-Forge
 out/
+
+# Application data directory (portable mode)
+data/
