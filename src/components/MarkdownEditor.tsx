@@ -133,7 +133,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }, 0);
   };
 
-  const prependToLines = (prefix: string, numbered: boolean = false) => {
+  const prependToLines = (prefix: string, numbered = false) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
 

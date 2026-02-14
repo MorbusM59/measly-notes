@@ -23,8 +23,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   refreshTrigger,
   selectedMonths = new Set(),
   selectedYears = new Set(),
-  onMonthToggle = () => {},
-  onYearToggle = () => {}
+  onMonthToggle,
+  onYearToggle
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
