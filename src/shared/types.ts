@@ -24,6 +24,20 @@ export interface SearchResult {
   matchType: 'title' | 'content' | 'tag';
 }
 
+export interface CategoryHierarchy {
+  [primaryTag: string]: {
+    notes: Note[];  // Notes with only primary tag
+    secondary: {
+      [secondaryTag: string]: {
+        notes: Note[];  // Notes with primary + secondary but no tertiary
+        tertiary: {
+          [tertiaryTag: string]: Note[];  // Notes with all three tags
+        };
+      };
+    };
+  };
+}
+
 export interface IElectronAPI {
   createNote: (title: string) => Promise<Note>;
   saveNote: (id: number, content: string) => Promise<void>;
@@ -47,6 +61,7 @@ export interface IElectronAPI {
   
   // Category view operations
   getNotesByPrimaryTag: () => Promise<{ [tagName: string]: Note[] }>;
+  getCategoryHierarchy: () => Promise<CategoryHierarchy>;
 }
 
 declare global {

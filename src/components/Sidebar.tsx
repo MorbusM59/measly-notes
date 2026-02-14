@@ -1,26 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { Note, SearchResult } from '../shared/types';
+import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
 import './Sidebar.css';
 
 interface SidebarProps {
   onSelectNote: (note: Note) => void;
   selectedNote: Note | null;
   onNotesUpdate?: () => void;
+  refreshTrigger?: number;
 }
 
 type ViewMode = 'date' | 'category';
 type SearchMode = 'none' | 'text' | 'tag';
 
-export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote, refreshTrigger }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
   const [viewMode, setViewMode] = useState<ViewMode>('date');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [dateNotes, setDateNotes] = useState<Note[]>([]);
-  const [categoryNotes, setCategoryNotes] = useState<{ [tagName: string]: Note[] }>({});
+  const [categoryHierarchy, setCategoryHierarchy] = useState<CategoryHierarchy>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [totalNotes, setTotalNotes] = useState(0);
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [collapsedPrimary, setCollapsedPrimary] = useState<Set<string>>(new Set());
+  const [collapsedSecondary, setCollapsedSecondary] = useState<Set<string>>(new Set());
   const notesPerPage = 20;
 
   // Load notes based on view mode
@@ -29,10 +31,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
       if (viewMode === 'date') {
         loadDateNotes();
       } else {
-        loadCategoryNotes();
+        loadCategoryHierarchy();
       }
     }
-  }, [viewMode, currentPage, searchMode]);
+  }, [viewMode, currentPage, searchMode, refreshTrigger]);
 
   const loadDateNotes = async () => {
     const result = await window.electronAPI.getNotesPage(currentPage, notesPerPage);
@@ -40,9 +42,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
     setTotalNotes(result.total);
   };
 
-  const loadCategoryNotes = async () => {
-    const notes = await window.electronAPI.getNotesByPrimaryTag();
-    setCategoryNotes(notes);
+  const loadCategoryHierarchy = async () => {
+    const hierarchy = await window.electronAPI.getCategoryHierarchy();
+    setCategoryHierarchy(hierarchy);
   };
 
   const handleSearch = async () => {
@@ -77,14 +79,46 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
     setSearchResults([]);
   };
 
-  const toggleCategory = (category: string) => {
-    const newCollapsed = new Set(collapsedCategories);
-    if (newCollapsed.has(category)) {
-      newCollapsed.delete(category);
+  const togglePrimaryCategory = (category: string) => {
+    const newCollapsed = new Set(collapsedPrimary);
+    
+    // Close all other primary categories
+    if (!newCollapsed.has(category)) {
+      // Open this one, close all others
+      newCollapsed.clear();
+      setCollapsedSecondary(new Set());  // Also clear secondary collapsed state
     } else {
+      // Close this one
       newCollapsed.add(category);
     }
-    setCollapsedCategories(newCollapsed);
+    
+    setCollapsedPrimary(newCollapsed);
+  };
+
+  const toggleSecondaryCategory = (primaryTag: string, secondaryTag: string) => {
+    const key = `${primaryTag}:${secondaryTag}`;
+    const newCollapsed = new Set(collapsedSecondary);
+    
+    // Close all other secondary categories within this primary
+    const primaryPrefix = `${primaryTag}:`;
+    const toRemove: string[] = [];
+    
+    newCollapsed.forEach(k => {
+      if (k.startsWith(primaryPrefix) && k !== key) {
+        toRemove.push(k);
+      }
+    });
+    
+    toRemove.forEach(k => newCollapsed.delete(k));
+    
+    // Toggle this one
+    if (newCollapsed.has(key)) {
+      newCollapsed.delete(key);
+    } else {
+      newCollapsed.add(key);
+    }
+    
+    setCollapsedSecondary(newCollapsed);
   };
 
   const totalPages = Math.ceil(totalNotes / notesPerPage);
@@ -153,35 +187,101 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectNote, selectedNote }) 
 
   const renderCategoryView = () => (
     <div className="category-view">
-      {Object.entries(categoryNotes).map(([tagName, notes]) => (
-        <div key={tagName} className="category-group">
-          <div
-            className="category-header"
-            onClick={() => toggleCategory(tagName)}
-          >
-            <span className="category-arrow">
-              {collapsedCategories.has(tagName) ? '▶' : '▼'}
-            </span>
-            <span className="category-name">{tagName}</span>
-            <span className="category-count">({notes.length})</span>
-          </div>
-          
-          {!collapsedCategories.has(tagName) && (
-            <div className="category-notes">
-              {notes.map(note => (
-                <div
-                  key={note.id}
-                  className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-                  onClick={() => onSelectNote(note)}
-                >
-                  <div className="note-title">{note.title}</div>
-                  <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
-                </div>
-              ))}
+      {Object.entries(categoryHierarchy).map(([primaryTag, primaryData]) => {
+        const isPrimaryCollapsed = collapsedPrimary.has(primaryTag);
+        const primaryNoteCount = primaryData.notes.length + 
+          Object.values(primaryData.secondary).reduce((sum, secData) => {
+            return sum + secData.notes.length + 
+              Object.values(secData.tertiary).reduce((tSum, tNotes) => tSum + tNotes.length, 0);
+          }, 0);
+        
+        return (
+          <div key={primaryTag} className="category-group">
+            <div
+              className="category-header primary"
+              onClick={() => togglePrimaryCategory(primaryTag)}
+            >
+              <span className="category-arrow">
+                {isPrimaryCollapsed ? '▶' : '▼'}
+              </span>
+              <span className="category-name">{primaryTag}</span>
+              <span className="category-count">({primaryNoteCount})</span>
             </div>
-          )}
-        </div>
-      ))}
+            
+            {!isPrimaryCollapsed && (
+              <div className="category-content">
+                {/* Secondary tags accordion */}
+                {Object.entries(primaryData.secondary).map(([secondaryTag, secondaryData]) => {
+                  const secKey = `${primaryTag}:${secondaryTag}`;
+                  const isSecondaryCollapsed = collapsedSecondary.has(secKey);
+                  const secNoteCount = secondaryData.notes.length + 
+                    Object.values(secondaryData.tertiary).reduce((sum, tNotes) => sum + tNotes.length, 0);
+                  
+                  return (
+                    <div key={secKey} className="secondary-group">
+                      <div
+                        className="category-header secondary"
+                        onClick={() => toggleSecondaryCategory(primaryTag, secondaryTag)}
+                      >
+                        <span className="category-arrow">
+                          {isSecondaryCollapsed ? '▶' : '▼'}
+                        </span>
+                        <span className="category-name">{secondaryTag}</span>
+                        <span className="category-count">({secNoteCount})</span>
+                      </div>
+                      
+                      {!isSecondaryCollapsed && (
+                        <div className="secondary-content">
+                          {/* Notes with primary + secondary but no tertiary */}
+                          {secondaryData.notes.map(note => (
+                            <div
+                              key={note.id}
+                              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+                              onClick={() => onSelectNote(note)}
+                            >
+                              <div className="note-title">{note.title}</div>
+                              <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                            </div>
+                          ))}
+                          
+                          {/* Tertiary tags (visual dividers, not accordion) */}
+                          {Object.entries(secondaryData.tertiary).map(([tertiaryTag, notes]) => (
+                            <div key={tertiaryTag} className="tertiary-group">
+                              <div className="tertiary-header">{tertiaryTag}</div>
+                              {notes.map(note => (
+                                <div
+                                  key={note.id}
+                                  className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+                                  onClick={() => onSelectNote(note)}
+                                >
+                                  <div className="note-title">{note.title}</div>
+                                  <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                
+                {/* Notes with only primary tag (at the end) */}
+                {primaryData.notes.map(note => (
+                  <div
+                    key={note.id}
+                    className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+                    onClick={() => onSelectNote(note)}
+                  >
+                    <div className="note-title">{note.title}</div>
+                    <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 

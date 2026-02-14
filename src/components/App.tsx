@@ -8,6 +8,7 @@ import './App.css';
 export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
 
   useEffect(() => {
     // Global keyboard shortcut: Ctrl+Enter to create new note
@@ -43,15 +44,20 @@ export const App: React.FC = () => {
     setRefreshKey(k => k + 1);
   };
 
+  const handleSidebarRefresh = () => {
+    setSidebarRefreshTrigger(t => t + 1);
+  };
+
   return (
     <div className="app">
       <Sidebar
         key={refreshKey}
         selectedNote={selectedNote}
         onSelectNote={handleSelectNote}
+        refreshTrigger={sidebarRefreshTrigger}
       />
       <div className="main-content">
-        <TagInput note={selectedNote} />
+        <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
         <MarkdownEditor note={selectedNote} onNoteUpdate={handleNoteUpdate} />
       </div>
     </div>
