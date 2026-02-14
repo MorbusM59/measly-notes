@@ -177,22 +177,20 @@ export function getTopTags(limit: number): Tag[] {
 }
 
 // Search operations
+// Note: Text search with content is handled in the IPC handler (index.ts)
+// This function only searches titles
 export function searchNotes(query: string): SearchResult[] {
   const searchTerm = `%${query}%`;
   const stmt = db.prepare(`
     SELECT * FROM notes 
-    WHERE title LIKE ? OR id IN (
-      SELECT id FROM notes WHERE filePath IN (
-        SELECT filePath FROM notes
-      )
-    )
+    WHERE title LIKE ?
     ORDER BY updatedAt DESC
   `);
   
   const notes = stmt.all(searchTerm) as Note[];
   return notes.map(note => ({
     note,
-    matchType: note.title.toLowerCase().includes(query.toLowerCase()) ? 'title' as const : 'content' as const
+    matchType: 'title' as const
   }));
 }
 

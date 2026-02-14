@@ -175,7 +175,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             className="markdown-textarea"
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
-            placeholder="# Note Title&#10;&#10;Start typing your note here..."
+            placeholder="# Note Title
+
+Start typing your note here..."
           />
         ) : (
           <div className="markdown-preview">
