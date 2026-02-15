@@ -42,7 +42,7 @@ export const DateFilter: React.FC<DateFilterProps> = ({
       button: 2,
       type: 'contextmenu'
     } as React.MouseEvent;
-    onYearToggle(CLEAR_YEARS_SIGNAL as any, syntheticEvent);
+    onYearToggle(CLEAR_YEARS_SIGNAL, syntheticEvent);
   };
 
   return (

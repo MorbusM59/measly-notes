@@ -87,7 +87,11 @@ export const App: React.FC = () => {
       return;
     }
 
-    handleMultiSelect(year as number | 'older', event, selectedYears, FILTER_YEARS, setSelectedYears);
+    // At this point, TypeScript knows year is number | 'older'
+    // but we need to explicitly narrow the type
+    if (year !== CLEAR_YEARS_SIGNAL) {
+      handleMultiSelect(year, event, selectedYears, FILTER_YEARS, setSelectedYears);
+    }
   };
 
   const handleNoteDelete = async (deletedNoteId: number, nextNoteToSelect?: Note | null) => {
