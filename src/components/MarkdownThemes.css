@@ -245,7 +245,7 @@
 
 /* compact: 1em margins, 0.5em paragraph spacing, 1.15 line-height */
 .markdown-preview.spacing-compact {
-  padding: 0.5em 1em 1em 1em;
+  padding: 0.75em;
   line-height: 1.15;
 }
 
@@ -288,7 +288,7 @@
 
 /* cozy: 1.5em margins, 0.75em paragraph spacing, 1.3 line-height */
 .markdown-preview.spacing-cozy {
-  padding: 0.5em 1.5em 1.5em 1.5em;
+  padding: 1em;
   line-height: 1.3;
 }
 
@@ -331,7 +331,7 @@
 
 /* wide: 2em margins, 1em paragraph spacing, 1.5 line-height */
 .markdown-preview.spacing-wide {
-  padding: 0.5em 2em 2em 2em;
+  padding: 1.25em;
   line-height: 1.5;
 }
 
