@@ -76,6 +76,7 @@
   position: relative;
 }
 
+/* Content wrapper for note title and date, allows text truncation */
 .note-item .note-content {
   flex: 1;
   min-width: 0;
