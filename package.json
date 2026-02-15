@@ -43,6 +43,13 @@
     "typescript": "~4.5.4"
   },
   "dependencies": {
+    "@fontsource/alumni-sans-pinstripe": "^5.2.7",
+    "@fontsource/dancing-script": "^5.2.8",
+    "@fontsource/delicious-handrawn": "^5.2.8",
+    "@fontsource/quicksand": "^5.2.10",
+    "@fontsource/roboto": "^5.2.9",
+    "@fontsource/roboto-condensed": "^5.2.8",
+    "@fontsource/sour-gummy": "^5.2.8",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "better-sqlite3": "^12.6.2",
