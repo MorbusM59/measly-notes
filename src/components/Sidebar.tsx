@@ -278,9 +278,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const notes: Note[] = [];
     const filteredHierarchy = getFilteredHierarchy(categoryHierarchy);
     
-    Object.entries(filteredHierarchy).forEach(([primaryTag, primaryData]) => {
+    Object.entries(filteredHierarchy).forEach(([, primaryData]) => {
       // Add secondary notes first
-      Object.entries(primaryData.secondary).forEach(([secondaryTag, secondaryData]) => {
+      Object.entries(primaryData.secondary).forEach(([, secondaryData]) => {
         notes.push(...secondaryData.notes);
         // Add tertiary notes
         Object.values(secondaryData.tertiary).forEach(tertiaryNotes => {
