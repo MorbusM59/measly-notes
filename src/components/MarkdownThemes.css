@@ -146,6 +146,15 @@
 /* Base styles for all themes */
 .markdown-preview {
   overflow-y: auto;
+  text-shadow:
+    1px 1px 0 #ffffff66,
+   -1px 1px 0 #ffffffBB,
+    1px -1px 0 #ffffff66,
+   -1px -1px 0 #ffffff66,
+    2px 2px 4px rgba(255,255,255,0.5),
+   -2px 2px 4px rgba(255,255,255,1),
+    2px -2px 4px rgba(255,255,255,0.5),
+   -2px -2px 4px rgba(255,255,255,0.5);
 }
 
 /* Fix top spacing - keep it at tight level across all spacing modes */
@@ -174,29 +183,29 @@
   font-size: 20px;
 }
 
-/* Heading size formula: h1=200%, h2=150%, h3=133.3%, h4=125%, h5=120%, h6=116.7% */
 .markdown-preview h1 {
-  font-size: 200%;
+  font-size: 150%;
+  text-transform: uppercase;
 }
 
 .markdown-preview h2 {
-  font-size: 150%;
-}
-
-.markdown-preview h3 {
-  font-size: 133.3%;
-}
-
-.markdown-preview h4 {
   font-size: 125%;
 }
 
-.markdown-preview h5 {
+.markdown-preview h3 {
   font-size: 120%;
 }
 
+.markdown-preview h4 {
+  font-size: 115%;
+}
+
+.markdown-preview h5 {
+  font-size: 110%;
+}
+
 .markdown-preview h6 {
-  font-size: 116.7%;
+  font-size: 105%;
 }
 
 /* Spacing Classes */
@@ -375,7 +384,8 @@
 /* Style: Clean (Roboto) */
 .markdown-preview.style-clean {
   font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #000000;
+  font-weight: 300;
+  color: #000000DD;
 }
 
 .markdown-preview.style-clean h1,
@@ -384,38 +394,43 @@
 .markdown-preview.style-clean h4,
 .markdown-preview.style-clean h5,
 .markdown-preview.style-clean h6 {
-  font-weight: 600;
-  color: #000000;
+  font-weight: 300;
+  color: #000000DD;
+  border-radius: 20px;
 }
 
 .markdown-preview.style-clean h1 {
-  border-bottom: 2px solid #e8e8e8;
+  border: 2px solid #e8e8e8;
   margin-bottom: 0.6em;
   background: #f8f8f8;
-  padding: 0.3em 0.5em 0.4em 0.5em;
+  padding: 0.3em 0.5em;
 }
 
 .markdown-preview.style-clean h2 {
-  border-bottom: 1px solid #e8e8e8;
-  padding-bottom: 0.3em;
-  margin-bottom: 0.5em;
+  border-bottom: 2px solid #e8e8e8;
+  border-left: 10px solid #e8e8e8;
+  padding: 0.3em;
+  margin: 0.5em 0;
 }
 
 .markdown-preview.style-clean h3 {
-  border-bottom: 1px solid #f0f0f0;
-  padding-bottom: 0.2em;
-  margin-bottom: 0.4em;
+  border-bottom: 2px solid #f0f0f0;
+  padding: 0 1em;
+  margin: 0.5em 0;
 }
 
 .markdown-preview.style-clean h4 {
+  padding: 0 2em;
   margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-clean h5 {
+  padding: 0 3em;
   margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-clean h6 {
+  padding: 0 4em;
   margin-bottom: 0.3em;
 }
 
@@ -466,31 +481,31 @@
 .markdown-preview.style-narrow h4,
 .markdown-preview.style-narrow h5,
 .markdown-preview.style-narrow h6 {
-  font-weight: 700;
+  font-weight: 400;
   color: #000;
   letter-spacing: -0.01em;
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .markdown-preview.style-narrow h1 {
-  border-left: 4px solid #d0d0d0;
+  border-left: 8px solid #00000077;
   padding-left: 12px;
   margin-bottom: 0.5em;
 }
 
 .markdown-preview.style-narrow h2 {
-  border-left: 3px solid #e0e0e0;
+  border-left: 4px solid #00000077;
   padding-left: 10px;
   margin-bottom: 0.4em;
 }
 
 .markdown-preview.style-narrow h3 {
-  border-left: 2px solid #e8e8e8;
+  border-left: 2px solid #00000077;
   padding-left: 8px;
   margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-narrow h4 {
-  border-left: 1px solid #f0f0f0;
   padding-left: 6px;
   margin-bottom: 0.3em;
 }
@@ -541,6 +556,7 @@
 .markdown-preview.style-print {
   font-family: 'Alumni Sans Pinstripe', 'Alumni Sans', 'Courier New', monospace;
   color: #000000;
+  font-weight: 600;
 }
 
 .markdown-preview.style-print h1,
@@ -553,39 +569,51 @@
   color: #000;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  border-bottom: 2px solid #e8e4e0;
+  text-shadow:
+    1px 1px 0 #fff,
+   -1px 1px 0 #fff,
+    1px -1px 0 #fff,
+   -1px -1px 0 #fff,
+    2px 2px 2px rgba(255,255,255,0.85),
+   -2px 2px 2px rgba(255,255,255,0.85),
+    2px -2px 2px rgba(255,255,255,0.85),
+   -2px -2px 2px rgba(255,255,255,0.85);
 }
 
 .markdown-preview.style-print h1 {
-  border-top: 2px solid #e8e4e0;
-  border-bottom: 2px solid #e8e4e0;
-  padding: 0.4em 0.6em;
+  padding: 0.2em 0.5em;
   margin-bottom: 0.6em;
-  background: #faf9f7;
+  background-image:
+    repeating-linear-gradient(135deg, rgba(0,0,0,0.1) 0 2px, transparent 0px 4px);
+  border: 2px solid #e8e4e0;
 }
 
 .markdown-preview.style-print h2 {
-  border-bottom: 1px solid #e8e4e0;
-  padding-bottom: 0.3em;
+  padding: 0 0.3em;
   margin-bottom: 0.5em;
+  background-image:
+    repeating-linear-gradient(135deg, rgba(0,0,0,0.1) 0 2px, transparent 0px 4px);
+  border: 2px solid #e8e4e0;
 }
 
 .markdown-preview.style-print h3 {
-  padding-left: 1em;
+  padding-left: 0;
   margin-bottom: 0.4em;
 }
 
 .markdown-preview.style-print h4 {
-  padding-left: 2em;
+  padding-left: 1em;
   margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-print h5 {
-  padding-left: 3em;
+  padding-left: 2em;
   margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-print h6 {
-  padding-left: 4em;
+  padding-left: 3em;
   margin-bottom: 0.3em;
 }
 
@@ -634,9 +662,10 @@
 .markdown-preview.style-modern h4,
 .markdown-preview.style-modern h5,
 .markdown-preview.style-modern h6 {
-  font-weight: 600;
+  font-weight: 500;
   color: #000000;
   letter-spacing: -0.01em;
+  border: 1px solid #00555522;
 }
 
 .markdown-preview.style-modern h1 {
@@ -731,7 +760,7 @@
 
 .markdown-preview.style-cute h1 {
   background: #f5f0f8;
-  border-left: 4px solid #e8ddf0;
+  border-left: 4px solid #d1bedfAA;
   padding: 0.4em 0.7em;
   margin-bottom: 0.6em;
   border-radius: 20px;
@@ -739,7 +768,7 @@
 
 .markdown-preview.style-cute h2 {
   background: #f7f3f9;
-  border-left: 3px solid #ebe3f2;
+  border-left: 3px solid #d1bedfAA;
   padding: 0.35em 0.6em;
   margin-bottom: 0.5em;
   border-radius: 18px;
@@ -747,7 +776,7 @@
 
 .markdown-preview.style-cute h3 {
   background: #f9f6fa;
-  border-left: 2px solid #eee8f4;
+  border-left: 2px solid #d1bedfAA;
   padding: 0.3em 0.5em;
   margin-bottom: 0.4em;
   border-radius: 15px;
@@ -824,19 +853,19 @@
 }
 
 .markdown-preview.style-hand h1 {
-  border-bottom: 2px dashed #f0ece8;
+  border-bottom: 2px dashed #00000044;
   padding-bottom: 0.4em;
   margin-bottom: 0.6em;
 }
 
 .markdown-preview.style-hand h2 {
-  border-bottom: 2px dotted #f0ece8;
+  border-bottom: 2px dotted #00000044;
   padding-bottom: 0.3em;
   margin-bottom: 0.5em;
 }
 
 .markdown-preview.style-hand h3 {
-  border-bottom: 1px dashed #f4f0ec;
+  border-bottom: 1px solid #00000022;
   padding-bottom: 0.2em;
   margin-bottom: 0.4em;
 }
@@ -902,40 +931,45 @@
 .markdown-preview.style-script h4,
 .markdown-preview.style-script h5,
 .markdown-preview.style-script h6 {
-  font-weight: 400;
+  font-weight: 700;
   color: #000000;
   font-style: italic;
   letter-spacing: 0.02em;
 }
 
 .markdown-preview.style-script h1 {
+  background: linear-gradient(to right, #b9ac9755, transparent);
+  border-image: linear-gradient(to right, #ddd8da, transparent) 1;
+  border-width: 2px;
+  border-style: solid;
   margin-bottom: 0.7em;
-  border-image: linear-gradient(to right, transparent, #ddd8da, transparent) 1;
-  border-bottom-width: 2px;
-  border-bottom-style: solid;
-  background: #f2eeef;
-  padding: 0.4em 0.6em 0.5em 0.6em;
+  padding: 0.2em 0.4em;
 }
 
 .markdown-preview.style-script h2 {
   margin-bottom: 0.6em;
-  border-image: linear-gradient(to right, transparent 10%, #e0dce0, transparent 90%) 1;
-  border-bottom-width: 1px;
-  border-bottom-style: solid;
-  padding-bottom: 0.4em;
+  background: linear-gradient(to right, #b9ac9755, transparent);
+  border-image: linear-gradient(to right, #ddd8da, transparent) 1;
+  border-width: 2px;
+  border-style: solid;
+  padding: 0 0.4em;
 }
 
 .markdown-preview.style-script h3 {
   margin-bottom: 0.5em;
-  border-image: linear-gradient(to right, transparent 20%, #e8e6e8, transparent 80%) 1;
-  border-bottom-width: 1px;
+  border-image: linear-gradient(to right, #ddd8da, transparent) 1;
+  border-width: 4px;
   border-bottom-style: solid;
-  padding-bottom: 0.3em;
+  padding: 0 0.3em;
 }
 
 .markdown-preview.style-script h4 {
   margin-bottom: 0.4em;
-  letter-spacing: 0.03em;
+  border-image: linear-gradient(to right, #ddd8da, transparent) 1;
+  border-width: 2px;
+  border-bottom-style: solid;
+  padding: 0 0.3em;
+  margin: 0 2em;
 }
 
 .markdown-preview.style-script h5 {
