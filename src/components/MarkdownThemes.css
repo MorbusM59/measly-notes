@@ -148,6 +148,11 @@
   overflow-y: auto;
 }
 
+/* Fix top spacing - keep it at tight level across all spacing modes */
+.markdown-preview > *:first-child {
+  margin-top: 0 !important;
+}
+
 /* Font Size Classes */
 .markdown-preview.size-xs {
   font-size: 12px;
@@ -240,7 +245,7 @@
 
 /* compact: 1em margins, 0.5em paragraph spacing, 1.15 line-height */
 .markdown-preview.spacing-compact {
-  padding: 1em;
+  padding: 0.5em 1em 1em 1em;
   line-height: 1.15;
 }
 
@@ -283,7 +288,7 @@
 
 /* cozy: 1.5em margins, 0.75em paragraph spacing, 1.3 line-height */
 .markdown-preview.spacing-cozy {
-  padding: 1.5em;
+  padding: 0.5em 1.5em 1.5em 1.5em;
   line-height: 1.3;
 }
 
@@ -326,7 +331,7 @@
 
 /* wide: 2em margins, 1em paragraph spacing, 1.5 line-height */
 .markdown-preview.spacing-wide {
-  padding: 2em;
+  padding: 0.5em 2em 2em 2em;
   line-height: 1.5;
 }
 
@@ -370,7 +375,7 @@
 /* Style: Clean (Roboto) */
 .markdown-preview.style-clean {
   font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #1a1a1a;
+  color: #000000;
 }
 
 .markdown-preview.style-clean h1,
@@ -418,7 +423,7 @@
 .markdown-preview.style-clean blockquote {
   border-left: 3px solid rgba(0, 0, 0, 0.15);
   padding-left: 1em;
-  color: #555;
+  color: #222222;
   background: rgba(0, 0, 0, 0.025);
 }
 
@@ -431,7 +436,7 @@
 /* Style: Narrow (Roboto Condensed) */
 .markdown-preview.style-narrow {
   font-family: 'Roboto Condensed', 'Arial Narrow', 'Helvetica Condensed', sans-serif;
-  color: #1a1a1a;
+  color: #000000;
 }
 
 .markdown-preview.style-narrow h1,
@@ -468,7 +473,7 @@
 .markdown-preview.style-narrow blockquote {
   border-left: 2px solid rgba(0, 0, 0, 0.2);
   padding-left: 1em;
-  color: #555;
+  color: #222222;
 }
 
 .markdown-preview.style-narrow hr {
@@ -480,7 +485,7 @@
 /* Style: Print (Alumni Sans Pinstripe) */
 .markdown-preview.style-print {
   font-family: 'Alumni Sans Pinstripe', 'Alumni Sans', 'Courier New', monospace;
-  color: #2c2c2c;
+  color: #000000;
 }
 
 .markdown-preview.style-print h1,
@@ -518,7 +523,7 @@
 .markdown-preview.style-print blockquote {
   border-left: 4px solid rgba(0, 0, 0, 0.2);
   padding-left: 1.2em;
-  color: #444;
+  color: #111111;
   font-style: italic;
 }
 
@@ -531,7 +536,7 @@
 /* Style: Modern (Quicksand) */
 .markdown-preview.style-modern {
   font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #2a2a2a;
+  color: #000000;
 }
 
 .markdown-preview.style-modern h1,
@@ -541,7 +546,7 @@
 .markdown-preview.style-modern h5,
 .markdown-preview.style-modern h6 {
   font-weight: 600;
-  color: #1a1a1a;
+  color: #000000;
   letter-spacing: -0.01em;
 }
 
@@ -561,7 +566,7 @@
   border-radius: 5px;
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 0.9em;
-  color: rgba(100, 50, 200, 0.9);
+  color: #000000;
 }
 
 .markdown-preview.style-modern pre {
@@ -580,7 +585,7 @@
 .markdown-preview.style-modern blockquote {
   border-left: 4px solid rgba(100, 100, 255, 0.4);
   padding-left: 1.2em;
-  color: #555;
+  color: #222222;
   background: rgba(100, 100, 255, 0.03);
 }
 
@@ -594,7 +599,7 @@
 /* Style: Cute (Sour Gummy) */
 .markdown-preview.style-cute {
   font-family: 'Sour Gummy', 'Comic Sans MS', 'Chalkboard SE', cursive;
-  color: #3a3a3a;
+  color: #000000;
 }
 
 .markdown-preview.style-cute h1,
@@ -604,8 +609,8 @@
 .markdown-preview.style-cute h5,
 .markdown-preview.style-cute h6 {
   font-weight: 700;
-  color: #ff6b9d;
-  text-shadow: 1px 1px 0 rgba(255, 200, 220, 0.3);
+  color: #000000;
+  text-shadow: none;
 }
 
 .markdown-preview.style-cute h1 {
@@ -626,7 +631,7 @@
   border-radius: 6px;
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 0.9em;
-  color: #d147a3;
+  color: #000000;
 }
 
 .markdown-preview.style-cute pre {
@@ -645,7 +650,7 @@
 .markdown-preview.style-cute blockquote {
   border-left: 4px solid rgba(255, 107, 157, 0.5);
   padding-left: 1.2em;
-  color: #666;
+  color: #222222;
   background: rgba(255, 180, 220, 0.08);
   border-radius: 0 8px 8px 0;
 }
@@ -660,7 +665,7 @@
 /* Style: Hand (Delicious Handrawn) */
 .markdown-preview.style-hand {
   font-family: 'Delicious Handrawn', 'Brush Script MT', cursive;
-  color: #2a2a2a;
+  color: #000000;
 }
 
 .markdown-preview.style-hand h1,
@@ -670,7 +675,7 @@
 .markdown-preview.style-hand h5,
 .markdown-preview.style-hand h6 {
   font-weight: 400;
-  color: #1a1a1a;
+  color: #000000;
 }
 
 .markdown-preview.style-hand code {
@@ -679,7 +684,7 @@
   border-radius: 4px;
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 0.85em;
-  color: #444;
+  color: #111111;
 }
 
 .markdown-preview.style-hand pre {
@@ -698,7 +703,7 @@
 .markdown-preview.style-hand blockquote {
   border-left: 3px solid rgba(0, 0, 0, 0.3);
   padding-left: 1.2em;
-  color: #555;
+  color: #222222;
   background: rgba(0, 0, 0, 0.02);
   font-style: italic;
 }
@@ -713,7 +718,7 @@
 /* Style: Script (Dancing Script) */
 .markdown-preview.style-script {
   font-family: 'Dancing Script', cursive;
-  color: #2c2c2c;
+  color: #000000;
 }
 
 .markdown-preview.style-script h1,
@@ -723,7 +728,7 @@
 .markdown-preview.style-script h5,
 .markdown-preview.style-script h6 {
   font-weight: 400;
-  color: #1a1a1a;
+  color: #000000;
   font-style: italic;
 }
 
@@ -733,7 +738,7 @@
   border-radius: 4px;
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 0.88em;
-  color: #444;
+  color: #111111;
   font-style: normal;
 }
 
@@ -753,7 +758,7 @@
 .markdown-preview.style-script blockquote {
   border-left: 4px solid rgba(0, 0, 0, 0.25);
   padding-left: 1.2em;
-  color: #555;
+  color: #222222;
   background: rgba(0, 0, 0, 0.02);
   font-style: italic;
 }

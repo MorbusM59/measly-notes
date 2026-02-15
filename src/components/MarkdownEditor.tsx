@@ -45,6 +45,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Load note content when note changes
   useEffect(() => {
     if (note) {
+      // Switch to edit mode immediately when note changes
+      setShowPreview(false);
+      
       window.electronAPI.loadNote(note.id).then(noteContent => {
         setContent(noteContent);
         lastSavedContentRef.current = noteContent;
@@ -54,9 +57,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         setTimeout(() => {
           const textarea = textareaRef.current;
           if (textarea) {
-            // Switch to edit mode if in view mode
-            setShowPreview(false);
-            
             // Focus the textarea
             textarea.focus();
             
@@ -68,7 +68,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               textarea.setSelectionRange(noteContent.length, noteContent.length);
             }
           }
-        }, 0);
+        }, 10);
       });
     } else {
       setContent('');
@@ -458,6 +458,28 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         clearTimeout(autoSaveTimeoutRef.current);
       }
     };
+  }, []);
+
+  // Shift+Enter to toggle Edit/View mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        setShowPreview(prev => {
+          const newShowPreview = !prev;
+          // If switching to edit mode, focus the textarea
+          if (!newShowPreview) {
+            setTimeout(() => {
+              textareaRef.current?.focus();
+            }, 10);
+          }
+          return newShowPreview;
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   if (!note) {

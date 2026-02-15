@@ -15,7 +15,7 @@ interface SidebarProps {
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   width?: number;
-  onNoteDelete?: (noteId: number) => void;
+  onNoteDelete?: (noteId: number, nextNoteToSelect?: Note | null) => void;
 }
 
 type ViewMode = 'date' | 'category';
@@ -236,13 +236,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       // First click - arm the button
       setDeleteArmedId(noteId);
     } else {
-      // Second click - actually delete
+      // Second click - find next note before deleting
+      const nextNote = findNextNoteAfterDeletion(noteId);
+      
+      // Actually delete
       await window.electronAPI.deleteNote(noteId);
       setDeleteArmedId(null);
       
       // Notify parent to handle selection and refresh
       if (onNoteDelete) {
-        onNoteDelete(noteId);
+        onNoteDelete(noteId, nextNote);
       }
       
       // Reload the current view
@@ -259,6 +262,64 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleDeleteMouseLeave = (e: React.MouseEvent) => {
     e.stopPropagation();
     setDeleteArmedId(null);
+  };
+
+  // Helper function to get all visible notes in current view
+  const getAllVisibleNotes = (): Note[] => {
+    if (searchMode !== 'none') {
+      return searchResults.map(r => r.note);
+    }
+    
+    if (viewMode === 'date') {
+      return getFilteredNotes(dateNotes);
+    }
+    
+    // Category view - flatten hierarchy
+    const notes: Note[] = [];
+    const filteredHierarchy = getFilteredHierarchy(categoryHierarchy);
+    
+    Object.entries(filteredHierarchy).forEach(([primaryTag, primaryData]) => {
+      // Add secondary notes first
+      Object.entries(primaryData.secondary).forEach(([secondaryTag, secondaryData]) => {
+        notes.push(...secondaryData.notes);
+        // Add tertiary notes
+        Object.values(secondaryData.tertiary).forEach(tertiaryNotes => {
+          notes.push(...tertiaryNotes);
+        });
+      });
+      // Add primary-only notes last
+      notes.push(...primaryData.notes);
+    });
+    
+    // Add uncategorized notes
+    const filteredUncategorized = getFilteredNotes(uncategorizedNotes);
+    notes.push(...filteredUncategorized);
+    
+    return notes;
+  };
+
+  // Helper function to find next note after deletion
+  const findNextNoteAfterDeletion = (deletedNoteId: number): Note | null => {
+    const allNotes = getAllVisibleNotes();
+    const currentIndex = allNotes.findIndex(n => n.id === deletedNoteId);
+    
+    if (currentIndex === -1) {
+      // Note not found in current view, return null
+      return null;
+    }
+    
+    // If there's a note after this one, select it
+    if (currentIndex < allNotes.length - 1) {
+      return allNotes[currentIndex + 1];
+    }
+    
+    // If this was the last note and there are other notes, select the previous one (now last)
+    if (currentIndex > 0) {
+      return allNotes[currentIndex - 1];
+    }
+    
+    // No notes left
+    return null;
   };
 
   const totalPages = Math.ceil(totalNotes / notesPerPage);
