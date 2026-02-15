@@ -15,6 +15,7 @@ interface SidebarProps {
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   width?: number;
+  onNoteDelete?: (noteId: number) => void;
 }
 
 type ViewMode = 'date' | 'category';
@@ -30,7 +31,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onYearToggle,
   viewMode: externalViewMode = 'date',
   onViewModeChange,
-  width = 320
+  width = 320,
+  onNoteDelete
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
@@ -43,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [totalNotes, setTotalNotes] = useState(0);
   const [collapsedPrimary, setCollapsedPrimary] = useState<Set<string>>(new Set());
   const [collapsedSecondary, setCollapsedSecondary] = useState<Set<string>>(new Set());
+  const [deleteArmedId, setDeleteArmedId] = useState<number | null>(null);
   const notesPerPage = 20;
   
   // Use external viewMode if provided, otherwise use internal
@@ -226,6 +229,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCollapsedSecondary(newCollapsed);
   };
 
+  const handleDeleteNote = async (e: React.MouseEvent, noteId: number) => {
+    e.stopPropagation();
+    
+    if (deleteArmedId !== noteId) {
+      // First click - arm the button
+      setDeleteArmedId(noteId);
+    } else {
+      // Second click - actually delete
+      await window.electronAPI.deleteNote(noteId);
+      setDeleteArmedId(null);
+      
+      // Notify parent to handle selection and refresh
+      if (onNoteDelete) {
+        onNoteDelete(noteId);
+      }
+      
+      // Reload the current view
+      if (searchMode === 'none') {
+        if (viewMode === 'date') {
+          await loadDateNotes();
+        } else {
+          await loadCategoryHierarchy();
+        }
+      }
+    }
+  };
+
+  const handleDeleteMouseLeave = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleteArmedId(null);
+  };
+
   const totalPages = Math.ceil(totalNotes / notesPerPage);
 
   const renderSearchResults = () => (
@@ -240,11 +275,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`note-item ${selectedNote?.id === result.note.id ? 'selected' : ''}`}
           onClick={() => onSelectNote(result.note)}
         >
-          <div className="note-title">{result.note.title}</div>
-          {result.snippet && (
-            <div className="note-snippet">{result.snippet}</div>
-          )}
-          <div className="note-date">{new Date(result.note.updatedAt).toLocaleDateString()}</div>
+          <div className="note-content">
+            <div className="note-title">{result.note.title}</div>
+            {result.snippet && (
+              <div className="note-snippet">{result.snippet}</div>
+            )}
+            <div className="note-date">{new Date(result.note.updatedAt).toLocaleDateString()}</div>
+          </div>
+          <button
+            className={`note-delete-btn ${deleteArmedId === result.note.id ? 'delete-armed' : ''}`}
+            onClick={(e) => handleDeleteNote(e, result.note.id)}
+            onMouseLeave={handleDeleteMouseLeave}
+            title={deleteArmedId === result.note.id ? 'Click again to confirm deletion' : 'Delete note'}
+          >
+            ×
+          </button>
         </div>
       ))}
     </div>
@@ -262,8 +307,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
               onClick={() => onSelectNote(note)}
             >
-              <div className="note-title">{note.title}</div>
-              <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+              <div className="note-content">
+                <div className="note-title">{note.title}</div>
+                <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+              </div>
+              <button
+                className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
+                onClick={(e) => handleDeleteNote(e, note.id)}
+                onMouseLeave={handleDeleteMouseLeave}
+                title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>
@@ -352,8 +407,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
                               onClick={() => onSelectNote(note)}
                             >
-                              <div className="note-title">{note.title}</div>
-                              <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                              <div className="note-content">
+                                <div className="note-title">{note.title}</div>
+                                <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                              </div>
+                              <button
+                                className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
+                                onClick={(e) => handleDeleteNote(e, note.id)}
+                                onMouseLeave={handleDeleteMouseLeave}
+                                title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
+                              >
+                                ×
+                              </button>
                             </div>
                           ))}
                           
@@ -367,8 +432,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
                                   onClick={() => onSelectNote(note)}
                                 >
-                                  <div className="note-title">{note.title}</div>
-                                  <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                                  <div className="note-content">
+                                    <div className="note-title">{note.title}</div>
+                                    <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                                  </div>
+                                  <button
+                                    className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
+                                    onClick={(e) => handleDeleteNote(e, note.id)}
+                                    onMouseLeave={handleDeleteMouseLeave}
+                                    title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
+                                  >
+                                    ×
+                                  </button>
                                 </div>
                               ))}
                             </div>
@@ -386,8 +461,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
                     onClick={() => onSelectNote(note)}
                   >
-                    <div className="note-title">{note.title}</div>
-                    <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                    <div className="note-content">
+                      <div className="note-title">{note.title}</div>
+                      <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                    </div>
+                    <button
+                      className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
+                      onClick={(e) => handleDeleteNote(e, note.id)}
+                      onMouseLeave={handleDeleteMouseLeave}
+                      title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
+                    >
+                      ×
+                    </button>
                   </div>
                 ))}
               </div>
@@ -410,8 +495,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
                 onClick={() => onSelectNote(note)}
               >
-                <div className="note-title">{note.title}</div>
-                <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                <div className="note-content">
+                  <div className="note-title">{note.title}</div>
+                  <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                </div>
+                <button
+                  className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
+                  onClick={(e) => handleDeleteNote(e, note.id)}
+                  onMouseLeave={handleDeleteMouseLeave}
+                  title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
