@@ -52,10 +52,10 @@
 }
 
 /* Spacing Classes */
-/* tight: 1em margins, 0.5em paragraph spacing, 100% line-height */
+/* tight: 1em margins, 0.5em paragraph spacing, 120% line-height (minimum for readability) */
 .markdown-preview.spacing-tight {
   padding: 1em;
-  line-height: 1;
+  line-height: 1.2;
   max-width: 800px;
   margin: 0 auto;
 }
