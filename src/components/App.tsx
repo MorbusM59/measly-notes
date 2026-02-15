@@ -16,6 +16,11 @@ export const App: React.FC = () => {
   const [sidebarWidth, setSidebarWidth] = useState<number>(400);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Global editor preview/edit mode (true = preview/view, false = edit)
+  const [showPreview, setShowPreview] = useState<boolean>(() => {
+    return localStorage.getItem('markdown-show-preview') === 'true';
+  });
+
   // Load sidebar width from localStorage
   useEffect(() => {
     const savedWidth = localStorage.getItem('sidebar-width');
@@ -27,12 +32,23 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  // Global keyboard shortcuts:
+  // - Ctrl+Enter to create new note
+  // - Shift+Enter to toggle edit/view (global)
   useEffect(() => {
-    // Global keyboard shortcut: Ctrl+Enter to create new note
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 'Enter') {
         e.preventDefault();
         handleCreateNote();
+        return;
+      }
+      if (e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        setShowPreview(prev => {
+          const next = !prev;
+          localStorage.setItem('markdown-show-preview', String(next));
+          return next;
+        });
       }
     };
 
@@ -45,6 +61,10 @@ export const App: React.FC = () => {
     if ((window as any).forceSaveCurrentNote) {
       await (window as any).forceSaveCurrentNote();
     }
+
+    // Ensure edit mode for newly-created note
+    setShowPreview(false);
+    localStorage.setItem('markdown-show-preview', 'false');
     
     // Create note with default title and pre-filled content
     const note = await window.electronAPI.createNote('Untitled');
@@ -87,8 +107,6 @@ export const App: React.FC = () => {
       return;
     }
 
-    // At this point, TypeScript knows year is number | 'older'
-    // but we need to explicitly narrow the type
     if (year !== CLEAR_YEARS_SIGNAL) {
       handleMultiSelect(year, event, selectedYears, FILTER_YEARS, setSelectedYears);
     }
@@ -109,11 +127,13 @@ export const App: React.FC = () => {
     setSidebarRefreshTrigger(t => t + 1);
   };
 
+  // Sidebar divider mouse down handler
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
   };
 
+  // Drag handling effect
   useEffect(() => {
     if (!isDragging) return;
 
@@ -161,7 +181,15 @@ export const App: React.FC = () => {
       />
       <div className="main-content">
         <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
-        <MarkdownEditor note={selectedNote} onNoteUpdate={handleNoteUpdate} />
+        <MarkdownEditor
+          note={selectedNote}
+          onNoteUpdate={handleNoteUpdate}
+          showPreview={showPreview}
+          onTogglePreview={(next: boolean) => {
+            setShowPreview(next);
+            localStorage.setItem('markdown-show-preview', String(next));
+          }}
+        />
       </div>
     </div>
   );

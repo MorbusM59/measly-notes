@@ -8,12 +8,13 @@ import './MarkdownThemes.css';
 interface MarkdownEditorProps {
   note: Note | null;
   onNoteUpdate?: (note: Note) => void;
+  showPreview: boolean;
+  onTogglePreview: (next: boolean) => void;
 }
 
-export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate }) => {
+export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview }) => {
   const [content, setContent] = useState('');
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const [viewStyle, setViewStyle] = useState<string>('clean');
   const [fontSize, setFontSize] = useState<string>('m');
   const [spacing, setSpacing] = useState<string>('cozy');
@@ -45,37 +46,43 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Load note content when note changes
   useEffect(() => {
     if (note) {
-      // Switch to edit mode immediately when note changes
-      setShowPreview(false);
-      
       window.electronAPI.loadNote(note.id).then(noteContent => {
         setContent(noteContent);
         lastSavedContentRef.current = noteContent;
         lastSavedTitleRef.current = note.title;
         
-        // Focus textarea and position cursor after content is loaded
-        setTimeout(() => {
-          const textarea = textareaRef.current;
-          if (textarea) {
-            // Focus the textarea
-            textarea.focus();
-            
-            // Position cursor after "# " for new notes
-            if (noteContent === '# ') {
-              textarea.setSelectionRange(2, 2);
-            } else {
-              // For existing notes, position at end
-              textarea.setSelectionRange(noteContent.length, noteContent.length);
+        // Focus textarea and position cursor after content is loaded only if we are in edit mode
+        if (!showPreview) {
+          setTimeout(() => {
+            const textarea = textareaRef.current;
+            if (textarea) {
+              // Focus the textarea
+              textarea.focus();
+              
+              // Position cursor after "# " for new notes
+              if (noteContent === '# ') {
+                textarea.setSelectionRange(2, 2);
+              } else {
+                // For existing notes, position at end
+                textarea.setSelectionRange(noteContent.length, noteContent.length);
+              }
             }
-          }
-        }, 10);
+          }, 10);
+        }
       });
     } else {
       setContent('');
       lastSavedContentRef.current = '';
       lastSavedTitleRef.current = '';
     }
-  }, [note]);
+  }, [note, showPreview]);
+
+  // If the global mode switches to edit, focus the textarea
+  useEffect(() => {
+    if (!showPreview) {
+      setTimeout(() => textareaRef.current?.focus(), 10);
+    }
+  }, [showPreview]);
 
   // Load and persist view style, font size, and spacing
   useEffect(() => {
@@ -173,44 +180,34 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       return;
     }
 
-    // Check for bold (**)
+    // -- (formatting checks unchanged) --
     if (start >= 2 && end <= content.length - 2) {
       if (content.substring(start - 2, start) === '**' && content.substring(end, end + 2) === '**') {
         active.add('bold');
       }
     }
-
-    // Check for italic (*) - but not if it's part of **
     if (start >= 1 && end <= content.length - 1) {
       const beforeChar = content.substring(start - 1, start);
       const afterChar = content.substring(end, end + 1);
       const beforeBefore = start >= 2 ? content.substring(start - 2, start - 1) : '';
       const afterAfter = end <= content.length - 2 ? content.substring(end + 1, end + 2) : '';
-      
       if (beforeChar === '*' && afterChar === '*' && beforeBefore !== '*' && afterAfter !== '*') {
         active.add('italic');
       }
     }
-
-    // Check for strikethrough (~~)
     if (start >= 2 && end <= content.length - 2) {
       if (content.substring(start - 2, start) === '~~' && content.substring(end, end + 2) === '~~') {
         active.add('strikethrough');
       }
     }
-
-    // Check for inline code (`)
     if (start >= 1 && end <= content.length - 1) {
       if (content.substring(start - 1, start) === '`' && content.substring(end, end + 1) === '`') {
         active.add('code');
       }
     }
-
-    // Check for code block (```)
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
     const lineEnd = content.indexOf('\n', end);
     const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
-    
     if (lineStart >= 4) {
       const prevLine = content.lastIndexOf('\n', lineStart - 2);
       const prevLineContent = content.substring(prevLine + 1, lineStart - 1);
@@ -223,8 +220,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         }
       }
     }
-
-    // Check for heading (# at start of line)
     const currentLineContent = content.substring(lineStart, actualLineEnd);
     if (currentLineContent.startsWith('# ')) {
       active.add('h1');
@@ -460,28 +455,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     };
   }, []);
 
-  // Shift+Enter to toggle Edit/View mode
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.shiftKey && e.key === 'Enter') {
-        e.preventDefault();
-        setShowPreview(prev => {
-          const newShowPreview = !prev;
-          // If switching to edit mode, focus the textarea
-          if (!newShowPreview) {
-            setTimeout(() => {
-              textareaRef.current?.focus();
-            }, 10);
-          }
-          return newShowPreview;
-        });
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
   if (!note) {
     return (
       <div className="markdown-editor empty">
@@ -497,7 +470,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       <div className="editor-toolbar">
         <button 
           className={`toolbar-toggle-btn ${!showPreview ? 'active' : ''}`}
-          onClick={() => setShowPreview(!showPreview)}
+          onClick={() => onTogglePreview(!showPreview)}
         >
           {showPreview ? 'Edit' : 'View'}
         </button>
@@ -597,9 +570,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             className="markdown-textarea"
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
-            placeholder="# Note Title
+            placeholder={`# Note Title
 
-Start typing your note here..."
+Start typing your note here...`}
           />
         ) : (
           <div className={`markdown-preview style-${viewStyle} size-${fontSize} spacing-${spacing}`}>
