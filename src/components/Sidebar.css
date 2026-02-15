@@ -332,3 +332,9 @@
 .tertiary-group .note-item {
   padding-left: 72px;
 }
+
+.note-edited {
+  color: #00000099;
+  font-size: 11px;
+  margin-left: 6px;
+}

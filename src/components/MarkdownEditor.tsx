@@ -148,8 +148,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     // Only save if content has changed
     if (content === lastSavedContentRef.current) return;
     
-    // Save content
-    await window.electronAPI.saveNote(note.id, content);
+    // Save content; new API returns the updated Note
+    const savedNote = await window.electronAPI.saveNote(note.id, content);
     lastSavedContentRef.current = content;
     
     // Update title if it has changed
@@ -158,9 +158,19 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       await window.electronAPI.updateNoteTitle(note.id, newTitle);
       lastSavedTitleRef.current = newTitle;
       
-      // Notify parent about note update
+      // Notify parent about note update using updated note object if available
       if (onNoteUpdate) {
-        onNoteUpdate({ ...note, title: newTitle });
+        // If save returned an updated note, use it; otherwise, synthesize minimal update
+        if (savedNote) {
+          onNoteUpdate(savedNote);
+        } else {
+          onNoteUpdate({ ...note, title: newTitle });
+        }
+      }
+    } else {
+      // Title unchanged - still notify parent about lastEdited via savedNote if present
+      if (onNoteUpdate && savedNote) {
+        onNoteUpdate(savedNote);
       }
     }
   }, [note, content, extractTitle, onNoteUpdate]);
@@ -521,7 +531,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             </button>
           </div>
         )}
-        
+
         {showPreview && (
           <>
             <div className="style-selector">

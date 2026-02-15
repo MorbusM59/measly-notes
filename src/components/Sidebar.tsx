@@ -141,7 +141,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // If nothing matched (e.g. uncategorized note), fall back to collapsing all primaries
     // which results in the uncategorized header being visible but everything else folded.
     if (!matched) {
-      setCollapsedPrimary(new Set(allPrimary)); // collapse all primaries
+      setCollapsedPrimary(new Set(Object.keys(categoryHierarchy))); // collapse all primaries
       setCollapsedSecondary(new Set(allSecondaryKeys)); // collapse all secondaries
     }
   }, [categoryHierarchy, selectedNote, refreshTrigger, viewMode, searchMode]);
@@ -259,7 +259,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     if (isCurrentlyCollapsed) {
       // Primary is currently collapsed -> open it and close all others.
-      // Represent collapsedPrimary as all primaries except the one to open.
       const newCollapsedPrimary = new Set(allPrimary.filter(p => p !== category));
       setCollapsedPrimary(newCollapsedPrimary);
 
@@ -278,7 +277,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     } else {
       // Primary is currently open -> we should toggle all secondaries under this primary.
       // First, ensure this primary remains the only open primary (collapse all others).
-      const newCollapsedPrimary = new Set(allPrimary.filter(p => p !== category));
+      const newCollapsedPrimary = new Set(Object.keys(categoryHierarchy).filter(p => p !== category));
       setCollapsedPrimary(newCollapsedPrimary);
 
       // Now toggle secondary groups under this primary:
@@ -428,6 +427,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return null;
   };
 
+  const formatLastEdited = (iso?: string | null) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   const totalPages = Math.ceil(totalNotes / notesPerPage);
 
   const renderSearchResults = () => (
@@ -447,11 +453,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {result.snippet && (
               <div className="note-snippet">{result.snippet}</div>
             )}
-            <div className="note-date">{new Date(result.note.updatedAt).toLocaleDateString()}</div>
+            <div className="note-date">
+              {new Date(result.note.updatedAt).toLocaleDateString()}
+              {result.note.lastEdited ? (
+                <span className="note-edited"> (edited: {formatLastEdited(result.note.lastEdited)})</span>
+              ) : null}
+            </div>
           </div>
           <button
             className={`note-delete-btn ${deleteArmedId === result.note.id ? 'delete-armed' : ''}`}
-            onClick={(e) => handleDeleteNote(e, result.note.id)}
+            onClick={(e) => { e.stopPropagation(); handleDeleteNote(e, result.note.id); }}
             onMouseLeave={handleDeleteMouseLeave}
             title={deleteArmedId === result.note.id ? 'Click again to confirm deletion' : 'Delete note'}
           >
@@ -476,7 +487,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <div className="note-content">
                 <div className="note-title">{note.title}</div>
-                <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                <div className="note-date">
+                  {new Date(note.updatedAt).toLocaleDateString()}
+                  {note.lastEdited ? (
+                    <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span>
+                  ) : null}
+                </div>
               </div>
               <button
                 className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
@@ -576,7 +592,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             >
                               <div className="note-content">
                                 <div className="note-title">{note.title}</div>
-                                <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                                <div className="note-date">
+                                  {new Date(note.updatedAt).toLocaleDateString()}
+                                  {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                                </div>
                               </div>
                               <button
                                 className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
@@ -601,7 +620,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 >
                                   <div className="note-content">
                                     <div className="note-title">{note.title}</div>
-                                    <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                                    <div className="note-date">
+                                      {new Date(note.updatedAt).toLocaleDateString()}
+                                      {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                                    </div>
                                   </div>
                                   <button
                                     className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
@@ -630,7 +652,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <div className="note-content">
                       <div className="note-title">{note.title}</div>
-                      <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                      <div className="note-date">
+                        {new Date(note.updatedAt).toLocaleDateString()}
+                        {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                      </div>
                     </div>
                     <button
                       className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
@@ -664,7 +689,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <div className="note-content">
                   <div className="note-title">{note.title}</div>
-                  <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+                  <div className="note-date">
+                    {new Date(note.updatedAt).toLocaleDateString()}
+                    {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                  </div>
                 </div>
                 <button
                   className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}

@@ -3,7 +3,7 @@ import { IElectronAPI } from './shared/types';
 
 const electronAPI: IElectronAPI = {
   createNote: (title: string) => ipcRenderer.invoke('create-note', title),
-  saveNote: (id: number, content: string) => ipcRenderer.invoke('save-note', id, content),
+  saveNote: (id: number, content: string) => ipcRenderer.invoke('save-note', id, content), // returns Note
   updateNoteTitle: (id: number, title: string) => ipcRenderer.invoke('update-note-title', id, title),
   loadNote: (id: number) => ipcRenderer.invoke('load-note', id),
   getAllNotes: () => ipcRenderer.invoke('get-all-notes'),
@@ -25,6 +25,7 @@ const electronAPI: IElectronAPI = {
   // Category view operations
   getNotesByPrimaryTag: () => ipcRenderer.invoke('get-notes-by-primary-tag'),
   getCategoryHierarchy: () => ipcRenderer.invoke('get-category-hierarchy'),
+  getLastEditedNote: () => ipcRenderer.invoke('get-last-edited-note'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

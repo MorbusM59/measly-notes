@@ -23,7 +23,8 @@ export async function initDatabase(): Promise<void> {
       title TEXT NOT NULL,
       filePath TEXT NOT NULL,
       createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL
+      updatedAt TEXT NOT NULL,
+      lastEdited TEXT
     );
     
     CREATE TABLE IF NOT EXISTS tags (
@@ -43,15 +44,28 @@ export async function initDatabase(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_note_tags_note ON note_tags(noteId);
     CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tagId);
   `);
+
+  // For older DBs, add lastEdited column if it's missing
+  try {
+    const colsStmt = db.prepare("PRAGMA table_info('notes')");
+    const cols = colsStmt.all();
+    const hasLastEdited = cols.some((c: any) => c.name === 'lastEdited');
+    if (!hasLastEdited) {
+      db.exec(`ALTER TABLE notes ADD COLUMN lastEdited TEXT`);
+    }
+  } catch (err) {
+    // non-fatal; leave DB as-is if PRAGMA fails
+    console.warn('Could not ensure lastEdited column:', err);
+  }
 }
 
 export function createNote(title: string, filePath: string): Note {
   const now = new Date().toISOString();
   const stmt = db.prepare(`
-    INSERT INTO notes (title, filePath, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO notes (title, filePath, createdAt, updatedAt, lastEdited)
+    VALUES (?, ?, ?, ?, ?)
   `);
-  const result = stmt.run(title, filePath, now, now);
+  const result = stmt.run(title, filePath, now, now, now);
   
   return {
     id: result.lastInsertRowid as number,
@@ -59,6 +73,7 @@ export function createNote(title: string, filePath: string): Note {
     filePath,
     createdAt: now,
     updatedAt: now,
+    lastEdited: now,
   };
 }
 
@@ -69,8 +84,8 @@ export function getAllNotes(): Note[] {
 
 export function updateNote(id: number): void {
   const now = new Date().toISOString();
-  const stmt = db.prepare('UPDATE notes SET updatedAt = ? WHERE id = ?');
-  stmt.run(now, id);
+  const stmt = db.prepare('UPDATE notes SET updatedAt = ?, lastEdited = ? WHERE id = ?');
+  stmt.run(now, now, id);
 }
 
 export function updateNoteTitle(id: number, title: string): void {
@@ -92,6 +107,11 @@ export function deleteNote(id: number): void {
 export function getNoteById(id: number): Note | undefined {
   const stmt = db.prepare('SELECT * FROM notes WHERE id = ?');
   return stmt.get(id) as Note | undefined;
+}
+
+export function getLastEditedNote(): Note | undefined {
+  const stmt = db.prepare('SELECT * FROM notes WHERE lastEdited IS NOT NULL ORDER BY lastEdited DESC LIMIT 1');
+  return stmt.get() as Note | undefined;
 }
 
 export function closeDatabase(): void {
@@ -240,7 +260,8 @@ export function getNotesByPrimaryTag(): { [tagName: string]: Note[] } {
       title: row.title,
       filePath: row.filePath,
       createdAt: row.createdAt,
-      updatedAt: row.updatedAt
+      updatedAt: row.updatedAt,
+      lastEdited: (row as any).lastEdited ?? null
     };
     
     if (!result[tagName]) {
@@ -256,7 +277,7 @@ export function getCategoryHierarchy() {
   // Get all notes with their tags at positions 0, 1, and 2
   const stmt = db.prepare(`
     SELECT 
-      n.id, n.title, n.filePath, n.createdAt, n.updatedAt,
+      n.id, n.title, n.filePath, n.createdAt, n.updatedAt, n.lastEdited,
       t0.name as primaryTag,
       t1.name as secondaryTag,
       t2.name as tertiaryTag
@@ -276,6 +297,7 @@ export function getCategoryHierarchy() {
     filePath: string;
     createdAt: string;
     updatedAt: string;
+    lastEdited: string | null;
     primaryTag: string | null;
     secondaryTag: string | null;
     tertiaryTag: string | null;
@@ -290,7 +312,8 @@ export function getCategoryHierarchy() {
       title: row.title,
       filePath: row.filePath,
       createdAt: row.createdAt,
-      updatedAt: row.updatedAt
+      updatedAt: row.updatedAt,
+      lastEdited: row.lastEdited ?? null
     };
     
     const primary = row.primaryTag;

@@ -4,6 +4,7 @@ export interface Note {
   filePath: string;
   createdAt: string;
   updatedAt: string;
+  lastEdited?: string | null; // ISO timestamp for last content edit
 }
 
 export interface Tag {
@@ -45,7 +46,7 @@ export interface CategoryData {
 
 export interface IElectronAPI {
   createNote: (title: string) => Promise<Note>;
-  saveNote: (id: number, content: string) => Promise<void>;
+  saveNote: (id: number, content: string) => Promise<Note | null>; // returns updated Note
   updateNoteTitle: (id: number, title: string) => Promise<void>;
   loadNote: (id: number) => Promise<string>;
   getAllNotes: () => Promise<Note[]>;
@@ -67,6 +68,9 @@ export interface IElectronAPI {
   // Category view operations
   getNotesByPrimaryTag: () => Promise<{ [tagName: string]: Note[] }>;
   getCategoryHierarchy: () => Promise<CategoryData>;
+
+  // Last edited helper
+  getLastEditedNote: () => Promise<Note | null>;
 }
 
 declare global {

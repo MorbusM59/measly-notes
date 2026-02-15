@@ -3,7 +3,7 @@ import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote, 
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
   addTagToNote, removeTagFromNote, reorderNoteTags, getNoteTags, 
-  getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy
+  getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy, getLastEditedNote
 } from './main/database';
 import { initFileSystem, saveNoteContent, loadNoteContent, deleteNoteFile } from './main/fileSystem';
 import { SearchResult } from './shared/types';
@@ -14,184 +14,264 @@ import { SearchResult } from './shared/types';
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
+// Global error handlers to make crashes visible in the terminal
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaughtException', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandledRejection', reason && (reason as any).stack ? (reason as any).stack : reason);
+});
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (require('electron-squirrel-startup')) {
-  app.quit();
+try {
+  if (require('electron-squirrel-startup')) {
+    app.quit();
+  }
+} catch (err) {
+  // in some environments require may behave differently; log and continue
+  console.warn('[main] squirrel check failed:', err);
 }
 
 // Disable GPU hardware acceleration to prevent GPU process crashes on Windows.
-// Some GPU drivers cause Chromium's GPU process to segfault (exit_code=-1073741819 / 0xC0000005),
-// resulting in a white screen. Hardware acceleration is not needed for this app.
 app.disableHardwareAcceleration();
 
+let mainWindow: BrowserWindow | null = null;
+
 const createWindow = (): void => {
-  // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
+  console.log('[main] createWindow() - start');
+  try {
+    mainWindow = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      webPreferences: {
+        preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+      show: false, // show when ready-to-show
+    });
 
-  // and load the index.html of the app.
-  mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
+    mainWindow.once('ready-to-show', () => {
+      console.log('[main] mainWindow ready-to-show -> showing');
+      try {
+        mainWindow?.show();
+      } catch (err) {
+        console.error('[main] error showing window', err);
+      }
+    });
 
-  // Open the DevTools in development.
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.webContents.openDevTools();
+    mainWindow.on('closed', () => {
+      console.log('[main] mainWindow closed');
+      mainWindow = null;
+    });
+
+    console.log('[main] loading URL:', MAIN_WINDOW_WEBPACK_ENTRY);
+    mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY).catch(err => {
+      console.error('[main] loadURL failed', err && err.stack ? err.stack : err);
+    });
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[main] opening devtools (development mode)');
+      mainWindow.webContents.openDevTools();
+    }
+
+    console.log('[main] createWindow() - done');
+  } catch (err) {
+    console.error('[main] createWindow() threw', err && (err as any).stack ? (err as any).stack : err);
+    throw err;
   }
 };
 
 // Initialize app
 app.whenReady().then(async () => {
-  await initDatabase();
-  await initFileSystem();
-  
-  // Register IPC handlers
-  ipcMain.handle('create-note', async (_, title: string) => {
-    const note = createNote(title, '');
-    const filePath = await saveNoteContent(note.id, '');
-    updateNoteFilePath(note.id, filePath);
-    const updatedNote = getNoteById(note.id);
-    if (!updatedNote) {
-      throw new Error(`Failed to retrieve note ${note.id} after creation`);
-    }
-    return updatedNote;
-  });
-
-  ipcMain.handle('save-note', async (_, id: number, content: string) => {
-    const note = getNoteById(id);
-    if (note) {
-      await saveNoteContent(id, content);
-      updateNote(id);
-    }
-  });
-
-  ipcMain.handle('load-note', async (_, id: number) => {
-    const note = getNoteById(id);
-    if (note) {
-      return await loadNoteContent(note.filePath);
-    }
-    return '';
-  });
-
-  ipcMain.handle('get-all-notes', async () => {
-    return getAllNotes();
-  });
-
-  ipcMain.handle('delete-note', async (_, id: number) => {
-    const note = getNoteById(id);
-    if (note) {
-      await deleteNoteFile(note.filePath);
-      deleteNote(id);
-    }
-  });
-
-  ipcMain.handle('update-note-title', async (_, id: number, title: string) => {
-    updateNoteTitle(id, title);
-  });
-
-  ipcMain.handle('get-notes-page', async (_, page: number, perPage: number) => {
-    return getNotesPage(page, perPage);
-  });
-
-  // Tag operations
-  ipcMain.handle('add-tag-to-note', async (_, noteId: number, tagName: string, position: number) => {
-    return addTagToNote(noteId, tagName, position);
-  });
-
-  ipcMain.handle('remove-tag-from-note', async (_, noteId: number, tagId: number) => {
-    removeTagFromNote(noteId, tagId);
-  });
-
-  ipcMain.handle('reorder-note-tags', async (_, noteId: number, tagIds: number[]) => {
-    reorderNoteTags(noteId, tagIds);
-  });
-
-  ipcMain.handle('get-note-tags', async (_, noteId: number) => {
-    return getNoteTags(noteId);
-  });
-
-  ipcMain.handle('get-all-tags', async () => {
-    return getAllTags();
-  });
-
-  ipcMain.handle('get-top-tags', async (_, limit: number) => {
-    return getTopTags(limit);
-  });
-
-  // Search operations
-  ipcMain.handle('search-notes', async (_, query: string) => {
-    const allNotes = getAllNotes();
-    const results: SearchResult[] = [];
-    
-    for (const note of allNotes) {
-      const matchInTitle = note.title.toLowerCase().includes(query.toLowerCase());
-      
-      // Load note content to search
-      const content = await loadNoteContent(note.filePath);
-      const matchInContent = content.toLowerCase().includes(query.toLowerCase());
-      
-      if (matchInTitle || matchInContent) {
-        results.push({
-          note,
-          matchType: matchInTitle ? 'title' : 'content',
-          snippet: matchInContent ? extractSnippet(content, query) : undefined
-        });
-      }
-    }
-    
-    return results;
-  });
-
-  function extractSnippet(content: string, query: string, radius = 50): string {
-    const lowerContent = content.toLowerCase();
-    const lowerQuery = query.toLowerCase();
-    const index = lowerContent.indexOf(lowerQuery);
-    
-    if (index === -1) return '';
-    
-    const start = Math.max(0, index - radius);
-    const end = Math.min(content.length, index + query.length + radius);
-    
-    let snippet = content.substring(start, end);
-    if (start > 0) snippet = '...' + snippet;
-    if (end < content.length) snippet = snippet + '...';
-    
-    return snippet;
+  console.log('[main] app.whenReady started');
+  try {
+    await initDatabase();
+    console.log('[main] initDatabase OK');
+    await initFileSystem();
+    console.log('[main] initFileSystem OK');
+  } catch (err) {
+    console.error('[main] initialization error', err && (err as any).stack ? (err as any).stack : err);
+    // Rethrow so the process fails visibly
+    throw err;
   }
 
-  ipcMain.handle('search-notes-by-tag', async (_, tagName: string) => {
-    return searchNotesByTag(tagName);
-  });
+  try {
+    console.log('[main] registering IPC handlers');
 
-  ipcMain.handle('get-notes-by-primary-tag', async () => {
-    return getNotesByPrimaryTag();
-  });
+    ipcMain.handle('create-note', async (_, title: string) => {
+      const note = createNote(title, '');
+      const filePath = await saveNoteContent(note.id, '');
+      updateNoteFilePath(note.id, filePath);
+      const updatedNote = getNoteById(note.id);
+      if (!updatedNote) {
+        throw new Error(`Failed to retrieve note ${note.id} after creation`);
+      }
+      return updatedNote;
+    });
 
-  ipcMain.handle('get-category-hierarchy', async () => {
-    return getCategoryHierarchy();
-  });
+    ipcMain.handle('save-note', async (_, id: number, content: string) => {
+      const note = getNoteById(id);
+      if (note) {
+        await saveNoteContent(id, content);
+        updateNote(id); // updates timestamps including lastEdited
+        return getNoteById(id) ?? null;
+      }
+      return null;
+    });
 
-  createWindow();
+    ipcMain.handle('load-note', async (_, id: number) => {
+      const note = getNoteById(id);
+      if (note) {
+        return await loadNoteContent(note.filePath);
+      }
+      return '';
+    });
+
+    ipcMain.handle('get-all-notes', async () => {
+      return getAllNotes();
+    });
+
+    ipcMain.handle('delete-note', async (_, id: number) => {
+      const note = getNoteById(id);
+      if (note) {
+        await deleteNoteFile(note.filePath);
+        deleteNote(id);
+      }
+    });
+
+    ipcMain.handle('update-note-title', async (_, id: number, title: string) => {
+      updateNoteTitle(id, title);
+    });
+
+    ipcMain.handle('get-notes-page', async (_, page: number, perPage: number) => {
+      return getNotesPage(page, perPage);
+    });
+
+    // Tag operations
+    ipcMain.handle('add-tag-to-note', async (_, noteId: number, tagName: string, position: number) => {
+      return addTagToNote(noteId, tagName, position);
+    });
+
+    ipcMain.handle('remove-tag-from-note', async (_, noteId: number, tagId: number) => {
+      removeTagFromNote(noteId, tagId);
+    });
+
+    ipcMain.handle('reorder-note-tags', async (_, noteId: number, tagIds: number[]) => {
+      reorderNoteTags(noteId, tagIds);
+    });
+
+    ipcMain.handle('get-note-tags', async (_, noteId: number) => {
+      return getNoteTags(noteId);
+    });
+
+    ipcMain.handle('get-all-tags', async () => {
+      return getAllTags();
+    });
+
+    ipcMain.handle('get-top-tags', async (_, limit: number) => {
+      return getTopTags(limit);
+    });
+
+    // Search operations
+    ipcMain.handle('search-notes', async (_, query: string) => {
+      const allNotes = getAllNotes();
+      const results: SearchResult[] = [];
+
+      for (const note of allNotes) {
+        const matchInTitle = note.title.toLowerCase().includes(query.toLowerCase());
+
+        // Load note content to search
+        const content = await loadNoteContent(note.filePath);
+        const matchInContent = content.toLowerCase().includes(query.toLowerCase());
+
+        if (matchInTitle || matchInContent) {
+          results.push({
+            note,
+            matchType: matchInTitle ? 'title' : 'content',
+            snippet: matchInContent ? extractSnippet(content, query) : undefined
+          });
+        }
+      }
+
+      return results;
+    });
+
+    function extractSnippet(content: string, query: string, radius = 50): string {
+      const lowerContent = content.toLowerCase();
+      const lowerQuery = query.toLowerCase();
+      const index = lowerContent.indexOf(lowerQuery);
+
+      if (index === -1) return '';
+
+      const start = Math.max(0, index - radius);
+      const end = Math.min(content.length, index + query.length + radius);
+
+      let snippet = content.substring(start, end);
+      if (start > 0) snippet = '...' + snippet;
+      if (end < content.length) snippet = snippet + '...';
+
+      return snippet;
+    }
+
+    ipcMain.handle('search-notes-by-tag', async (_, tagName: string) => {
+      return searchNotesByTag(tagName);
+    });
+
+    ipcMain.handle('get-notes-by-primary-tag', async () => {
+      return getNotesByPrimaryTag();
+    });
+
+    ipcMain.handle('get-category-hierarchy', async () => {
+      return getCategoryHierarchy();
+    });
+
+    ipcMain.handle('get-last-edited-note', async () => {
+      const n = getLastEditedNote();
+      return n ?? null;
+    });
+
+    console.log('[main] IPC handlers registered');
+  } catch (err) {
+    console.error('[main] error registering IPC handlers', err && (err as any).stack ? (err as any).stack : err);
+    throw err;
+  }
+
+  try {
+    console.log('[main] creating window');
+    createWindow();
+    console.log('[main] window creation requested');
+  } catch (err) {
+    console.error('[main] createWindow threw', err && (err as any).stack ? (err as any).stack : err);
+    throw err;
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+}).catch(err => {
+  console.error('[main] whenReady threw', err && (err as any).stack ? (err as any).stack : err);
+  // rethrow to make the process exit in dev so you see the error
+  throw err;
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    closeDatabase();
+    try {
+      closeDatabase();
+    } catch (err) {
+      console.error('[main] closeDatabase error', err);
+    }
     app.quit();
   }
 });
 
 app.on('before-quit', () => {
-  closeDatabase();
+  try {
+    closeDatabase();
+  } catch (err) {
+    console.error('[main] closeDatabase error', err);
+  }
 });

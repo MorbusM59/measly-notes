@@ -32,6 +32,20 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  // On start, open the last edited note if available
+  useEffect(() => {
+    (async () => {
+      try {
+        const last = await window.electronAPI.getLastEditedNote();
+        if (last) {
+          setSelectedNote(last);
+        }
+      } catch (err) {
+        console.warn('Could not get last edited note', err);
+      }
+    })();
+  }, []);
+
   // Global keyboard shortcuts:
   // - Ctrl+Enter to create new note
   // - Shift+Enter to toggle edit/view (global)
@@ -84,6 +98,8 @@ export const App: React.FC = () => {
   const handleNoteUpdate = (updatedNote: Note) => {
     setSelectedNote(updatedNote);
     setRefreshKey(k => k + 1);
+    // also refresh sidebar so dates/tags reflect immediately
+    setSidebarRefreshTrigger(t => t + 1);
   };
 
   const handleSidebarRefresh = () => {
