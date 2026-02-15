@@ -20,33 +20,27 @@ export const DateFilter: React.FC<DateFilterProps> = ({
   return (
     <div className="date-filter">
       <div className="filter-row">
-        <div className="filter-label">Months:</div>
-        <div className="filter-buttons">
-          {months.map(month => (
-            <button
-              key={month}
-              className={`filter-btn ${selectedMonths.has(month) ? 'active' : ''}`}
-              onClick={() => onMonthToggle(month)}
-            >
-              {month}
-            </button>
-          ))}
-        </div>
+        {months.map(month => (
+          <button
+            key={month}
+            className={`filter-btn ${selectedMonths.has(month) ? 'active' : ''}`}
+            onClick={() => onMonthToggle(month)}
+          >
+            {month}
+          </button>
+        ))}
       </div>
       
       <div className="filter-row">
-        <div className="filter-label">Years:</div>
-        <div className="filter-buttons">
-          {years.map(year => (
-            <button
-              key={year}
-              className={`filter-btn ${selectedYears.has(year) ? 'active' : ''}`}
-              onClick={() => onYearToggle(year)}
-            >
-              {year === 'older' ? 'Older' : year}
-            </button>
-          ))}
-        </div>
+        {years.map(year => (
+          <button
+            key={year}
+            className={`filter-btn ${selectedYears.has(year) ? 'active' : ''}`}
+            onClick={() => onYearToggle(year)}
+          >
+            {year === 'older' ? 'Older' : year}
+          </button>
+        ))}
       </div>
     </div>
   );
