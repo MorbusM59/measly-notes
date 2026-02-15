@@ -1,5 +1,6 @@
 import React from 'react';
 import './DateFilter.css';
+import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL } from '../shared/filterConstants';
 
 interface DateFilterProps {
   selectedMonths: Set<number>;
@@ -14,23 +15,19 @@ export const DateFilter: React.FC<DateFilterProps> = ({
   onMonthToggle,
   onYearToggle,
 }) => {
-  const years: (number | 'older')[] = ['older', 2022, 2023, 2024, 2025, 2026];
-  const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-
   const handleMonthClick = (e: React.MouseEvent, month: number) => {
     onMonthToggle(month, e);
   };
 
   const handleMonthRightClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    // Clear all month selections by calling onMonthToggle with null indicator
-    // We'll use a special event marker
+    // Clear all month selections using special signal
     const syntheticEvent = {
       ...e,
       button: 2,
       type: 'contextmenu'
     } as React.MouseEvent;
-    onMonthToggle(-1, syntheticEvent); // -1 signals clear all
+    onMonthToggle(CLEAR_MONTHS_SIGNAL, syntheticEvent);
   };
 
   const handleYearClick = (e: React.MouseEvent, year: number | 'older') => {
@@ -39,19 +36,19 @@ export const DateFilter: React.FC<DateFilterProps> = ({
 
   const handleYearRightClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    // Clear all year selections
+    // Clear all year selections using special signal
     const syntheticEvent = {
       ...e,
       button: 2,
       type: 'contextmenu'
     } as React.MouseEvent;
-    onYearToggle('clear-all' as any, syntheticEvent); // special signal
+    onYearToggle(CLEAR_YEARS_SIGNAL as any, syntheticEvent);
   };
 
   return (
     <div className="date-filter">
       <div className="filter-row" onContextMenu={handleMonthRightClick}>
-        {months.map(month => (
+        {FILTER_MONTHS.map(month => (
           <button
             key={month}
             className={`filter-btn ${selectedMonths.has(month) ? 'active' : ''}`}
@@ -64,7 +61,7 @@ export const DateFilter: React.FC<DateFilterProps> = ({
       </div>
       
       <div className="filter-row" onContextMenu={handleYearRightClick}>
-        {years.map(year => (
+        {FILTER_YEARS.map(year => (
           <button
             key={year}
             className={`filter-btn ${selectedYears.has(year) ? 'active' : ''}`}

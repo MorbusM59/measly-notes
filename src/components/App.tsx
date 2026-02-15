@@ -3,6 +3,7 @@ import { Note } from '../shared/types';
 import { Sidebar } from './Sidebar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { TagInput } from './TagInput';
+import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL } from '../shared/filterConstants';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -71,12 +72,11 @@ export const App: React.FC = () => {
 
   const handleMonthToggle = (month: number, event: React.MouseEvent) => {
     // Special case: right-click clear signal
-    if (month === -1 && event.type === 'contextmenu') {
+    if (month === CLEAR_MONTHS_SIGNAL && event.type === 'contextmenu') {
       setSelectedMonths(new Set());
       return;
     }
 
-    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     const currentSelection = selectedMonths;
     
     if (event.ctrlKey || event.metaKey) {
@@ -91,11 +91,11 @@ export const App: React.FC = () => {
     } else if (event.shiftKey && currentSelection.size === 1) {
       // Range select from the single selected button to clicked button
       const anchor = Array.from(currentSelection)[0];
-      const anchorIndex = months.indexOf(anchor);
-      const clickIndex = months.indexOf(month);
+      const anchorIndex = FILTER_MONTHS.indexOf(anchor);
+      const clickIndex = FILTER_MONTHS.indexOf(month);
       const start = Math.min(anchorIndex, clickIndex);
       const end = Math.max(anchorIndex, clickIndex);
-      const rangeMonths = months.slice(start, end + 1);
+      const rangeMonths = FILTER_MONTHS.slice(start, end + 1);
       setSelectedMonths(new Set(rangeMonths));
     } else if (event.shiftKey && currentSelection.size > 1) {
       // With multiple selected, shift behaves like ctrl (add single)
@@ -116,12 +116,11 @@ export const App: React.FC = () => {
 
   const handleYearToggle = (year: number | 'older', event: React.MouseEvent) => {
     // Special case: right-click clear signal
-    if ((year as any) === 'clear-all' && event.type === 'contextmenu') {
+    if ((year as any) === CLEAR_YEARS_SIGNAL && event.type === 'contextmenu') {
       setSelectedYears(new Set());
       return;
     }
 
-    const years: (number | 'older')[] = ['older', 2022, 2023, 2024, 2025, 2026];
     const currentSelection = selectedYears;
     
     if (event.ctrlKey || event.metaKey) {
@@ -136,11 +135,11 @@ export const App: React.FC = () => {
     } else if (event.shiftKey && currentSelection.size === 1) {
       // Range select from the single selected button to clicked button
       const anchor = Array.from(currentSelection)[0];
-      const anchorIndex = years.indexOf(anchor);
-      const clickIndex = years.indexOf(year);
+      const anchorIndex = FILTER_YEARS.indexOf(anchor);
+      const clickIndex = FILTER_YEARS.indexOf(year);
       const start = Math.min(anchorIndex, clickIndex);
       const end = Math.max(anchorIndex, clickIndex);
-      const rangeYears = years.slice(start, end + 1);
+      const rangeYears = FILTER_YEARS.slice(start, end + 1);
       setSelectedYears(new Set(rangeYears));
     } else if (event.shiftKey && currentSelection.size > 1) {
       // With multiple selected, shift behaves like ctrl (add single)
