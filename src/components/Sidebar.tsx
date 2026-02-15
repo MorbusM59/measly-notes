@@ -10,8 +10,8 @@ interface SidebarProps {
   refreshTrigger?: number;
   selectedMonths?: Set<number>;
   selectedYears?: Set<number | 'older'>;
-  onMonthToggle?: (month: number) => void;
-  onYearToggle?: (year: number | 'older') => void;
+  onMonthToggle?: (month: number, event: React.MouseEvent) => void;
+  onYearToggle?: (year: number | 'older', event: React.MouseEvent) => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   width?: number;

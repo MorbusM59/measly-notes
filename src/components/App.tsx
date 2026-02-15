@@ -69,24 +69,94 @@ export const App: React.FC = () => {
     setSidebarRefreshTrigger(t => t + 1);
   };
 
-  const handleMonthToggle = (month: number) => {
-    const newMonths = new Set(selectedMonths);
-    if (newMonths.has(month)) {
-      newMonths.delete(month);
-    } else {
-      newMonths.add(month);
+  const handleMonthToggle = (month: number, event: React.MouseEvent) => {
+    // Special case: right-click clear signal
+    if (month === -1 && event.type === 'contextmenu') {
+      setSelectedMonths(new Set());
+      return;
     }
-    setSelectedMonths(newMonths);
+
+    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const currentSelection = selectedMonths;
+    
+    if (event.ctrlKey || event.metaKey) {
+      // Toggle individual button
+      const newMonths = new Set(currentSelection);
+      if (newMonths.has(month)) {
+        newMonths.delete(month);
+      } else {
+        newMonths.add(month);
+      }
+      setSelectedMonths(newMonths);
+    } else if (event.shiftKey && currentSelection.size === 1) {
+      // Range select from the single selected button to clicked button
+      const anchor = Array.from(currentSelection)[0];
+      const anchorIndex = months.indexOf(anchor);
+      const clickIndex = months.indexOf(month);
+      const start = Math.min(anchorIndex, clickIndex);
+      const end = Math.max(anchorIndex, clickIndex);
+      const rangeMonths = months.slice(start, end + 1);
+      setSelectedMonths(new Set(rangeMonths));
+    } else if (event.shiftKey && currentSelection.size > 1) {
+      // With multiple selected, shift behaves like ctrl (add single)
+      const newMonths = new Set(currentSelection);
+      if (!newMonths.has(month)) {
+        newMonths.add(month);
+      }
+      setSelectedMonths(newMonths);
+    } else {
+      // Plain click — exclusive select (or deselect if already sole selection)
+      if (currentSelection.size === 1 && currentSelection.has(month)) {
+        setSelectedMonths(new Set()); // deselect
+      } else {
+        setSelectedMonths(new Set([month])); // exclusive select
+      }
+    }
   };
 
-  const handleYearToggle = (year: number | 'older') => {
-    const newYears = new Set(selectedYears);
-    if (newYears.has(year)) {
-      newYears.delete(year);
-    } else {
-      newYears.add(year);
+  const handleYearToggle = (year: number | 'older', event: React.MouseEvent) => {
+    // Special case: right-click clear signal
+    if ((year as any) === 'clear-all' && event.type === 'contextmenu') {
+      setSelectedYears(new Set());
+      return;
     }
-    setSelectedYears(newYears);
+
+    const years: (number | 'older')[] = ['older', 2022, 2023, 2024, 2025, 2026];
+    const currentSelection = selectedYears;
+    
+    if (event.ctrlKey || event.metaKey) {
+      // Toggle individual button
+      const newYears = new Set(currentSelection);
+      if (newYears.has(year)) {
+        newYears.delete(year);
+      } else {
+        newYears.add(year);
+      }
+      setSelectedYears(newYears);
+    } else if (event.shiftKey && currentSelection.size === 1) {
+      // Range select from the single selected button to clicked button
+      const anchor = Array.from(currentSelection)[0];
+      const anchorIndex = years.indexOf(anchor);
+      const clickIndex = years.indexOf(year);
+      const start = Math.min(anchorIndex, clickIndex);
+      const end = Math.max(anchorIndex, clickIndex);
+      const rangeYears = years.slice(start, end + 1);
+      setSelectedYears(new Set(rangeYears));
+    } else if (event.shiftKey && currentSelection.size > 1) {
+      // With multiple selected, shift behaves like ctrl (add single)
+      const newYears = new Set(currentSelection);
+      if (!newYears.has(year)) {
+        newYears.add(year);
+      }
+      setSelectedYears(newYears);
+    } else {
+      // Plain click — exclusive select (or deselect if already sole selection)
+      if (currentSelection.size === 1 && currentSelection.has(year)) {
+        setSelectedYears(new Set()); // deselect
+      } else {
+        setSelectedYears(new Set([year])); // exclusive select
+      }
+    }
   };
 
   const handleNoteDelete = async (deletedNoteId: number, nextNoteToSelect?: Note | null) => {
