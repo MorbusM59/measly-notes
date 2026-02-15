@@ -3,6 +3,7 @@ import { Note } from '../shared/types';
 import { Sidebar } from './Sidebar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { TagInput } from './TagInput';
+import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL, YearValue, handleMultiSelect } from '../shared/filterConstants';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -69,24 +70,28 @@ export const App: React.FC = () => {
     setSidebarRefreshTrigger(t => t + 1);
   };
 
-  const handleMonthToggle = (month: number) => {
-    const newMonths = new Set(selectedMonths);
-    if (newMonths.has(month)) {
-      newMonths.delete(month);
-    } else {
-      newMonths.add(month);
+  const handleMonthToggle = (month: number, event: React.MouseEvent) => {
+    // Special case: right-click clear signal
+    if (month === CLEAR_MONTHS_SIGNAL && event.type === 'contextmenu') {
+      setSelectedMonths(new Set());
+      return;
     }
-    setSelectedMonths(newMonths);
+
+    handleMultiSelect(month, event, selectedMonths, FILTER_MONTHS, setSelectedMonths);
   };
 
-  const handleYearToggle = (year: number | 'older') => {
-    const newYears = new Set(selectedYears);
-    if (newYears.has(year)) {
-      newYears.delete(year);
-    } else {
-      newYears.add(year);
+  const handleYearToggle = (year: YearValue, event: React.MouseEvent) => {
+    // Special case: right-click clear signal
+    if (year === CLEAR_YEARS_SIGNAL && event.type === 'contextmenu') {
+      setSelectedYears(new Set());
+      return;
     }
-    setSelectedYears(newYears);
+
+    // At this point, TypeScript knows year is number | 'older'
+    // but we need to explicitly narrow the type
+    if (year !== CLEAR_YEARS_SIGNAL) {
+      handleMultiSelect(year, event, selectedYears, FILTER_YEARS, setSelectedYears);
+    }
   };
 
   const handleNoteDelete = async (deletedNoteId: number, nextNoteToSelect?: Note | null) => {

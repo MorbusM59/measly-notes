@@ -203,7 +203,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
             onDragOver={(e) => handleDragOver(e)}
             onDrop={(e) => handleDrop(e, index)}
           >
-            #{noteTag.tag?.name}
+            {noteTag.tag?.name}
             <button
               className="tag-remove"
               onClick={() => handleRemoveTag(noteTag.tagId)}
@@ -219,7 +219,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
             className="tag-pill suggested"
             onClick={() => handleAddSuggestedTag(tag.name)}
           >
-            ${tag.name}
+            {tag.name}
           </div>
         ))}
       </div>
