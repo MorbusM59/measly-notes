@@ -385,17 +385,39 @@
 .markdown-preview.style-clean h5,
 .markdown-preview.style-clean h6 {
   font-weight: 600;
-  color: #0a0a0a;
+  color: #000000;
 }
 
 .markdown-preview.style-clean h1 {
-  border-bottom: 2px solid rgba(0, 0, 0, 0.08);
-  padding-bottom: 0.3em;
+  border-bottom: 2px solid #e8e8e8;
+  padding-bottom: 0.4em;
+  margin-bottom: 0.6em;
+  background: #f8f8f8;
+  padding: 0.3em 0.5em;
 }
 
 .markdown-preview.style-clean h2 {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding-bottom: 0.25em;
+  border-bottom: 1px solid #e8e8e8;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-preview.style-clean h3 {
+  border-bottom: 1px solid #f0f0f0;
+  padding-bottom: 0.2em;
+  margin-bottom: 0.4em;
+}
+
+.markdown-preview.style-clean h4 {
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-clean h5 {
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-clean h6 {
+  margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-clean code {
@@ -450,6 +472,40 @@
   letter-spacing: -0.01em;
 }
 
+.markdown-preview.style-narrow h1 {
+  border-left: 4px solid #d0d0d0;
+  padding-left: 12px;
+  margin-bottom: 0.5em;
+}
+
+.markdown-preview.style-narrow h2 {
+  border-left: 3px solid #e0e0e0;
+  padding-left: 10px;
+  margin-bottom: 0.4em;
+}
+
+.markdown-preview.style-narrow h3 {
+  border-left: 2px solid #e8e8e8;
+  padding-left: 8px;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-narrow h4 {
+  border-left: 1px solid #f0f0f0;
+  padding-left: 6px;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-narrow h5 {
+  padding-left: 4px;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-narrow h6 {
+  padding-left: 4px;
+  margin-bottom: 0.3em;
+}
+
 .markdown-preview.style-narrow code {
   background: rgba(0, 0, 0, 0.06);
   padding: 2px 5px;
@@ -498,6 +554,40 @@
   color: #000;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.markdown-preview.style-print h1 {
+  border-top: 2px solid #e8e4e0;
+  border-bottom: 2px solid #e8e4e0;
+  padding: 0.4em 0.6em;
+  margin-bottom: 0.6em;
+  background: #faf9f7;
+}
+
+.markdown-preview.style-print h2 {
+  border-bottom: 1px solid #e8e4e0;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-preview.style-print h3 {
+  padding-left: 1em;
+  margin-bottom: 0.4em;
+}
+
+.markdown-preview.style-print h4 {
+  padding-left: 2em;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-print h5 {
+  padding-left: 3em;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-print h6 {
+  padding-left: 4em;
+  margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-print code {
@@ -551,13 +641,41 @@
 }
 
 .markdown-preview.style-modern h1 {
-  border-bottom: 3px solid rgba(100, 100, 255, 0.2);
-  padding-bottom: 0.3em;
+  background: linear-gradient(to right, #f0f2f8, #fafbfd);
+  padding: 0.4em 0.6em;
+  margin-bottom: 0.6em;
+  border-radius: 6px;
 }
 
 .markdown-preview.style-modern h2 {
-  border-bottom: 2px solid rgba(100, 100, 255, 0.15);
-  padding-bottom: 0.25em;
+  background: linear-gradient(to right, #f4f5fa, #fafbfd);
+  padding: 0.35em 0.5em;
+  margin-bottom: 0.5em;
+  border-radius: 5px;
+}
+
+.markdown-preview.style-modern h3 {
+  background: linear-gradient(to right, #f8f9fc, #fafbfd);
+  padding: 0.3em 0.4em;
+  margin-bottom: 0.4em;
+  border-radius: 4px;
+}
+
+.markdown-preview.style-modern h4 {
+  background: #fafbfd;
+  padding: 0.25em 0.3em;
+  margin-bottom: 0.3em;
+  border-radius: 3px;
+}
+
+.markdown-preview.style-modern h5 {
+  padding: 0.2em 0.2em;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-modern h6 {
+  padding: 0.2em 0.2em;
+  margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-modern code {
@@ -610,19 +728,47 @@
 .markdown-preview.style-cute h6 {
   font-weight: 700;
   color: #000000;
-  text-shadow: none;
 }
 
 .markdown-preview.style-cute h1 {
-  background: linear-gradient(to right, rgba(255, 180, 200, 0.15), transparent);
-  padding: 0.3em 0.5em;
-  border-radius: 8px;
+  background: #f5f0f8;
+  border-left: 4px solid #e8ddf0;
+  padding: 0.4em 0.7em;
+  margin-bottom: 0.6em;
+  border-radius: 20px;
 }
 
 .markdown-preview.style-cute h2 {
-  background: linear-gradient(to right, rgba(255, 180, 200, 0.1), transparent);
+  background: #f7f3f9;
+  border-left: 3px solid #ebe3f2;
+  padding: 0.35em 0.6em;
+  margin-bottom: 0.5em;
+  border-radius: 18px;
+}
+
+.markdown-preview.style-cute h3 {
+  background: #f9f6fa;
+  border-left: 2px solid #eee8f4;
+  padding: 0.3em 0.5em;
+  margin-bottom: 0.4em;
+  border-radius: 15px;
+}
+
+.markdown-preview.style-cute h4 {
+  background: #faf8fb;
   padding: 0.25em 0.4em;
-  border-radius: 6px;
+  margin-bottom: 0.3em;
+  border-radius: 12px;
+}
+
+.markdown-preview.style-cute h5 {
+  padding: 0.2em 0.3em;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-cute h6 {
+  padding: 0.2em 0.3em;
+  margin-bottom: 0.3em;
 }
 
 .markdown-preview.style-cute code {
@@ -678,6 +824,36 @@
   color: #000000;
 }
 
+.markdown-preview.style-hand h1 {
+  border-bottom: 2px dashed #f0ece8;
+  padding-bottom: 0.4em;
+  margin-bottom: 0.6em;
+}
+
+.markdown-preview.style-hand h2 {
+  border-bottom: 2px dotted #f0ece8;
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-preview.style-hand h3 {
+  border-bottom: 1px dashed #f4f0ec;
+  padding-bottom: 0.2em;
+  margin-bottom: 0.4em;
+}
+
+.markdown-preview.style-hand h4 {
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-hand h5 {
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview.style-hand h6 {
+  margin-bottom: 0.3em;
+}
+
 .markdown-preview.style-hand code {
   background: rgba(0, 0, 0, 0.05);
   padding: 3px 8px;
@@ -730,6 +906,48 @@
   font-weight: 400;
   color: #000000;
   font-style: italic;
+  letter-spacing: 0.02em;
+}
+
+.markdown-preview.style-script h1 {
+  padding-bottom: 0.5em;
+  margin-bottom: 0.7em;
+  border-image: linear-gradient(to right, transparent, #ddd8da, transparent) 1;
+  border-bottom-width: 2px;
+  border-bottom-style: solid;
+  background: #f2eeef;
+  padding: 0.4em 0.6em;
+}
+
+.markdown-preview.style-script h2 {
+  padding-bottom: 0.4em;
+  margin-bottom: 0.6em;
+  border-image: linear-gradient(to right, transparent 10%, #e0dce0, transparent 90%) 1;
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+}
+
+.markdown-preview.style-script h3 {
+  padding-bottom: 0.3em;
+  margin-bottom: 0.5em;
+  border-image: linear-gradient(to right, transparent 20%, #e8e6e8, transparent 80%) 1;
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+}
+
+.markdown-preview.style-script h4 {
+  margin-bottom: 0.4em;
+  letter-spacing: 0.03em;
+}
+
+.markdown-preview.style-script h5 {
+  margin-bottom: 0.3em;
+  letter-spacing: 0.03em;
+}
+
+.markdown-preview.style-script h6 {
+  margin-bottom: 0.3em;
+  letter-spacing: 0.03em;
 }
 
 .markdown-preview.style-script code {
