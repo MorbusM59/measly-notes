@@ -83,6 +83,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setUncategorizedNotes(data.uncategorizedNotes);
   };
 
+  // Auto-expand relevant categories when the hierarchy reloads or the selected note changes.
+  // This makes tag changes reflect immediately in the menu: the note's primary and
+  // secondary will be unfolded and all other primary/secondary entries will be folded in.
+  useEffect(() => {
+    // Only apply this behavior in category view and when not searching.
+    if (viewMode !== 'category' || searchMode !== 'none') return;
+    if (!selectedNote) return;
+    if (!categoryHierarchy || Object.keys(categoryHierarchy).length === 0) return;
+
+    const allPrimary = Object.keys(categoryHierarchy);
+    // Build a flat list of all secondary keys across all primaries: "Primary:Secondary"
+    const allSecondaryKeys = allPrimary.flatMap(p => Object.keys(categoryHierarchy[p]?.secondary ?? {}).map(s => `${p}:${s}`));
+
+    let matched = false;
+
+    for (const primary of allPrimary) {
+      const pData = categoryHierarchy[primary];
+      if (!pData) continue;
+
+      // Primary-only notes
+      if (pData.notes.some(n => n.id === selectedNote.id)) {
+        // Open this primary (collapse all others)
+        setCollapsedPrimary(new Set(allPrimary.filter(p => p !== primary)));
+        // Fold in (collapse) all secondaries (for a clean overview)
+        setCollapsedSecondary(new Set(allSecondaryKeys));
+        matched = true;
+        break;
+      }
+
+      // Check secondary and tertiary groups
+      for (const [secondary, secData] of Object.entries(pData.secondary || {})) {
+        // Notes directly under secondary
+        if (secData.notes.some(n => n.id === selectedNote.id)) {
+          setCollapsedPrimary(new Set(allPrimary.filter(p => p !== primary)));
+          // Collapse all secondaries except the target one (so the target secondary is unfolded)
+          setCollapsedSecondary(new Set(allSecondaryKeys.filter(k => k !== `${primary}:${secondary}`)));
+          matched = true;
+          break;
+        }
+
+        // Notes under tertiary groups
+        for (const [tertiary, tNotes] of Object.entries(secData.tertiary || {})) {
+          if (tNotes.some(n => n.id === selectedNote.id)) {
+            setCollapsedPrimary(new Set(allPrimary.filter(p => p !== primary)));
+            // Unfold the parent secondary and collapse all other secondaries
+            setCollapsedSecondary(new Set(allSecondaryKeys.filter(k => k !== `${primary}:${secondary}`)));
+            matched = true;
+            break;
+          }
+        }
+        if (matched) break;
+      }
+      if (matched) break;
+    }
+
+    // If nothing matched (e.g. uncategorized note), fall back to collapsing all primaries
+    // which results in the uncategorized header being visible but everything else folded.
+    if (!matched) {
+      setCollapsedPrimary(new Set(allPrimary)); // collapse all primaries
+      setCollapsedSecondary(new Set(allSecondaryKeys)); // collapse all secondaries
+    }
+  }, [categoryHierarchy, selectedNote, refreshTrigger, viewMode, searchMode]);
+
   // Filter notes by date
   const filterNotesByDate = (note: Note): boolean => {
     const hasMonthFilter = selectedMonths.size > 0;
@@ -189,45 +252,87 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const togglePrimaryCategory = (category: string) => {
-    const newCollapsed = new Set(collapsedPrimary);
-    
-    // Close all other primary categories
-    if (!newCollapsed.has(category)) {
-      // Open this one, close all others
-      newCollapsed.clear();
-      setCollapsedSecondary(new Set());  // Also clear secondary collapsed state
+    // List of all primary tags available from current hierarchy
+    const allPrimary = Object.keys(categoryHierarchy);
+
+    const isCurrentlyCollapsed = collapsedPrimary.has(category);
+
+    if (isCurrentlyCollapsed) {
+      // Primary is currently collapsed -> open it and close all others.
+      // Represent collapsedPrimary as all primaries except the one to open.
+      const newCollapsedPrimary = new Set(allPrimary.filter(p => p !== category));
+      setCollapsedPrimary(newCollapsedPrimary);
+
+      // When opening a primary, collapse (fold in) all of its secondary categories
+      // so the user sees a clean overview.
+      const secondaries = Object.keys(categoryHierarchy[category]?.secondary ?? {});
+      const secondaryKeys = secondaries.map(s => `${category}:${s}`);
+
+      // Add these secondary keys to the collapsed set
+      setCollapsedSecondary(prev => {
+        const next = new Set(prev);
+        secondaryKeys.forEach(k => next.add(k));
+        return next;
+      });
+
     } else {
-      // Close this one
-      newCollapsed.add(category);
+      // Primary is currently open -> we should toggle all secondaries under this primary.
+      // First, ensure this primary remains the only open primary (collapse all others).
+      const newCollapsedPrimary = new Set(allPrimary.filter(p => p !== category));
+      setCollapsedPrimary(newCollapsedPrimary);
+
+      // Now toggle secondary groups under this primary:
+      const secondaries = Object.keys(categoryHierarchy[category]?.secondary ?? {});
+      const secondaryKeys = secondaries.map(s => `${category}:${s}`);
+
+      if (secondaryKeys.length === 0) {
+        // Nothing to toggle
+        return;
+      }
+
+      // Determine if ALL secondaries are currently expanded (i.e., none of their keys are in collapsedSecondary)
+      const allExpanded = secondaryKeys.every(k => !collapsedSecondary.has(k));
+
+      const newCollapsedSecondary = new Set(collapsedSecondary);
+
+      if (allExpanded) {
+        // All expanded -> collapse them all (add all keys to collapsed set)
+        secondaryKeys.forEach(k => newCollapsedSecondary.add(k));
+      } else {
+        // Not all expanded -> expand them all (remove their keys from collapsed set)
+        secondaryKeys.forEach(k => newCollapsedSecondary.delete(k));
+      }
+
+      setCollapsedSecondary(newCollapsedSecondary);
     }
-    
-    setCollapsedPrimary(newCollapsed);
   };
 
   const toggleSecondaryCategory = (primaryTag: string, secondaryTag: string) => {
     const key = `${primaryTag}:${secondaryTag}`;
-    const newCollapsed = new Set(collapsedSecondary);
-    
-    // Close all other secondary categories within this primary
-    const primaryPrefix = `${primaryTag}:`;
-    const toRemove: string[] = [];
-    
-    newCollapsed.forEach(k => {
-      if (k.startsWith(primaryPrefix) && k !== key) {
-        toRemove.push(k);
-      }
-    });
-    
-    toRemove.forEach(k => newCollapsed.delete(k));
-    
-    // Toggle this one
-    if (newCollapsed.has(key)) {
-      newCollapsed.delete(key);
+
+    // Ensure this primary becomes the only open primary (collapse all others)
+    const allPrimary = Object.keys(categoryHierarchy);
+    const newCollapsedPrimary = new Set(allPrimary.filter(p => p !== primaryTag));
+    setCollapsedPrimary(newCollapsedPrimary);
+
+    // Build the set of secondary keys that belong to this primary
+    const secondaries = Object.keys(categoryHierarchy[primaryTag]?.secondary ?? {});
+    const secondaryKeys = secondaries.map(s => `${primaryTag}:${s}`);
+
+    const newCollapsedSecondary = new Set(collapsedSecondary);
+
+    if (newCollapsedSecondary.has(key)) {
+      // Currently collapsed -> open this one, collapse other secondaries within same primary
+      secondaryKeys.forEach(k => {
+        if (k !== key) newCollapsedSecondary.add(k);
+      });
+      newCollapsedSecondary.delete(key);
     } else {
-      newCollapsed.add(key);
+      // Currently open -> collapse this one
+      newCollapsedSecondary.add(key);
     }
-    
-    setCollapsedSecondary(newCollapsed);
+
+    setCollapsedSecondary(newCollapsedSecondary);
   };
 
   const handleDeleteNote = async (e: React.MouseEvent, noteId: number) => {
