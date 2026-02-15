@@ -11,6 +11,20 @@ export const App: React.FC = () => {
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [selectedYears, setSelectedYears] = useState<Set<number | 'older'>>(new Set());
+  const [viewMode, setViewMode] = useState<'date' | 'category'>('date');
+  const [sidebarWidth, setSidebarWidth] = useState<number>(400);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Load sidebar width from localStorage
+  useEffect(() => {
+    const savedWidth = localStorage.getItem('sidebar-width');
+    if (savedWidth) {
+      const width = parseInt(savedWidth, 10);
+      if (width >= 250 && width <= 600) {
+        setSidebarWidth(width);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     // Global keyboard shortcut: Ctrl+Enter to create new note
@@ -26,6 +40,11 @@ export const App: React.FC = () => {
   }, []);
 
   const handleCreateNote = async () => {
+    // Force save the current note before creating a new one
+    if ((window as any).forceSaveCurrentNote) {
+      await (window as any).forceSaveCurrentNote();
+    }
+    
     // Create note with default title and pre-filled content
     const note = await window.electronAPI.createNote('Untitled');
     
@@ -70,6 +89,36 @@ export const App: React.FC = () => {
     setSelectedYears(newYears);
   };
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = e.clientX;
+      if (newWidth >= 250 && newWidth <= 600) {
+        setSidebarWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      // Save to localStorage
+      localStorage.setItem('sidebar-width', sidebarWidth.toString());
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, sidebarWidth]);
+
   return (
     <div className="app">
       <Sidebar
@@ -81,6 +130,13 @@ export const App: React.FC = () => {
         selectedYears={selectedYears}
         onMonthToggle={handleMonthToggle}
         onYearToggle={handleYearToggle}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        width={sidebarWidth}
+      />
+      <div 
+        className="sidebar-divider"
+        onMouseDown={handleMouseDown}
       />
       <div className="main-content">
         <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />

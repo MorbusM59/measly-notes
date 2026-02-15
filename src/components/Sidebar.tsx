@@ -12,6 +12,9 @@ interface SidebarProps {
   selectedYears?: Set<number | 'older'>;
   onMonthToggle?: (month: number) => void;
   onYearToggle?: (year: number | 'older') => void;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
+  width?: number;
 }
 
 type ViewMode = 'date' | 'category';
@@ -24,19 +27,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedMonths = new Set(),
   selectedYears = new Set(),
   onMonthToggle,
-  onYearToggle
+  onYearToggle,
+  viewMode: externalViewMode = 'date',
+  onViewModeChange,
+  width = 320
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
-  const [viewMode, setViewMode] = useState<ViewMode>('date');
+  const [internalViewMode, setInternalViewMode] = useState<ViewMode>('date');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [dateNotes, setDateNotes] = useState<Note[]>([]);
   const [categoryHierarchy, setCategoryHierarchy] = useState<CategoryHierarchy>({});
+  const [uncategorizedNotes, setUncategorizedNotes] = useState<Note[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalNotes, setTotalNotes] = useState(0);
   const [collapsedPrimary, setCollapsedPrimary] = useState<Set<string>>(new Set());
   const [collapsedSecondary, setCollapsedSecondary] = useState<Set<string>>(new Set());
   const notesPerPage = 20;
+  
+  // Use external viewMode if provided, otherwise use internal
+  const viewMode = onViewModeChange ? externalViewMode : internalViewMode;
+  
+  const handleViewModeChange = (mode: ViewMode) => {
+    if (onViewModeChange) {
+      onViewModeChange(mode);
+    } else {
+      setInternalViewMode(mode);
+    }
+  };
 
   // Load notes based on view mode
   useEffect(() => {
@@ -56,8 +74,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const loadCategoryHierarchy = async () => {
-    const hierarchy = await window.electronAPI.getCategoryHierarchy();
-    setCategoryHierarchy(hierarchy);
+    const data = await window.electronAPI.getCategoryHierarchy();
+    setCategoryHierarchy(data.hierarchy);
+    setUncategorizedNotes(data.uncategorizedNotes);
   };
 
   // Filter notes by date
@@ -277,6 +296,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const renderCategoryView = () => {
     const filteredHierarchy = getFilteredHierarchy(categoryHierarchy);
+    const filteredUncategorized = getFilteredNotes(uncategorizedNotes);
     
     return (
       <div className="category-view">
@@ -375,12 +395,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         );
       })}
+      
+      {/* Uncategorized notes section */}
+      {filteredUncategorized.length > 0 && (
+        <div className="category-group">
+          <div className="category-header primary uncategorized">
+            <span className="category-name">Uncategorized</span>
+            <span className="category-count">({filteredUncategorized.length})</span>
+          </div>
+          <div className="category-content">
+            {filteredUncategorized.map(note => (
+              <div
+                key={note.id}
+                className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
+                onClick={() => onSelectNote(note)}
+              >
+                <div className="note-title">{note.title}</div>
+                <div className="note-date">{new Date(note.updatedAt).toLocaleDateString()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
   return (
-    <div className="sidebar">
+    <div className="sidebar" style={{ width: `${width}px` }}>
       <div className="search-box">
         <input
           type="text"
@@ -395,13 +437,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="view-toggle">
           <button
             className={`toggle-btn ${viewMode === 'date' ? 'active' : ''}`}
-            onClick={() => setViewMode('date')}
+            onClick={() => handleViewModeChange('date')}
           >
             Date
           </button>
           <button
             className={`toggle-btn ${viewMode === 'category' ? 'active' : ''}`}
-            onClick={() => setViewMode('category')}
+            onClick={() => handleViewModeChange('category')}
           >
             Category
           </button>

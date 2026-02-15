@@ -4,10 +4,28 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
 }
 
+.sidebar-divider {
+  width: 5px;
+  background: #ddd;
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.2s;
+  position: relative;
+}
+
+.sidebar-divider:hover {
+  background: #007bff;
+}
+
+.sidebar-divider:active {
+  background: #0056b3;
+}
+
 .main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 

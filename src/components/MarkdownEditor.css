@@ -74,6 +74,12 @@
   background: #d8d8d8;
 }
 
+.toolbar-btn-icon.active {
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
 .toolbar-divider {
   color: #ccc;
   margin: 0 4px;
@@ -83,6 +89,15 @@
 
 .style-selector {
   margin-left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.selector-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
 }
 
 .style-selector select {
