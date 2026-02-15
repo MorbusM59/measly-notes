@@ -19,6 +19,11 @@ if (require('electron-squirrel-startup')) {
   app.quit();
 }
 
+// Disable GPU hardware acceleration to prevent GPU process crashes on Windows.
+// Some GPU drivers cause Chromium's GPU process to segfault (exit_code=-1073741819 / 0xC0000005),
+// resulting in a white screen. Hardware acceleration is not needed for this app.
+app.disableHardwareAcceleration();
+
 const createWindow = (): void => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
