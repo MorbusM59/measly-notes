@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
 import { DateFilter } from './DateFilter';
+import { YearValue } from '../shared/filterConstants';
 import './Sidebar.css';
 
 interface SidebarProps {
@@ -11,7 +12,7 @@ interface SidebarProps {
   selectedMonths?: Set<number>;
   selectedYears?: Set<number | 'older'>;
   onMonthToggle?: (month: number, event: React.MouseEvent) => void;
-  onYearToggle?: (year: number | 'older', event: React.MouseEvent) => void;
+  onYearToggle?: (year: YearValue, event: React.MouseEvent) => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   width?: number;

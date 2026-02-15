@@ -1,12 +1,12 @@
 import React from 'react';
 import './DateFilter.css';
-import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL } from '../shared/filterConstants';
+import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL, YearValue } from '../shared/filterConstants';
 
 interface DateFilterProps {
   selectedMonths: Set<number>;
   selectedYears: Set<number | 'older'>;
   onMonthToggle: (month: number, event: React.MouseEvent) => void;
-  onYearToggle: (year: number | 'older', event: React.MouseEvent) => void;
+  onYearToggle: (year: YearValue, event: React.MouseEvent) => void;
 }
 
 export const DateFilter: React.FC<DateFilterProps> = ({

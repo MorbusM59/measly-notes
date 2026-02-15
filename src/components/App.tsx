@@ -3,7 +3,7 @@ import { Note } from '../shared/types';
 import { Sidebar } from './Sidebar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { TagInput } from './TagInput';
-import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL } from '../shared/filterConstants';
+import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL, YearValue, handleMultiSelect } from '../shared/filterConstants';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -77,85 +77,17 @@ export const App: React.FC = () => {
       return;
     }
 
-    const currentSelection = selectedMonths;
-    
-    if (event.ctrlKey || event.metaKey) {
-      // Toggle individual button
-      const newMonths = new Set(currentSelection);
-      if (newMonths.has(month)) {
-        newMonths.delete(month);
-      } else {
-        newMonths.add(month);
-      }
-      setSelectedMonths(newMonths);
-    } else if (event.shiftKey && currentSelection.size === 1) {
-      // Range select from the single selected button to clicked button
-      const anchor = Array.from(currentSelection)[0];
-      const anchorIndex = FILTER_MONTHS.indexOf(anchor);
-      const clickIndex = FILTER_MONTHS.indexOf(month);
-      const start = Math.min(anchorIndex, clickIndex);
-      const end = Math.max(anchorIndex, clickIndex);
-      const rangeMonths = FILTER_MONTHS.slice(start, end + 1);
-      setSelectedMonths(new Set(rangeMonths));
-    } else if (event.shiftKey && currentSelection.size > 1) {
-      // With multiple selected, shift behaves like ctrl (add single)
-      const newMonths = new Set(currentSelection);
-      if (!newMonths.has(month)) {
-        newMonths.add(month);
-      }
-      setSelectedMonths(newMonths);
-    } else {
-      // Plain click — exclusive select (or deselect if already sole selection)
-      if (currentSelection.size === 1 && currentSelection.has(month)) {
-        setSelectedMonths(new Set()); // deselect
-      } else {
-        setSelectedMonths(new Set([month])); // exclusive select
-      }
-    }
+    handleMultiSelect(month, event, selectedMonths, FILTER_MONTHS, setSelectedMonths);
   };
 
-  const handleYearToggle = (year: number | 'older', event: React.MouseEvent) => {
+  const handleYearToggle = (year: YearValue, event: React.MouseEvent) => {
     // Special case: right-click clear signal
-    if ((year as any) === CLEAR_YEARS_SIGNAL && event.type === 'contextmenu') {
+    if (year === CLEAR_YEARS_SIGNAL && event.type === 'contextmenu') {
       setSelectedYears(new Set());
       return;
     }
 
-    const currentSelection = selectedYears;
-    
-    if (event.ctrlKey || event.metaKey) {
-      // Toggle individual button
-      const newYears = new Set(currentSelection);
-      if (newYears.has(year)) {
-        newYears.delete(year);
-      } else {
-        newYears.add(year);
-      }
-      setSelectedYears(newYears);
-    } else if (event.shiftKey && currentSelection.size === 1) {
-      // Range select from the single selected button to clicked button
-      const anchor = Array.from(currentSelection)[0];
-      const anchorIndex = FILTER_YEARS.indexOf(anchor);
-      const clickIndex = FILTER_YEARS.indexOf(year);
-      const start = Math.min(anchorIndex, clickIndex);
-      const end = Math.max(anchorIndex, clickIndex);
-      const rangeYears = FILTER_YEARS.slice(start, end + 1);
-      setSelectedYears(new Set(rangeYears));
-    } else if (event.shiftKey && currentSelection.size > 1) {
-      // With multiple selected, shift behaves like ctrl (add single)
-      const newYears = new Set(currentSelection);
-      if (!newYears.has(year)) {
-        newYears.add(year);
-      }
-      setSelectedYears(newYears);
-    } else {
-      // Plain click — exclusive select (or deselect if already sole selection)
-      if (currentSelection.size === 1 && currentSelection.has(year)) {
-        setSelectedYears(new Set()); // deselect
-      } else {
-        setSelectedYears(new Set([year])); // exclusive select
-      }
-    }
+    handleMultiSelect(year as number | 'older', event, selectedYears, FILTER_YEARS, setSelectedYears);
   };
 
   const handleNoteDelete = async (deletedNoteId: number, nextNoteToSelect?: Note | null) => {
