@@ -13,6 +13,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const [suggestedTags, setSuggestedTags] = useState<Tag[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [deleteArmed, setDeleteArmed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Load tags when note changes
@@ -122,6 +123,28 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     }
   };
 
+  const handleDeleteNote = async () => {
+    if (!note) return;
+
+    if (!deleteArmed) {
+      // First click - arm the button
+      setDeleteArmed(true);
+    } else {
+      // Second click - actually delete
+      await window.electronAPI.deleteNote(note.id);
+      setDeleteArmed(false);
+      
+      // Notify parent to refresh and handle selection
+      if (onTagsChanged) {
+        onTagsChanged();
+      }
+    }
+  };
+
+  const handleDeleteMouseLeave = () => {
+    setDeleteArmed(false);
+  };
+
   // Get autocomplete suggestions
   const getAutocompleteSuggestion = (): string | null => {
     if (!inputValue.trim()) return null;
@@ -143,21 +166,31 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
 
   return (
     <div className="tag-input-container">
-      <div className="tag-input-wrapper">
-        <input
-          ref={inputRef}
-          type="text"
-          className="tag-input"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Add tag..."
-        />
-        {autocompleteSuggestion && (
-          <div className="autocomplete-hint">
-            {autocompleteSuggestion}
-          </div>
-        )}
+      <div className="tag-input-bar">
+        <div className="tag-input-wrapper">
+          <input
+            ref={inputRef}
+            type="text"
+            className="tag-input"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Add tag..."
+          />
+          {autocompleteSuggestion && (
+            <div className="autocomplete-hint">
+              {autocompleteSuggestion}
+            </div>
+          )}
+        </div>
+        <button
+          className={`delete-note-btn ${deleteArmed ? 'delete-armed' : ''}`}
+          onClick={handleDeleteNote}
+          onMouseLeave={handleDeleteMouseLeave}
+          title={deleteArmed ? 'Click again to confirm deletion' : 'Delete note'}
+        >
+          ×
+        </button>
       </div>
       
       <div className="tags-display">

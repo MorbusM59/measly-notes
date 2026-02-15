@@ -1,4 +1,147 @@
-/* No external fonts - using system fonts only */
+/* Local font declarations */
+
+/* Roboto */
+@font-face {
+  font-family: 'Roboto';
+  src: url('../fonts/Roboto-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Roboto';
+  src: url('../fonts/Roboto-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Roboto';
+  src: url('../fonts/Roboto-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Roboto Condensed */
+@font-face {
+  font-family: 'Roboto Condensed';
+  src: url('../fonts/RobotoCondensed-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Roboto Condensed';
+  src: url('../fonts/RobotoCondensed-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Roboto Condensed';
+  src: url('../fonts/RobotoCondensed-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Alumni Sans Pinstripe */
+@font-face {
+  font-family: 'Alumni Sans Pinstripe';
+  src: url('../fonts/AlumniSansPinstripe-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Quicksand */
+@font-face {
+  font-family: 'Quicksand';
+  src: url('../fonts/Quicksand-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Quicksand';
+  src: url('../fonts/Quicksand-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Quicksand';
+  src: url('../fonts/Quicksand-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Sour Gummy */
+@font-face {
+  font-family: 'Sour Gummy';
+  src: url('../fonts/SourGummy-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sour Gummy';
+  src: url('../fonts/SourGummy-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Sour Gummy';
+  src: url('../fonts/SourGummy-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Delicious Handrawn */
+@font-face {
+  font-family: 'Delicious Handrawn';
+  src: url('../fonts/DeliciousHandrawn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Dancing Script */
+@font-face {
+  font-family: 'Dancing Script';
+  src: url('../fonts/DancingScript-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Dancing Script';
+  src: url('../fonts/DancingScript-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Dancing Script';
+  src: url('../fonts/DancingScript-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
 
 /* Base styles for all themes */
 .markdown-preview {
@@ -52,16 +195,14 @@
 }
 
 /* Spacing Classes */
-/* tight: 1em margins, 0.5em paragraph spacing, 120% line-height (minimum for readability) */
+/* tight: 0.5em margins, 0.25em paragraph spacing, 1.0 line-height */
 .markdown-preview.spacing-tight {
-  padding: 1em;
-  line-height: 1.2;
-  max-width: 800px;
-  margin: 0 auto;
+  padding: 0.5em;
+  line-height: 1.0;
 }
 
 .markdown-preview.spacing-tight p {
-  margin: 0.5em 0;
+  margin: 0.25em 0;
 }
 
 .markdown-preview.spacing-tight h1,
@@ -70,43 +211,41 @@
 .markdown-preview.spacing-tight h4,
 .markdown-preview.spacing-tight h5,
 .markdown-preview.spacing-tight h6 {
-  margin: 0.5em 0 0.25em 0;
+  margin: 0.25em 0 0.125em 0;
 }
 
 .markdown-preview.spacing-tight ul,
 .markdown-preview.spacing-tight ol {
-  margin: 0.5em 0;
+  margin: 0.25em 0;
   padding-left: 1.5em;
 }
 
 .markdown-preview.spacing-tight li {
-  margin: 0.25em 0;
+  margin: 0.125em 0;
 }
 
 .markdown-preview.spacing-tight blockquote {
-  margin: 0.5em 0;
-  padding: 0.5em 1em;
+  margin: 0.25em 0;
+  padding: 0.25em 0.5em;
 }
 
 .markdown-preview.spacing-tight pre {
-  margin: 0.5em 0;
-  padding: 0.5em;
+  margin: 0.25em 0;
+  padding: 0.25em;
 }
 
 .markdown-preview.spacing-tight hr {
-  margin: 0.5em 0;
+  margin: 0.25em 0;
 }
 
-/* compact: 2em margins, 1em paragraph spacing, 125% line-height */
+/* compact: 1em margins, 0.5em paragraph spacing, 1.15 line-height */
 .markdown-preview.spacing-compact {
-  padding: 2em;
-  line-height: 1.25;
-  max-width: 800px;
-  margin: 0 auto;
+  padding: 1em;
+  line-height: 1.15;
 }
 
 .markdown-preview.spacing-compact p {
-  margin: 1em 0;
+  margin: 0.5em 0;
 }
 
 .markdown-preview.spacing-compact h1,
@@ -115,43 +254,41 @@
 .markdown-preview.spacing-compact h4,
 .markdown-preview.spacing-compact h5,
 .markdown-preview.spacing-compact h6 {
-  margin: 1em 0 0.5em 0;
+  margin: 0.5em 0 0.25em 0;
 }
 
 .markdown-preview.spacing-compact ul,
 .markdown-preview.spacing-compact ol {
-  margin: 1em 0;
+  margin: 0.5em 0;
   padding-left: 2em;
 }
 
 .markdown-preview.spacing-compact li {
-  margin: 0.35em 0;
+  margin: 0.25em 0;
 }
 
 .markdown-preview.spacing-compact blockquote {
-  margin: 1em 0;
-  padding: 1em 1.5em;
+  margin: 0.5em 0;
+  padding: 0.5em 1em;
 }
 
 .markdown-preview.spacing-compact pre {
-  margin: 1em 0;
-  padding: 1em;
+  margin: 0.5em 0;
+  padding: 0.5em;
 }
 
 .markdown-preview.spacing-compact hr {
-  margin: 1em 0;
+  margin: 0.5em 0;
 }
 
-/* cozy: 4em margins, 2em paragraph spacing, 150% line-height */
+/* cozy: 1.5em margins, 0.75em paragraph spacing, 1.3 line-height */
 .markdown-preview.spacing-cozy {
-  padding: 4em;
-  line-height: 1.5;
-  max-width: 800px;
-  margin: 0 auto;
+  padding: 1.5em;
+  line-height: 1.3;
 }
 
 .markdown-preview.spacing-cozy p {
-  margin: 2em 0;
+  margin: 0.75em 0;
 }
 
 .markdown-preview.spacing-cozy h1,
@@ -160,43 +297,41 @@
 .markdown-preview.spacing-cozy h4,
 .markdown-preview.spacing-cozy h5,
 .markdown-preview.spacing-cozy h6 {
-  margin: 2em 0 1em 0;
+  margin: 0.75em 0 0.375em 0;
 }
 
 .markdown-preview.spacing-cozy ul,
 .markdown-preview.spacing-cozy ol {
-  margin: 2em 0;
+  margin: 0.75em 0;
   padding-left: 2.5em;
 }
 
 .markdown-preview.spacing-cozy li {
-  margin: 0.5em 0;
+  margin: 0.375em 0;
 }
 
 .markdown-preview.spacing-cozy blockquote {
-  margin: 2em 0;
-  padding: 1.5em 2em;
+  margin: 0.75em 0;
+  padding: 0.75em 1.5em;
 }
 
 .markdown-preview.spacing-cozy pre {
-  margin: 2em 0;
-  padding: 1.5em;
+  margin: 0.75em 0;
+  padding: 0.75em;
 }
 
 .markdown-preview.spacing-cozy hr {
-  margin: 2em 0;
+  margin: 0.75em 0;
 }
 
-/* wide: 8em margins, 4em paragraph spacing, 200% line-height */
+/* wide: 2em margins, 1em paragraph spacing, 1.5 line-height */
 .markdown-preview.spacing-wide {
-  padding: 8em;
-  line-height: 2;
-  max-width: 800px;
-  margin: 0 auto;
+  padding: 2em;
+  line-height: 1.5;
 }
 
 .markdown-preview.spacing-wide p {
-  margin: 4em 0;
+  margin: 1em 0;
 }
 
 .markdown-preview.spacing-wide h1,
@@ -205,31 +340,31 @@
 .markdown-preview.spacing-wide h4,
 .markdown-preview.spacing-wide h5,
 .markdown-preview.spacing-wide h6 {
-  margin: 4em 0 2em 0;
+  margin: 1em 0 0.5em 0;
 }
 
 .markdown-preview.spacing-wide ul,
 .markdown-preview.spacing-wide ol {
-  margin: 4em 0;
+  margin: 1em 0;
   padding-left: 3em;
 }
 
 .markdown-preview.spacing-wide li {
-  margin: 1em 0;
+  margin: 0.5em 0;
 }
 
 .markdown-preview.spacing-wide blockquote {
-  margin: 4em 0;
-  padding: 2em 3em;
+  margin: 1em 0;
+  padding: 1em 2em;
 }
 
 .markdown-preview.spacing-wide pre {
-  margin: 4em 0;
-  padding: 2em;
+  margin: 1em 0;
+  padding: 1em;
 }
 
 .markdown-preview.spacing-wide hr {
-  margin: 4em 0;
+  margin: 1em 0;
 }
 
 /* Style: Clean (Roboto) */
@@ -575,9 +710,9 @@
   border-radius: 1px;
 }
 
-/* Style: Script (Story Script) */
+/* Style: Script (Dancing Script) */
 .markdown-preview.style-script {
-  font-family: 'Story Script', 'Brush Script MT', 'Lucida Handwriting', cursive;
+  font-family: 'Dancing Script', cursive;
   color: #2c2c2c;
 }
 

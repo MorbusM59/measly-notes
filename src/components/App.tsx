@@ -89,6 +89,33 @@ export const App: React.FC = () => {
     setSelectedYears(newYears);
   };
 
+  const handleNoteDelete = async (deletedNoteId: number) => {
+    // If the deleted note was selected, select the next note or clear selection
+    if (selectedNote?.id === deletedNoteId) {
+      // Try to get the notes list and select the next one
+      try {
+        const result = await window.electronAPI.getNotesPage(1, 20);
+        if (result.notes.length > 0) {
+          // Find the next note (first one that's not the deleted one)
+          const nextNote = result.notes.find(n => n.id !== deletedNoteId);
+          if (nextNote) {
+            setSelectedNote(nextNote);
+          } else {
+            setSelectedNote(null);
+          }
+        } else {
+          setSelectedNote(null);
+        }
+      } catch (err) {
+        setSelectedNote(null);
+      }
+    }
+    
+    // Refresh the sidebar
+    setRefreshKey(k => k + 1);
+    setSidebarRefreshTrigger(t => t + 1);
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -133,6 +160,7 @@ export const App: React.FC = () => {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         width={sidebarWidth}
+        onNoteDelete={handleNoteDelete}
       />
       <div 
         className="sidebar-divider"
