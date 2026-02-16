@@ -451,7 +451,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="note-content">
             <div className="note-title">{result.note.title}</div>
             {result.snippet && (
-              <div className="note-snippet">{result.snippet}</div>
+              <div className="note-snippet">
+                {result.snippet.map((seg, i) =>
+                  seg.highlight ? <strong key={i}>{seg.text}</strong> : <span key={i}>{seg.text}</span>
+                )}
+              </div>
             )}
             <div className="note-date">
               {new Date(result.note.updatedAt).toLocaleDateString()}

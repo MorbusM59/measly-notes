@@ -1,10 +1,12 @@
+// shared/types.ts - central types for Measly Notes
+
 export interface Note {
   id: number;
   title: string;
   filePath: string;
   createdAt: string;
   updatedAt: string;
-  lastEdited?: string | null; // ISO timestamp for last content edit
+  lastEdited?: string | null;
 }
 
 export interface Tag {
@@ -19,40 +21,75 @@ export interface NoteTag {
   tag?: Tag;
 }
 
-export interface SearchResult {
-  note: Note;
-  snippet?: string;
-  matchType: 'title' | 'content' | 'tag';
+/**
+ * SnippetSegment:
+ * - text: plain substring from the note (NOT HTML)
+ * - highlight?: when true the renderer should display this segment highlighted (e.g. <strong>)
+ */
+export interface SnippetSegment {
+  text: string;
+  highlight?: true;
 }
 
-export interface CategoryHierarchy {
+/**
+ * SearchResult returned by searchNotes
+ */
+export interface SearchResult {
+  note: Note;
+  matchType: 'title' | 'content' | 'tag';
+  snippet?: SnippetSegment[]; // renderer maps segments to DOM
+}
+
+/**
+ * CategoryHierarchy describes the structure returned by getCategoryHierarchy():
+ * {
+ *   hierarchy: {
+ *     [primaryTag: string]: {
+ *       notes: Note[],
+ *       secondary: {
+ *         [secondaryTag: string]: {
+ *           notes: Note[],
+ *           tertiary: {
+ *             [tertiaryTag: string]: Note[]
+ *           }
+ *         }
+ *       }
+ *     }
+ *   },
+ *   uncategorizedNotes: Note[]
+ * }
+ */
+export type CategoryHierarchy = {
   [primaryTag: string]: {
-    notes: Note[];  // Notes with only primary tag
+    notes: Note[];
     secondary: {
       [secondaryTag: string]: {
-        notes: Note[];  // Notes with primary + secondary but no tertiary
+        notes: Note[];
         tertiary: {
-          [tertiaryTag: string]: Note[];  // Notes with all three tags
+          [tertiaryTag: string]: Note[];
         };
       };
     };
   };
-}
+};
 
-export interface CategoryData {
+export interface CategoryHierarchyResult {
   hierarchy: CategoryHierarchy;
   uncategorizedNotes: Note[];
 }
 
+/**
+ * Electron preload/IPC API interface (used in global.d.ts and preload.ts)
+ */
 export interface IElectronAPI {
   createNote: (title: string) => Promise<Note>;
-  saveNote: (id: number, content: string) => Promise<Note | null>; // returns updated Note
+  saveNote: (id: number, content: string) => Promise<Note | null>;
   updateNoteTitle: (id: number, title: string) => Promise<void>;
   loadNote: (id: number) => Promise<string>;
   getAllNotes: () => Promise<Note[]>;
   getNotesPage: (page: number, perPage: number) => Promise<{ notes: Note[]; total: number }>;
   deleteNote: (id: number) => Promise<void>;
-  
+
   // Tag operations
   addTagToNote: (noteId: number, tagName: string, position: number) => Promise<NoteTag>;
   removeTagFromNote: (noteId: number, tagId: number) => Promise<void>;
@@ -60,21 +97,13 @@ export interface IElectronAPI {
   getNoteTags: (noteId: number) => Promise<NoteTag[]>;
   getAllTags: () => Promise<Tag[]>;
   getTopTags: (limit: number) => Promise<Tag[]>;
-  
+
   // Search operations
   searchNotes: (query: string) => Promise<SearchResult[]>;
   searchNotesByTag: (tagName: string) => Promise<SearchResult[]>;
-  
+
   // Category view operations
   getNotesByPrimaryTag: () => Promise<{ [tagName: string]: Note[] }>;
-  getCategoryHierarchy: () => Promise<CategoryData>;
-
-  // Last edited helper
+  getCategoryHierarchy: () => Promise<CategoryHierarchyResult>;
   getLastEditedNote: () => Promise<Note | null>;
-}
-
-declare global {
-  interface Window {
-    electronAPI: IElectronAPI;
-  }
 }

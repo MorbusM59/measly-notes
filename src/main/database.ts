@@ -1,23 +1,20 @@
 import Database from 'better-sqlite3';
 import * as fs from 'fs/promises';
-import { Note, Tag, NoteTag, SearchResult } from '../shared/types';
+import { Note, Tag, NoteTag, SearchResult, SnippetSegment } from '../shared/types';
 import { getDataDir, getDbPath } from './paths';
 
 let db: Database.Database;
 
 // Initialize database schema
 export async function initDatabase(): Promise<void> {
-  // Ensure data directory exists
   try {
     await fs.mkdir(getDataDir(), { recursive: true });
   } catch (error) {
     throw new Error(`Failed to create data directory: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  // Open DB (creates file if missing)
   db = new Database(getDbPath());
 
-  // Create main schema (explicit; includes lastEdited from the start)
   db.exec(`
     PRAGMA foreign_keys = ON;
 
@@ -48,9 +45,6 @@ export async function initDatabase(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tagId);
   `);
 
-  // Create FTS5 virtual table to index title and content for fast search.
-  // noteId is stored as text/unindexed column so we can join back to notes.
-  // FTS5 must be available in the SQLite build used by Electron (most distributions include it).
   try {
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
@@ -60,22 +54,20 @@ export async function initDatabase(): Promise<void> {
       );
     `);
   } catch (err) {
-    // If FTS5 is not available, surface an error so it's obvious during development.
     console.error('[db] Failed to create FTS table; FTS5 may be unavailable', err);
     throw err;
   }
 }
 
-/**
- * Normalize tag names for canonical storage:
- * - trim whitespace
- * - lowercase
- * - collapse one-or-more whitespace into single dash '-'
- */
+/* Utilities */
 function normalizeTagName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, '-');
 }
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
+/* Core note operations */
 export function createNote(title: string, filePath: string): Note {
   const now = new Date().toISOString();
   const stmt = db.prepare(`
@@ -84,7 +76,7 @@ export function createNote(title: string, filePath: string): Note {
   `);
   const result = stmt.run(title, filePath, now, now, now);
 
-  const note: Note = {
+  return {
     id: result.lastInsertRowid as number,
     title,
     filePath,
@@ -92,13 +84,16 @@ export function createNote(title: string, filePath: string): Note {
     updatedAt: now,
     lastEdited: now,
   };
-
-  return note;
 }
 
 export function getAllNotes(): Note[] {
   const stmt = db.prepare('SELECT * FROM notes ORDER BY updatedAt DESC');
   return stmt.all() as Note[];
+}
+
+export function getNoteById(id: number): Note | undefined {
+  const stmt = db.prepare('SELECT * FROM notes WHERE id = ?');
+  return stmt.get(id) as Note | undefined;
 }
 
 export function updateNote(id: number): void {
@@ -121,18 +116,7 @@ export function updateNoteFilePath(id: number, filePath: string): void {
 export function deleteNote(id: number): void {
   const stmt = db.prepare('DELETE FROM notes WHERE id = ?');
   stmt.run(id);
-
-  // Also remove any FTS entry
-  try {
-    removeNoteFts(id);
-  } catch (err) {
-    console.warn('[db] Failed to remove FTS entry for note', id, err);
-  }
-}
-
-export function getNoteById(id: number): Note | undefined {
-  const stmt = db.prepare('SELECT * FROM notes WHERE id = ?');
-  return stmt.get(id) as Note | undefined;
+  try { removeNoteFts(id); } catch (err) { console.warn('[db] removeNoteFts failed', err); }
 }
 
 export function getLastEditedNote(): Note | undefined {
@@ -144,26 +128,21 @@ export function closeDatabase(): void {
   db.close();
 }
 
-// Pagination
+/* Pagination */
 export function getNotesPage(page: number, perPage: number): { notes: Note[]; total: number } {
   const offset = (page - 1) * perPage;
   const notesStmt = db.prepare('SELECT * FROM notes ORDER BY updatedAt DESC LIMIT ? OFFSET ?');
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM notes');
-
   const notes = notesStmt.all(perPage, offset) as Note[];
   const result = countStmt.get() as { count: number };
-
   return { notes, total: result.count };
 }
 
-// Tag operations
+/* Tags */
 export function createOrGetTag(name: string): Tag {
   const normalized = normalizeTagName(name);
   const existing = db.prepare('SELECT * FROM tags WHERE name = ?').get(normalized) as Tag | undefined;
-  if (existing) {
-    return existing;
-  }
-
+  if (existing) return existing;
   const stmt = db.prepare('INSERT INTO tags (name) VALUES (?)');
   const result = stmt.run(normalized);
   return { id: result.lastInsertRowid as number, name: normalized };
@@ -171,20 +150,13 @@ export function createOrGetTag(name: string): Tag {
 
 export function addTagToNote(noteId: number, tagName: string, position: number): NoteTag {
   const tag = createOrGetTag(tagName);
-
-  // Remove if already exists (to update position)
   db.prepare('DELETE FROM note_tags WHERE noteId = ? AND tagId = ?').run(noteId, tag.id);
-
-  // Insert with new position
   db.prepare('INSERT INTO note_tags (noteId, tagId, position) VALUES (?, ?, ?)').run(noteId, tag.id, position);
-
   return { noteId, tagId: tag.id, position, tag };
 }
 
 export function removeTagFromNote(noteId: number, tagId: number): void {
   db.prepare('DELETE FROM note_tags WHERE noteId = ? AND tagId = ?').run(noteId, tagId);
-
-  // Re-index remaining tags
   const tags = db.prepare('SELECT * FROM note_tags WHERE noteId = ? ORDER BY position').all(noteId) as NoteTag[];
   tags.forEach((tag, index) => {
     db.prepare('UPDATE note_tags SET position = ? WHERE noteId = ? AND tagId = ?').run(index, noteId, tag.tagId);
@@ -205,7 +177,6 @@ export function getNoteTags(noteId: number): NoteTag[] {
     WHERE nt.noteId = ?
     ORDER BY nt.position
   `);
-
   const rows = stmt.all(noteId) as Array<{ noteId: number; tagId: number; position: number; id: number; name: string }>;
   return rows.map(row => ({
     noteId: row.noteId,
@@ -220,14 +191,8 @@ export function getAllTags(): Tag[] {
   return stmt.all() as Tag[];
 }
 
-/**
- * Returns the top tags used by notes created or edited within the last 90 days.
- * Only tags that are used by at least one recent note will be returned.
- * Ordering: usage_count DESC, name ASC. Caller may re-order alphabetically for display.
- */
 export function getTopTags(limit: number): Tag[] {
   const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-
   const stmt = db.prepare(`
     SELECT t.id, t.name, COUNT(nt.noteId) as usage_count
     FROM tags t
@@ -239,102 +204,384 @@ export function getTopTags(limit: number): Tag[] {
     ORDER BY usage_count DESC, t.name
     LIMIT ?
   `);
-
   return stmt.all(cutoff, cutoff, cutoff, limit) as Tag[];
 }
 
-/**
- * FTS helpers
- */
-
-// Upsert the FTS entry for a note
+/* FTS helpers */
 export function upsertNoteFts(noteId: number, title: string, content: string): void {
-  // Use text version of noteId for storage in FTS table
   const idStr = String(noteId);
-  const del = db.prepare('DELETE FROM notes_fts WHERE noteId = ?');
-  del.run(idStr);
-
-  const ins = db.prepare('INSERT INTO notes_fts(noteId, title, content) VALUES (?, ?, ?)');
-  ins.run(idStr, title, content);
+  db.prepare('DELETE FROM notes_fts WHERE noteId = ?').run(idStr);
+  db.prepare('INSERT INTO notes_fts(noteId, title, content) VALUES (?, ?, ?)').run(idStr, title, content);
 }
-
-// Remove FTS entry
 export function removeNoteFts(noteId: number): void {
   const idStr = String(noteId);
   db.prepare('DELETE FROM notes_fts WHERE noteId = ?').run(idStr);
 }
 
-/**
- * Search using FTS index.
- * - Uses MATCH to narrow candidates.
- * - Reads content only for matched notes to create a snippet (preserves existing UX).
- */
+/* Phrase permissive check */
+function phraseMatchesPermissive(content: string, phrase: string): boolean {
+  if (!phrase) return false;
+  const tokens = phrase.split(/\s+/).map(t => t.trim()).filter(Boolean).map(t => t.replace(/[^A-Za-z0-9_-]+/g, ''));
+  if (tokens.length === 0) return false;
+  const allButLast = tokens.slice(0, -1).map(t => escapeRegExp(t));
+  const last = escapeRegExp(tokens[tokens.length - 1]);
+  const prefix = allButLast.length ? allButLast.join('\\W+') + '\\W+' : '';
+  const pattern = prefix + last + '\\w*';
+  const re = new RegExp(pattern, 'i');
+  return re.test(content);
+}
+
+/* Build FTS match expression (tokens required -> AND semantics). */
+function buildFtsMatchExpression(query: string): string {
+  if (!query) return '';
+  const phraseRegex = /"([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  const phraseTokens: string[] = [];
+  while ((m = phraseRegex.exec(query)) !== null) {
+    const phrase = m[1].trim();
+    if (phrase) {
+      const toks = phrase.split(/\s+/).map(t => t.trim().replace(/[^A-Za-z0-9_-]+/g, '')).filter(Boolean);
+      for (const t of toks) phraseTokens.push(`${t}*`);
+    }
+  }
+  let stripped = query.replace(phraseRegex, ' ');
+  const tokens = stripped.split(/\s+/).map(t => t.trim()).filter(Boolean);
+  const tokenParts: string[] = [];
+  for (const raw of tokens) {
+    const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, '');
+    if (!cleaned) continue;
+    tokenParts.push(`${cleaned}*`);
+  }
+  const parts = [...phraseTokens, ...tokenParts];
+  if (parts.length === 0) return '';
+  return parts.join(' AND ');
+}
+
+/* Search (FTS-backed, with post-filtering and snippet segments) */
 export async function searchNotes(query: string): Promise<SearchResult[]> {
-  // Guard empty query
   const trimmed = (query || '').trim();
   if (!trimmed) return [];
 
-  // For FTS MATCH usage: keep it simple and let FTS tokenize as configured
-  // Using parameter binding for safety.
-  const matchExpr = trimmed; // you can transform to handle phrase search or prefix queries
-
-  // Get matching noteIds (limit results to protect memory)
-  const stmt = db.prepare(`SELECT noteId FROM notes_fts WHERE notes_fts MATCH ? LIMIT 200`);
-  const rows = stmt.all(matchExpr) as Array<{ noteId: string }>;
-
-  const results: SearchResult[] = [];
-
-  for (const r of rows) {
-    const id = Number(r.noteId);
-    if (Number.isNaN(id)) continue;
-    const note = getNoteById(id);
-    if (!note) continue;
-
-    // Load content for snippet generation only (IO limited to matched notes)
-    let content = '';
-    try {
-      content = await fs.readFile(note.filePath, 'utf-8');
-    } catch {
-      content = '';
-    }
-
-    const lowerContent = content.toLowerCase();
-    const lowerQuery = trimmed.toLowerCase();
-    const matchInTitle = note.title.toLowerCase().includes(lowerQuery);
-    const matchInContent = content && lowerContent.includes(lowerQuery);
-
-    const snippet = matchInContent ? extractSnippet(content, trimmed) : undefined;
-
-    results.push({
-      note,
-      matchType: matchInTitle ? 'title' : 'content',
-      snippet
-    });
+  const phraseRegex = /"([^"]+)"/g;
+  let pm: RegExpExecArray | null;
+  const quotedPhrases: string[] = [];
+  while ((pm = phraseRegex.exec(trimmed)) !== null) {
+    const phrase = pm[1].trim();
+    if (phrase) quotedPhrases.push(phrase);
   }
 
-  return results;
+  let stripped = trimmed.replace(phraseRegex, ' ');
+  const tokens = stripped.split(/\s+/).map(t => t.trim()).filter(Boolean);
+  const tokenPatterns = tokens
+    .map(t => t.replace(/[^A-Za-z0-9_-]+/g, ''))
+    .filter(Boolean)
+    .map(t => t.toLowerCase());
+
+  const matchExpr = buildFtsMatchExpression(trimmed);
+  if (!matchExpr) return [];
+
+  const MAX_RESULTS = 200;
+
+  // Try parameterized MATCH first (safer); if not supported, try inlined escaped expression.
+  try {
+    const stmtParam = db.prepare(`SELECT noteId FROM notes_fts WHERE notes_fts MATCH ? LIMIT ?`);
+    const rows = stmtParam.all(matchExpr, MAX_RESULTS) as Array<{ noteId: string }>;
+
+    const results: SearchResult[] = [];
+
+    for (const r of rows) {
+      const id = Number(r.noteId);
+      if (Number.isNaN(id)) continue;
+      const note = getNoteById(id);
+      if (!note) continue;
+
+      let content = '';
+      try { content = await fs.readFile(note.filePath, 'utf-8'); } catch { content = ''; }
+      const contentLower = content.toLowerCase();
+      const titleLower = note.title.toLowerCase();
+
+      let ok = true;
+      for (const phrase of quotedPhrases) {
+        const inContent = content && phraseMatchesPermissive(content, phrase);
+        const inTitle = phrase && note.title && phraseMatchesPermissive(note.title, phrase);
+        if (!inContent && !inTitle) { ok = false; break; }
+      }
+      if (!ok) continue;
+
+      for (const tp of tokenPatterns) {
+        if (!(contentLower.includes(tp) || titleLower.includes(tp))) { ok = false; break; }
+      }
+      if (!ok) continue;
+
+      // Determine snippet center and build segments
+      let firstIndex = -1;
+      let firstMatchText = '';
+      for (const phrase of quotedPhrases) {
+        if (!phrase) continue;
+        const tokensP = phrase.split(/\s+/).map(t => t.replace(/[^A-Za-z0-9_-]+/g, '')).filter(Boolean);
+        if (tokensP.length === 0) continue;
+        const reStr = tokensP.map(t => escapeRegExp(t)).join('\\W+');
+        const regex = new RegExp(reStr, 'i');
+        const m2 = regex.exec(content);
+        if (m2 && m2.index !== undefined) {
+          if (firstIndex === -1 || m2.index < firstIndex) { firstIndex = m2.index; firstMatchText = m2[0]; }
+        }
+      }
+      for (const t of tokenPatterns) {
+        const idx = contentLower.indexOf(t);
+        if (idx !== -1 && (firstIndex === -1 || idx < firstIndex)) { firstIndex = idx; firstMatchText = content.substr(idx, t.length); }
+      }
+
+      if (firstIndex === -1) {
+        for (const phrase of quotedPhrases) {
+          const re = new RegExp(escapeRegExp(phrase), 'i');
+          const mt = re.exec(note.title);
+          if (mt && mt.index !== undefined) { firstIndex = 0; firstMatchText = mt[0]; break; }
+        }
+        if (firstIndex === -1) {
+          for (const t of tokenPatterns) {
+            const idx = titleLower.indexOf(t);
+            if (idx !== -1) { firstIndex = 0; firstMatchText = note.title.substr(idx, t.length); break; }
+          }
+        }
+      }
+
+      const radius = 50;
+      let snippetRaw = '';
+      if (!content) snippetRaw = note.title;
+      else {
+        const centerPos = firstIndex >= 0 ? firstIndex : 0;
+        const start = Math.max(0, centerPos - radius);
+        const end = Math.min(content.length, centerPos + (firstMatchText ? firstMatchText.length : 0) + radius);
+        snippetRaw = content.substring(start, end);
+        if (start > 0) snippetRaw = '...' + snippetRaw;
+        if (end < content.length) snippetRaw = snippetRaw + '...';
+      }
+
+      const highlightItems: string[] = [];
+      for (const p of quotedPhrases) if (p) highlightItems.push(p);
+      for (const t of tokenPatterns) if (t) highlightItems.push(t);
+      const uniqueHighlights = Array.from(new Set(highlightItems)).filter(Boolean).sort((a, b) => b.length - a.length);
+
+      const segments: SnippetSegment[] = [];
+      if (!snippetRaw) segments.push({ text: '' });
+      else if (uniqueHighlights.length === 0) segments.push({ text: snippetRaw });
+      else {
+        const alt = uniqueHighlights.map(h => escapeRegExp(h)).join('|');
+        const re = new RegExp(alt, 'ig');
+        let lastIndex = 0;
+        let m3: RegExpExecArray | null;
+        while ((m3 = re.exec(snippetRaw)) !== null) {
+          const s = m3.index;
+          const e = re.lastIndex;
+          if (s > lastIndex) segments.push({ text: snippetRaw.substring(lastIndex, s) });
+          segments.push({ text: snippetRaw.substring(s, e), highlight: true });
+          lastIndex = e;
+        }
+        if (lastIndex < snippetRaw.length) segments.push({ text: snippetRaw.substring(lastIndex) });
+      }
+
+      const joinedQuery = (quotedPhrases.join(' ') + ' ' + tokenPatterns.join(' ')).trim().toLowerCase();
+      const matchInTitle = note.title.toLowerCase().includes(joinedQuery);
+
+      results.push({ note, matchType: matchInTitle ? 'title' : 'content', snippet: segments });
+      if (results.length >= MAX_RESULTS) break;
+    }
+
+    return results;
+  } catch (paramErr) {
+    // Fallback: attempt safe inline match, then final manual scan if necessary
+    try {
+      const safeMatch = matchExpr.replace(/'/g, "''").slice(0, 2000);
+      const sql = `SELECT noteId FROM notes_fts WHERE notes_fts MATCH '${safeMatch}' LIMIT ${MAX_RESULTS}`;
+      const stmt = db.prepare(sql);
+      const rows = stmt.all() as Array<{ noteId: string }>;
+      // reuse processing logic (kept concise here by delegating to above behavior)
+      const results: SearchResult[] = [];
+      for (const r of rows) {
+        const id = Number(r.noteId);
+        if (Number.isNaN(id)) continue;
+        const note = getNoteById(id);
+        if (!note) continue;
+        let content = '';
+        try { content = await fs.readFile(note.filePath, 'utf-8'); } catch { content = ''; }
+        const contentLower = content.toLowerCase();
+        const titleLower = note.title.toLowerCase();
+        let ok = true;
+        for (const phrase of quotedPhrases) {
+          const inContent = content && phraseMatchesPermissive(content, phrase);
+          const inTitle = phrase && note.title && phraseMatchesPermissive(note.title, phrase);
+          if (!inContent && !inTitle) { ok = false; break; }
+        }
+        if (!ok) continue;
+        for (const tp of tokenPatterns) {
+          if (!(contentLower.includes(tp) || titleLower.includes(tp))) { ok = false; break; }
+        }
+        if (!ok) continue;
+
+        // Build snippet (same as above)...
+        let firstIndex = -1;
+        let firstMatchText = '';
+        for (const phrase of quotedPhrases) {
+          if (!phrase) continue;
+          const tokensP = phrase.split(/\s+/).map(t => t.replace(/[^A-Za-z0-9_-]+/g, '')).filter(Boolean);
+          if (tokensP.length === 0) continue;
+          const reStr = tokensP.map(t => escapeRegExp(t)).join('\\W+');
+          const regex = new RegExp(reStr, 'i');
+          const m2 = regex.exec(content);
+          if (m2 && m2.index !== undefined) {
+            if (firstIndex === -1 || m2.index < firstIndex) { firstIndex = m2.index; firstMatchText = m2[0]; }
+          }
+        }
+        for (const t of tokenPatterns) {
+          const idx = contentLower.indexOf(t);
+          if (idx !== -1 && (firstIndex === -1 || idx < firstIndex)) { firstIndex = idx; firstMatchText = content.substr(idx, t.length); }
+        }
+
+        if (firstIndex === -1) {
+          for (const phrase of quotedPhrases) {
+            const re = new RegExp(escapeRegExp(phrase), 'i');
+            const mt = re.exec(note.title);
+            if (mt && mt.index !== undefined) { firstIndex = 0; firstMatchText = mt[0]; break; }
+          }
+          if (firstIndex === -1) {
+            for (const t of tokenPatterns) {
+              const idx = titleLower.indexOf(t);
+              if (idx !== -1) { firstIndex = 0; firstMatchText = note.title.substr(idx, t.length); break; }
+            }
+          }
+        }
+
+        const radius = 50;
+        let snippetRaw = '';
+        if (!content) snippetRaw = note.title;
+        else {
+          const centerPos = firstIndex >= 0 ? firstIndex : 0;
+          const start = Math.max(0, centerPos - radius);
+          const end = Math.min(content.length, centerPos + (firstMatchText ? firstMatchText.length : 0) + radius);
+          snippetRaw = content.substring(start, end);
+          if (start > 0) snippetRaw = '...' + snippetRaw;
+          if (end < content.length) snippetRaw = snippetRaw + '...';
+        }
+
+        const highlightItems: string[] = [];
+        for (const p of quotedPhrases) if (p) highlightItems.push(p);
+        for (const t of tokenPatterns) if (t) highlightItems.push(t);
+        const uniqueHighlights = Array.from(new Set(highlightItems)).filter(Boolean).sort((a, b) => b.length - a.length);
+
+        const segments: SnippetSegment[] = [];
+        if (!snippetRaw) segments.push({ text: '' });
+        else if (uniqueHighlights.length === 0) segments.push({ text: snippetRaw });
+        else {
+          const alt = uniqueHighlights.map(h => escapeRegExp(h)).join('|');
+          const re = new RegExp(alt, 'ig');
+          let lastIndex = 0;
+          let m3: RegExpExecArray | null;
+          while ((m3 = re.exec(snippetRaw)) !== null) {
+            const s = m3.index;
+            const e = re.lastIndex;
+            if (s > lastIndex) segments.push({ text: snippetRaw.substring(lastIndex, s) });
+            segments.push({ text: snippetRaw.substring(s, e), highlight: true });
+            lastIndex = e;
+          }
+          if (lastIndex < snippetRaw.length) segments.push({ text: snippetRaw.substring(lastIndex) });
+        }
+
+        const joinedQuery = (quotedPhrases.join(' ') + ' ' + tokenPatterns.join(' ')).trim().toLowerCase();
+        const matchInTitle = note.title.toLowerCase().includes(joinedQuery);
+
+        results.push({ note, matchType: matchInTitle ? 'title' : 'content', snippet: segments });
+        if (results.length >= MAX_RESULTS) break;
+      }
+
+      return results;
+    } catch (inlineErr) {
+      console.error('[db] FTS inline match failed', inlineErr);
+      // Final fallback: manual scan across all notes
+      const phrasesFallback: string[] = [];
+      const phraseRegexFallback = /"([^"]+)"/g;
+      let pm2: RegExpExecArray | null;
+      while ((pm2 = phraseRegexFallback.exec(trimmed)) !== null) {
+        const phrase = pm2[1].trim();
+        if (phrase) phrasesFallback.push(phrase);
+      }
+      let stripped2 = trimmed.replace(phraseRegexFallback, ' ');
+      const tokensFallback = stripped2.split(/\s+/).map(t => t.trim()).filter(Boolean)
+        .map(t => t.replace(/[^A-Za-z0-9_-]+/g, '').toLowerCase())
+        .filter(Boolean);
+
+      const allNotes = getAllNotes();
+      const results: SearchResult[] = [];
+      for (const note of allNotes) {
+        const content = await (async () => {
+          try { return await fs.readFile(note.filePath, 'utf-8'); } catch { return ''; }
+        })();
+        const contentLower = content.toLowerCase();
+        const titleLower = note.title.toLowerCase();
+
+        let ok = true;
+        for (const p of phrasesFallback) {
+          if (!(phraseMatchesPermissive(content, p) || phraseMatchesPermissive(note.title, p))) { ok = false; break; }
+        }
+        if (!ok) continue;
+        for (const t of tokensFallback) {
+          if (!(contentLower.includes(t) || titleLower.includes(t))) { ok = false; break; }
+        }
+        if (!ok) continue;
+
+        // snippet building
+        const firstIndexCandidates: number[] = [];
+        for (const p of phrasesFallback) {
+          const idx = contentLower.indexOf(p.toLowerCase());
+          if (idx !== -1) firstIndexCandidates.push(idx);
+        }
+        for (const t of tokensFallback) {
+          const idx = contentLower.indexOf(t);
+          if (idx !== -1) firstIndexCandidates.push(idx);
+        }
+        const firstIndex = firstIndexCandidates.length ? Math.min(...firstIndexCandidates) : -1;
+        const radius = 50;
+        let snippetRaw = '';
+        if (!content) snippetRaw = note.title;
+        else {
+          const centerPos = firstIndex >= 0 ? firstIndex : 0;
+          const start = Math.max(0, centerPos - radius);
+          const end = Math.min(content.length, centerPos + radius);
+          snippetRaw = content.substring(start, end);
+          if (start > 0) snippetRaw = '...' + snippetRaw;
+          if (end < content.length) snippetRaw = snippetRaw + '...';
+        }
+
+        const highlights = [...phrasesFallback, ...tokensFallback].filter(Boolean).sort((a, b) => b.length - a.length);
+        const segments: SnippetSegment[] = [];
+        if (!snippetRaw) segments.push({ text: '' });
+        else {
+          const alt = highlights.map(h => escapeRegExp(h)).join('|');
+          const re = new RegExp(alt, 'ig');
+          let lastIndex = 0;
+          let m3: RegExpExecArray | null;
+          while ((m3 = re.exec(snippetRaw)) !== null) {
+            const s = m3.index;
+            const e = re.lastIndex;
+            if (s > lastIndex) segments.push({ text: snippetRaw.substring(lastIndex, s) });
+            segments.push({ text: snippetRaw.substring(s, e), highlight: true });
+            lastIndex = e;
+          }
+          if (lastIndex < snippetRaw.length) segments.push({ text: snippetRaw.substring(lastIndex) });
+        }
+
+        const joinedQuery = (phrasesFallback.join(' ') + ' ' + tokensFallback.join(' ')).trim().toLowerCase();
+        const matchInTitle = note.title.toLowerCase().includes(joinedQuery);
+
+        results.push({ note, matchType: matchInTitle ? 'title' : 'content', snippet: segments });
+        if (results.length >= MAX_RESULTS) break;
+      }
+      return results;
+    }
+  }
 }
 
-function extractSnippet(content: string, query: string, radius = 50): string {
-  const lowerContent = content.toLowerCase();
-  const lowerQuery = query.toLowerCase();
-  const index = lowerContent.indexOf(lowerQuery);
-
-  if (index === -1) return '';
-
-  const start = Math.max(0, index - radius);
-  const end = Math.min(content.length, index + query.length + radius);
-
-  let snippet = content.substring(start, end);
-  if (start > 0) snippet = '...' + snippet;
-  if (end < content.length) snippet = snippet + '...';
-
-  return snippet;
-}
-
-// Search operations that rely on DB-only lookups (titles/tags)
-// kept where useful for non-content queries
-
+/* DB-only searches (tags / primary grouping) */
 export function searchNotesByTag(tagName: string): SearchResult[] {
   const stmt = db.prepare(`
     SELECT n.*, nt.position
@@ -344,12 +591,8 @@ export function searchNotesByTag(tagName: string): SearchResult[] {
     WHERE t.name LIKE ?
     ORDER BY nt.position, n.updatedAt DESC
   `);
-
   const notes = stmt.all(`%${tagName}%`) as Note[];
-  return notes.map(note => ({
-    note,
-    matchType: 'tag' as const
-  }));
+  return notes.map(note => ({ note, matchType: 'tag' as const }));
 }
 
 export function getNotesByPrimaryTag(): { [tagName: string]: Note[] } {
@@ -361,10 +604,8 @@ export function getNotesByPrimaryTag(): { [tagName: string]: Note[] } {
     WHERE nt.position = 0
     ORDER BY t.name, n.updatedAt DESC
   `);
-
   const rows = stmt.all() as Array<Note & { tagName: string }>;
   const result: { [tagName: string]: Note[] } = {};
-
   rows.forEach(row => {
     const tagName = row.tagName;
     const note: Note = {
@@ -375,18 +616,13 @@ export function getNotesByPrimaryTag(): { [tagName: string]: Note[] } {
       updatedAt: row.updatedAt,
       lastEdited: (row as any).lastEdited ?? null
     };
-
-    if (!result[tagName]) {
-      result[tagName] = [];
-    }
+    if (!result[tagName]) result[tagName] = [];
     result[tagName].push(note);
   });
-
   return result;
 }
 
-export function getCategoryHierarchy() {
-  // Get all notes with their tags at positions 0, 1, and 2
+export function getCategoryHierarchy(): { hierarchy: any; uncategorizedNotes: Note[] } {
   const stmt = db.prepare(`
     SELECT 
       n.id, n.title, n.filePath, n.createdAt, n.updatedAt, n.lastEdited,
@@ -402,17 +638,9 @@ export function getCategoryHierarchy() {
     LEFT JOIN tags t2 ON nt2.tagId = t2.id
     ORDER BY t0.name, t1.name, t2.name, n.updatedAt DESC
   `);
-
   const rows = stmt.all() as Array<{
-    id: number;
-    title: string;
-    filePath: string;
-    createdAt: string;
-    updatedAt: string;
-    lastEdited: string | null;
-    primaryTag: string | null;
-    secondaryTag: string | null;
-    tertiaryTag: string | null;
+    id: number; title: string; filePath: string; createdAt: string; updatedAt: string; lastEdited: string | null;
+    primaryTag: string | null; secondaryTag: string | null; tertiaryTag: string | null;
   }>;
 
   const hierarchy: any = {};
@@ -420,65 +648,22 @@ export function getCategoryHierarchy() {
 
   rows.forEach(row => {
     const note: Note = {
-      id: row.id,
-      title: row.title,
-      filePath: row.filePath,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
+      id: row.id, title: row.title, filePath: row.filePath, createdAt: row.createdAt, updatedAt: row.updatedAt,
       lastEdited: row.lastEdited ?? null
     };
+    const primary = row.primaryTag, secondary = row.secondaryTag, tertiary = row.tertiaryTag;
+    if (!primary) { uncategorizedNotes.push(note); return; }
 
-    const primary = row.primaryTag;
-    const secondary = row.secondaryTag;
-    const tertiary = row.tertiaryTag;
+    if (!hierarchy[primary]) hierarchy[primary] = { notes: [], secondary: {} };
+    if (!secondary) { hierarchy[primary].notes.push(note); return; }
 
-    // Note has no tags - add to uncategorized
-    if (!primary) {
-      uncategorizedNotes.push(note);
-      return;
-    }
+    if (!hierarchy[primary].secondary[secondary]) hierarchy[primary].secondary[secondary] = { notes: [], tertiary: {} };
+    if (!tertiary) { hierarchy[primary].secondary[secondary].notes.push(note); return; }
 
-    // Initialize primary tag if needed
-    if (!hierarchy[primary]) {
-      hierarchy[primary] = {
-        notes: [],
-        secondary: {}
-      };
-    }
-
-    // Note has only primary tag
-    if (!secondary) {
-      hierarchy[primary].notes.push(note);
-      return;
-    }
-
-    // Initialize secondary tag if needed
-    if (!hierarchy[primary].secondary[secondary]) {
-      hierarchy[primary].secondary[secondary] = {
-        notes: [],
-        tertiary: {}
-      };
-    }
-
-    // Note has primary + secondary but no tertiary
-    if (!tertiary) {
-      hierarchy[primary].secondary[secondary].notes.push(note);
-      return;
-    }
-
-    // Initialize tertiary tag if needed
-    if (!hierarchy[primary].secondary[secondary].tertiary[tertiary]) {
-      hierarchy[primary].secondary[secondary].tertiary[tertiary] = [];
-    }
-
-    // Note has all three tags
+    if (!hierarchy[primary].secondary[secondary].tertiary[tertiary]) hierarchy[primary].secondary[secondary].tertiary[tertiary] = [];
     hierarchy[primary].secondary[secondary].tertiary[tertiary].push(note);
   });
 
-  // Sort uncategorized notes by date descending (most recent first)
-  uncategorizedNotes.sort((a, b) => {
-    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-  });
-
+  uncategorizedNotes.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   return { hierarchy, uncategorizedNotes };
 }

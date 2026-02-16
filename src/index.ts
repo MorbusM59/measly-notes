@@ -219,23 +219,6 @@ app.whenReady().then(async () => {
       }
     });
 
-    function extractSnippet(content: string, query: string, radius = 50): string {
-      const lowerContent = content.toLowerCase();
-      const lowerQuery = query.toLowerCase();
-      const index = lowerContent.indexOf(lowerQuery);
-
-      if (index === -1) return '';
-
-      const start = Math.max(0, index - radius);
-      const end = Math.min(content.length, index + query.length + radius);
-
-      let snippet = content.substring(start, end);
-      if (start > 0) snippet = '...' + snippet;
-      if (end < content.length) snippet = snippet + '...';
-
-      return snippet;
-    }
-
     ipcMain.handle('search-notes-by-tag', async (_, tagName: string) => {
       return searchNotesByTag(tagName);
     });
