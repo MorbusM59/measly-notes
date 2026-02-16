@@ -16,6 +16,9 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const [deleteArmed, setDeleteArmed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // normalize on the frontend too (defensive)
+  const normalizeTagName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
+
   // Load tags when note changes
   useEffect(() => {
     if (note) {
@@ -34,11 +37,21 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     setNoteTags(tags);
   };
 
+  /**
+   * Suggested tags handling:
+   * - Get recent/popular tags from DB (the DB now filters to recent notes)
+   * - Remove tags already attached to this note
+   * - Sort alphabetically
+   * - Limit display to top 15
+   */
   const loadSuggestedTags = async () => {
     if (!note) return;
-    const topTags = await window.electronAPI.getTopTags(12);
+    // fetch more than 15 so that after filtering we can still show up to 15 options
+    const topTags = await window.electronAPI.getTopTags(30);
     const currentTagIds = new Set((await window.electronAPI.getNoteTags(note.id)).map(t => t.tagId));
-    setSuggestedTags(topTags.filter(tag => !currentTagIds.has(tag.id)));
+    const filtered = topTags.filter(tag => !currentTagIds.has(tag.id));
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+    setSuggestedTags(filtered.slice(0, 20));
   };
 
   const loadAllTags = async () => {
@@ -49,14 +62,16 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const handleAddTag = async () => {
     if (!note || !inputValue.trim()) return;
 
+    const normalized = normalizeTagName(inputValue);
+    if (!normalized) return;
+
     const position = noteTags.length;
-    await window.electronAPI.addTagToNote(note.id, inputValue.trim(), position);
+    await window.electronAPI.addTagToNote(note.id, normalized, position);
     setInputValue('');
     await loadNoteTags();
     await loadSuggestedTags();
     inputRef.current?.focus();
-    
-    // Notify parent to refresh sidebar
+
     if (onTagsChanged) {
       onTagsChanged();
     }
@@ -68,7 +83,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     await loadNoteTags();
     await loadSuggestedTags();
     
-    // Notify parent to refresh sidebar
     if (onTagsChanged) {
       onTagsChanged();
     }
@@ -76,12 +90,12 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
 
   const handleAddSuggestedTag = async (tagName: string) => {
     if (!note) return;
+    const normalized = normalizeTagName(tagName);
     const position = noteTags.length;
-    await window.electronAPI.addTagToNote(note.id, tagName, position);
+    await window.electronAPI.addTagToNote(note.id, normalized, position);
     await loadNoteTags();
     await loadSuggestedTags();
     
-    // Notify parent to refresh sidebar
     if (onTagsChanged) {
       onTagsChanged();
     }
@@ -111,7 +125,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     setDraggedIndex(null);
     await loadNoteTags();
     
-    // Notify parent to refresh sidebar
     if (onTagsChanged) {
       onTagsChanged();
     }
@@ -127,14 +140,11 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     if (!note) return;
 
     if (!deleteArmed) {
-      // First click - arm the button
       setDeleteArmed(true);
     } else {
-      // Second click - actually delete
       await window.electronAPI.deleteNote(note.id);
       setDeleteArmed(false);
       
-      // Notify parent to refresh and handle selection
       if (onTagsChanged) {
         onTagsChanged();
       }
@@ -144,21 +154,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const handleDeleteMouseLeave = () => {
     setDeleteArmed(false);
   };
-
-  // Get autocomplete suggestions
-  const getAutocompleteSuggestion = (): string | null => {
-    if (!inputValue.trim()) return null;
-    
-    const input = inputValue.toLowerCase();
-    const matchingTag = allTags.find(tag => 
-      tag.name.toLowerCase().startsWith(input) && 
-      !noteTags.some(nt => nt.tagId === tag.id)
-    );
-    
-    return matchingTag ? matchingTag.name : null;
-  };
-
-  const autocompleteSuggestion = getAutocompleteSuggestion();
 
   if (!note) {
     return null;
@@ -175,13 +170,8 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Add tag..."
+            placeholder="Add tag (spaces will become '-')"
           />
-          {autocompleteSuggestion && (
-            <div className="autocomplete-hint">
-              {autocompleteSuggestion}
-            </div>
-          )}
         </div>
         <button
           className={`delete-note-btn ${deleteArmed ? 'delete-armed' : ''}`}

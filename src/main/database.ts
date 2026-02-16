@@ -14,7 +14,7 @@ export async function initDatabase(): Promise<void> {
     throw new Error(`Failed to create data directory: ${error instanceof Error ? error.message : String(error)}`);
   }
   
-  // Initialize database
+  // Initialize database (use getDbPath to respect dev vs prod paths)
   db = new Database(getDbPath());
   
   db.exec(`
@@ -57,6 +57,16 @@ export async function initDatabase(): Promise<void> {
     // non-fatal; leave DB as-is if PRAGMA fails
     console.warn('Could not ensure lastEdited column:', err);
   }
+}
+
+/**
+ * Normalize tag names for canonical storage:
+ * - trim whitespace
+ * - lowercase
+ * - collapse one-or-more whitespace into single dash '-'
+ */
+function normalizeTagName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, '-');
 }
 
 export function createNote(title: string, filePath: string): Note {
@@ -132,14 +142,15 @@ export function getNotesPage(page: number, perPage: number): { notes: Note[]; to
 
 // Tag operations
 export function createOrGetTag(name: string): Tag {
-  const existing = db.prepare('SELECT * FROM tags WHERE name = ?').get(name) as Tag | undefined;
+  const normalized = normalizeTagName(name);
+  const existing = db.prepare('SELECT * FROM tags WHERE name = ?').get(normalized) as Tag | undefined;
   if (existing) {
     return existing;
   }
   
   const stmt = db.prepare('INSERT INTO tags (name) VALUES (?)');
-  const result = stmt.run(name);
-  return { id: result.lastInsertRowid as number, name };
+  const result = stmt.run(normalized);
+  return { id: result.lastInsertRowid as number, name: normalized };
 }
 
 export function addTagToNote(noteId: number, tagName: string, position: number): NoteTag {
@@ -193,16 +204,27 @@ export function getAllTags(): Tag[] {
   return stmt.all() as Tag[];
 }
 
+/**
+ * Returns the top tags used by notes created or edited within the last 90 days.
+ * Only tags that are used by at least one recent note will be returned.
+ * Ordering: usage_count DESC, name ASC. Caller may re-order alphabetically for display.
+ */
 export function getTopTags(limit: number): Tag[] {
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
   const stmt = db.prepare(`
     SELECT t.id, t.name, COUNT(nt.noteId) as usage_count
     FROM tags t
-    LEFT JOIN note_tags nt ON t.id = nt.tagId
+    JOIN note_tags nt ON t.id = nt.tagId
+    JOIN notes n ON nt.noteId = n.id
+    WHERE (n.updatedAt >= ? OR n.createdAt >= ? OR (n.lastEdited IS NOT NULL AND n.lastEdited >= ?))
     GROUP BY t.id
+    HAVING usage_count > 0
     ORDER BY usage_count DESC, t.name
     LIMIT ?
   `);
-  return stmt.all(limit) as Tag[];
+
+  return stmt.all(cutoff, cutoff, cutoff, limit) as Tag[];
 }
 
 // Search operations
