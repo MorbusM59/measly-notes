@@ -43,6 +43,16 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     };
   }, [note, content]);
 
+  // When entering view mode, clear any pending autosave so nothing runs during preview.
+  useEffect(() => {
+    if (showPreview) {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+    }
+  }, [showPreview]);
+
   // Load note content when note changes
   useEffect(() => {
     if (note) {
@@ -415,11 +425,25 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       clearTimeout(autoSaveTimeoutRef.current);
     }
     
-    // Don't auto-save while on first line
-    if (!isOnFirstLine && note) {
+    // Don't auto-save while on first line or while in preview mode
+    if (!isOnFirstLine && note && !showPreview) {
       autoSaveTimeoutRef.current = setTimeout(() => {
         autoSave();
       }, 1000);
+    }
+  };
+
+  // Handle Enter key: save immediately when a new line is started (but not when editing title).
+  const handleTextareaKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter') {
+      // Only save when not on the first line and when a note exists and content has changed
+      if (!isOnFirstLine && note && content !== lastSavedContentRef.current) {
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
+          autoSaveTimeoutRef.current = null;
+        }
+        autoSave();
+      }
     }
   };
 
@@ -580,6 +604,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             className="markdown-textarea"
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
+            onKeyUp={handleTextareaKeyUp}
             placeholder={`# Note Title
 
 Start typing your note here...`}

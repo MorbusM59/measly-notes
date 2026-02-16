@@ -46,6 +46,21 @@ export const App: React.FC = () => {
     })();
   }, []);
 
+  // Helper to toggle preview mode and force-save before entering preview
+  const togglePreview = async (next: boolean) => {
+    // If entering preview mode, force a save first (so preview renders current content).
+    if (next && (window as any).forceSaveCurrentNote) {
+      try {
+        await (window as any).forceSaveCurrentNote();
+      } catch (err) {
+        console.warn('forceSaveCurrentNote failed', err);
+      }
+    }
+
+    setShowPreview(next);
+    localStorage.setItem('markdown-show-preview', String(next));
+  };
+
   // Global keyboard shortcuts:
   // - Ctrl+Enter to create new note
   // - Shift+Enter to toggle edit/view (global)
@@ -58,17 +73,14 @@ export const App: React.FC = () => {
       }
       if (e.shiftKey && e.key === 'Enter') {
         e.preventDefault();
-        setShowPreview(prev => {
-          const next = !prev;
-          localStorage.setItem('markdown-show-preview', String(next));
-          return next;
-        });
+        // Use the togglePreview helper so we force-save when entering preview
+        togglePreview(!showPreview);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [showPreview]);
 
   const handleCreateNote = async () => {
     // Force save the current note before creating a new one
@@ -201,10 +213,7 @@ export const App: React.FC = () => {
           note={selectedNote}
           onNoteUpdate={handleNoteUpdate}
           showPreview={showPreview}
-          onTogglePreview={(next: boolean) => {
-            setShowPreview(next);
-            localStorage.setItem('markdown-show-preview', String(next));
-          }}
+          onTogglePreview={(next: boolean) => togglePreview(next)}
         />
       </div>
     </div>
