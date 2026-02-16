@@ -316,6 +316,53 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }, 0);
   };
 
+  // Sanitize pasted text: prefer plain text and strip links/HTML-rich data.
+  const sanitizePastedText = (text: string): string => {
+    if (!text) return '';
+
+    // Replace markdown links [label](url) with the label
+    let out = text.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');
+
+    // Remove protocol links like https://... or http://...
+    out = out.replace(/https?:\/\/\S+/gi, '');
+
+    // Remove www.-style links
+    out = out.replace(/www\.\S+/gi, '');
+
+    // Remove mailto: links
+    out = out.replace(/mailto:\S+/gi, '');
+
+    // Normalize whitespace and trim
+    out = out.replace(/\r\n/g, '\n').replace(/\s+$/g, '').trim();
+
+    return out;
+  };
+
+  // Intercept paste events on the textarea to ensure we only insert plain, sanitized text.
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+
+    // Prefer plain text from the clipboard
+    let plain = e.clipboardData.getData('text/plain') || '';
+
+    // Fallback: if there's no plain text, try to extract visible text from HTML clipboard data
+    if (!plain) {
+      const html = e.clipboardData.getData('text/html') || '';
+      if (html) {
+        // Create a temporary DOM node to strip tags and get visible text
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        plain = tmp.textContent || tmp.innerText || '';
+      }
+    }
+
+    const sanitized = sanitizePastedText(plain);
+    if (sanitized) {
+      insertAtCursor(sanitized);
+    }
+    // If sanitized is empty (e.g. the paste was just a URL and we stripped it), do nothing.
+  };
+
   const prependToLines = (prefix: string, numbered = false) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -605,6 +652,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
             onKeyUp={handleTextareaKeyUp}
+            onPaste={handlePaste}
             placeholder={`# Note Title
 
 Start typing your note here...`}
