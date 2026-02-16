@@ -464,14 +464,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ) : null}
             </div>
           </div>
-          <button
-            className={`note-delete-btn ${deleteArmedId === result.note.id ? 'delete-armed' : ''}`}
-            onClick={(e) => { e.stopPropagation(); handleDeleteNote(e, result.note.id); }}
-            onMouseLeave={handleDeleteMouseLeave}
-            title={deleteArmedId === result.note.id ? 'Click again to confirm deletion' : 'Delete note'}
-          >
-            ×
-          </button>
         </div>
       ))}
     </div>
