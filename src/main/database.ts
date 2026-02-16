@@ -13,11 +13,14 @@ export async function initDatabase(): Promise<void> {
   } catch (error) {
     throw new Error(`Failed to create data directory: ${error instanceof Error ? error.message : String(error)}`);
   }
-  
-  // Initialize database (use getDbPath to respect dev vs prod paths)
+
+  // Open DB (creates file if missing)
   db = new Database(getDbPath());
-  
+
+  // Create main schema (explicit; includes lastEdited from the start)
   db.exec(`
+    PRAGMA foreign_keys = ON;
+
     CREATE TABLE IF NOT EXISTS notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -26,12 +29,12 @@ export async function initDatabase(): Promise<void> {
       updatedAt TEXT NOT NULL,
       lastEdited TEXT
     );
-    
+
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL
     );
-    
+
     CREATE TABLE IF NOT EXISTS note_tags (
       noteId INTEGER NOT NULL,
       tagId INTEGER NOT NULL,
@@ -40,22 +43,26 @@ export async function initDatabase(): Promise<void> {
       FOREIGN KEY (noteId) REFERENCES notes(id) ON DELETE CASCADE,
       FOREIGN KEY (tagId) REFERENCES tags(id)
     );
-    
+
     CREATE INDEX IF NOT EXISTS idx_note_tags_note ON note_tags(noteId);
     CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tagId);
   `);
 
-  // For older DBs, add lastEdited column if it's missing
+  // Create FTS5 virtual table to index title and content for fast search.
+  // noteId is stored as text/unindexed column so we can join back to notes.
+  // FTS5 must be available in the SQLite build used by Electron (most distributions include it).
   try {
-    const colsStmt = db.prepare("PRAGMA table_info('notes')");
-    const cols = colsStmt.all();
-    const hasLastEdited = cols.some((c: any) => c.name === 'lastEdited');
-    if (!hasLastEdited) {
-      db.exec(`ALTER TABLE notes ADD COLUMN lastEdited TEXT`);
-    }
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+        noteId UNINDEXED,
+        title,
+        content
+      );
+    `);
   } catch (err) {
-    // non-fatal; leave DB as-is if PRAGMA fails
-    console.warn('Could not ensure lastEdited column:', err);
+    // If FTS5 is not available, surface an error so it's obvious during development.
+    console.error('[db] Failed to create FTS table; FTS5 may be unavailable', err);
+    throw err;
   }
 }
 
@@ -76,8 +83,8 @@ export function createNote(title: string, filePath: string): Note {
     VALUES (?, ?, ?, ?, ?)
   `);
   const result = stmt.run(title, filePath, now, now, now);
-  
-  return {
+
+  const note: Note = {
     id: result.lastInsertRowid as number,
     title,
     filePath,
@@ -85,6 +92,8 @@ export function createNote(title: string, filePath: string): Note {
     updatedAt: now,
     lastEdited: now,
   };
+
+  return note;
 }
 
 export function getAllNotes(): Note[] {
@@ -112,6 +121,13 @@ export function updateNoteFilePath(id: number, filePath: string): void {
 export function deleteNote(id: number): void {
   const stmt = db.prepare('DELETE FROM notes WHERE id = ?');
   stmt.run(id);
+
+  // Also remove any FTS entry
+  try {
+    removeNoteFts(id);
+  } catch (err) {
+    console.warn('[db] Failed to remove FTS entry for note', id, err);
+  }
 }
 
 export function getNoteById(id: number): Note | undefined {
@@ -133,10 +149,10 @@ export function getNotesPage(page: number, perPage: number): { notes: Note[]; to
   const offset = (page - 1) * perPage;
   const notesStmt = db.prepare('SELECT * FROM notes ORDER BY updatedAt DESC LIMIT ? OFFSET ?');
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM notes');
-  
+
   const notes = notesStmt.all(perPage, offset) as Note[];
   const result = countStmt.get() as { count: number };
-  
+
   return { notes, total: result.count };
 }
 
@@ -147,7 +163,7 @@ export function createOrGetTag(name: string): Tag {
   if (existing) {
     return existing;
   }
-  
+
   const stmt = db.prepare('INSERT INTO tags (name) VALUES (?)');
   const result = stmt.run(normalized);
   return { id: result.lastInsertRowid as number, name: normalized };
@@ -155,19 +171,19 @@ export function createOrGetTag(name: string): Tag {
 
 export function addTagToNote(noteId: number, tagName: string, position: number): NoteTag {
   const tag = createOrGetTag(tagName);
-  
+
   // Remove if already exists (to update position)
   db.prepare('DELETE FROM note_tags WHERE noteId = ? AND tagId = ?').run(noteId, tag.id);
-  
+
   // Insert with new position
   db.prepare('INSERT INTO note_tags (noteId, tagId, position) VALUES (?, ?, ?)').run(noteId, tag.id, position);
-  
+
   return { noteId, tagId: tag.id, position, tag };
 }
 
 export function removeTagFromNote(noteId: number, tagId: number): void {
   db.prepare('DELETE FROM note_tags WHERE noteId = ? AND tagId = ?').run(noteId, tagId);
-  
+
   // Re-index remaining tags
   const tags = db.prepare('SELECT * FROM note_tags WHERE noteId = ? ORDER BY position').all(noteId) as NoteTag[];
   tags.forEach((tag, index) => {
@@ -189,7 +205,7 @@ export function getNoteTags(noteId: number): NoteTag[] {
     WHERE nt.noteId = ?
     ORDER BY nt.position
   `);
-  
+
   const rows = stmt.all(noteId) as Array<{ noteId: number; tagId: number; position: number; id: number; name: string }>;
   return rows.map(row => ({
     noteId: row.noteId,
@@ -227,23 +243,97 @@ export function getTopTags(limit: number): Tag[] {
   return stmt.all(cutoff, cutoff, cutoff, limit) as Tag[];
 }
 
-// Search operations
-// Note: Text search with content is handled in the IPC handler (index.ts)
-// This function only searches titles
-export function searchNotes(query: string): SearchResult[] {
-  const searchTerm = `%${query}%`;
-  const stmt = db.prepare(`
-    SELECT * FROM notes 
-    WHERE title LIKE ?
-    ORDER BY updatedAt DESC
-  `);
-  
-  const notes = stmt.all(searchTerm) as Note[];
-  return notes.map(note => ({
-    note,
-    matchType: 'title' as const
-  }));
+/**
+ * FTS helpers
+ */
+
+// Upsert the FTS entry for a note
+export function upsertNoteFts(noteId: number, title: string, content: string): void {
+  // Use text version of noteId for storage in FTS table
+  const idStr = String(noteId);
+  const del = db.prepare('DELETE FROM notes_fts WHERE noteId = ?');
+  del.run(idStr);
+
+  const ins = db.prepare('INSERT INTO notes_fts(noteId, title, content) VALUES (?, ?, ?)');
+  ins.run(idStr, title, content);
 }
+
+// Remove FTS entry
+export function removeNoteFts(noteId: number): void {
+  const idStr = String(noteId);
+  db.prepare('DELETE FROM notes_fts WHERE noteId = ?').run(idStr);
+}
+
+/**
+ * Search using FTS index.
+ * - Uses MATCH to narrow candidates.
+ * - Reads content only for matched notes to create a snippet (preserves existing UX).
+ */
+export async function searchNotes(query: string): Promise<SearchResult[]> {
+  // Guard empty query
+  const trimmed = (query || '').trim();
+  if (!trimmed) return [];
+
+  // For FTS MATCH usage: keep it simple and let FTS tokenize as configured
+  // Using parameter binding for safety.
+  const matchExpr = trimmed; // you can transform to handle phrase search or prefix queries
+
+  // Get matching noteIds (limit results to protect memory)
+  const stmt = db.prepare(`SELECT noteId FROM notes_fts WHERE notes_fts MATCH ? LIMIT 200`);
+  const rows = stmt.all(matchExpr) as Array<{ noteId: string }>;
+
+  const results: SearchResult[] = [];
+
+  for (const r of rows) {
+    const id = Number(r.noteId);
+    if (Number.isNaN(id)) continue;
+    const note = getNoteById(id);
+    if (!note) continue;
+
+    // Load content for snippet generation only (IO limited to matched notes)
+    let content = '';
+    try {
+      content = await fs.readFile(note.filePath, 'utf-8');
+    } catch {
+      content = '';
+    }
+
+    const lowerContent = content.toLowerCase();
+    const lowerQuery = trimmed.toLowerCase();
+    const matchInTitle = note.title.toLowerCase().includes(lowerQuery);
+    const matchInContent = content && lowerContent.includes(lowerQuery);
+
+    const snippet = matchInContent ? extractSnippet(content, trimmed) : undefined;
+
+    results.push({
+      note,
+      matchType: matchInTitle ? 'title' : 'content',
+      snippet
+    });
+  }
+
+  return results;
+}
+
+function extractSnippet(content: string, query: string, radius = 50): string {
+  const lowerContent = content.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerContent.indexOf(lowerQuery);
+
+  if (index === -1) return '';
+
+  const start = Math.max(0, index - radius);
+  const end = Math.min(content.length, index + query.length + radius);
+
+  let snippet = content.substring(start, end);
+  if (start > 0) snippet = '...' + snippet;
+  if (end < content.length) snippet = snippet + '...';
+
+  return snippet;
+}
+
+// Search operations that rely on DB-only lookups (titles/tags)
+// kept where useful for non-content queries
 
 export function searchNotesByTag(tagName: string): SearchResult[] {
   const stmt = db.prepare(`
@@ -254,7 +344,7 @@ export function searchNotesByTag(tagName: string): SearchResult[] {
     WHERE t.name LIKE ?
     ORDER BY nt.position, n.updatedAt DESC
   `);
-  
+
   const notes = stmt.all(`%${tagName}%`) as Note[];
   return notes.map(note => ({
     note,
@@ -271,10 +361,10 @@ export function getNotesByPrimaryTag(): { [tagName: string]: Note[] } {
     WHERE nt.position = 0
     ORDER BY t.name, n.updatedAt DESC
   `);
-  
+
   const rows = stmt.all() as Array<Note & { tagName: string }>;
   const result: { [tagName: string]: Note[] } = {};
-  
+
   rows.forEach(row => {
     const tagName = row.tagName;
     const note: Note = {
@@ -285,13 +375,13 @@ export function getNotesByPrimaryTag(): { [tagName: string]: Note[] } {
       updatedAt: row.updatedAt,
       lastEdited: (row as any).lastEdited ?? null
     };
-    
+
     if (!result[tagName]) {
       result[tagName] = [];
     }
     result[tagName].push(note);
   });
-  
+
   return result;
 }
 
@@ -312,7 +402,7 @@ export function getCategoryHierarchy() {
     LEFT JOIN tags t2 ON nt2.tagId = t2.id
     ORDER BY t0.name, t1.name, t2.name, n.updatedAt DESC
   `);
-  
+
   const rows = stmt.all() as Array<{
     id: number;
     title: string;
@@ -324,10 +414,10 @@ export function getCategoryHierarchy() {
     secondaryTag: string | null;
     tertiaryTag: string | null;
   }>;
-  
+
   const hierarchy: any = {};
   const uncategorizedNotes: Note[] = [];
-  
+
   rows.forEach(row => {
     const note: Note = {
       id: row.id,
@@ -337,17 +427,17 @@ export function getCategoryHierarchy() {
       updatedAt: row.updatedAt,
       lastEdited: row.lastEdited ?? null
     };
-    
+
     const primary = row.primaryTag;
     const secondary = row.secondaryTag;
     const tertiary = row.tertiaryTag;
-    
+
     // Note has no tags - add to uncategorized
     if (!primary) {
       uncategorizedNotes.push(note);
       return;
     }
-    
+
     // Initialize primary tag if needed
     if (!hierarchy[primary]) {
       hierarchy[primary] = {
@@ -355,13 +445,13 @@ export function getCategoryHierarchy() {
         secondary: {}
       };
     }
-    
+
     // Note has only primary tag
     if (!secondary) {
       hierarchy[primary].notes.push(note);
       return;
     }
-    
+
     // Initialize secondary tag if needed
     if (!hierarchy[primary].secondary[secondary]) {
       hierarchy[primary].secondary[secondary] = {
@@ -369,26 +459,26 @@ export function getCategoryHierarchy() {
         tertiary: {}
       };
     }
-    
+
     // Note has primary + secondary but no tertiary
     if (!tertiary) {
       hierarchy[primary].secondary[secondary].notes.push(note);
       return;
     }
-    
+
     // Initialize tertiary tag if needed
     if (!hierarchy[primary].secondary[secondary].tertiary[tertiary]) {
       hierarchy[primary].secondary[secondary].tertiary[tertiary] = [];
     }
-    
+
     // Note has all three tags
     hierarchy[primary].secondary[secondary].tertiary[tertiary].push(note);
   });
-  
+
   // Sort uncategorized notes by date descending (most recent first)
   uncategorizedNotes.sort((a, b) => {
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
   });
-  
+
   return { hierarchy, uncategorizedNotes };
 }

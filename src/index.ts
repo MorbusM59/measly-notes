@@ -1,9 +1,10 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { 
-  initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote, 
+import {
+  initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote,
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
-  addTagToNote, removeTagFromNote, reorderNoteTags, getNoteTags, 
-  getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy, getLastEditedNote
+  addTagToNote, removeTagFromNote, reorderNoteTags, getNoteTags,
+  getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy, getLastEditedNote,
+  upsertNoteFts, removeNoteFts, searchNotes
 } from './main/database';
 import { initFileSystem, saveNoteContent, loadNoteContent, deleteNoteFile } from './main/fileSystem';
 import { SearchResult } from './shared/types';
@@ -103,6 +104,14 @@ app.whenReady().then(async () => {
       const note = createNote(title, '');
       const filePath = await saveNoteContent(note.id, '');
       updateNoteFilePath(note.id, filePath);
+
+      // Ensure FTS entry exists for the new note (empty content initially)
+      try {
+        upsertNoteFts(note.id, note.title, '');
+      } catch (err) {
+        console.warn('[main] could not create FTS entry for new note', note.id, err);
+      }
+
       const updatedNote = getNoteById(note.id);
       if (!updatedNote) {
         throw new Error(`Failed to retrieve note ${note.id} after creation`);
@@ -115,6 +124,14 @@ app.whenReady().then(async () => {
       if (note) {
         await saveNoteContent(id, content);
         updateNote(id); // updates timestamps including lastEdited
+
+        // Update FTS index so searches will include the new content
+        try {
+          upsertNoteFts(id, note.title, content);
+        } catch (err) {
+          console.error('[main] failed to update FTS index for note', id, err);
+        }
+
         return getNoteById(id) ?? null;
       }
       return null;
@@ -137,11 +154,29 @@ app.whenReady().then(async () => {
       if (note) {
         await deleteNoteFile(note.filePath);
         deleteNote(id);
+
+        // Remove FTS entry if present
+        try {
+          removeNoteFts(id);
+        } catch (err) {
+          console.warn('[main] failed to remove FTS entry for deleted note', id, err);
+        }
       }
     });
 
     ipcMain.handle('update-note-title', async (_, id: number, title: string) => {
       updateNoteTitle(id, title);
+
+      // keep FTS title in sync; load content to preserve FTS content column
+      try {
+        const note = getNoteById(id);
+        if (note) {
+          const content = await loadNoteContent(note.filePath);
+          upsertNoteFts(id, title, content);
+        }
+      } catch (err) {
+        console.warn('[main] failed to update FTS entry after title change', id, err);
+      }
     });
 
     ipcMain.handle('get-notes-page', async (_, page: number, perPage: number) => {
@@ -173,28 +208,15 @@ app.whenReady().then(async () => {
       return getTopTags(limit);
     });
 
-    // Search operations
+    // Search operations - delegate to FTS-backed search
     ipcMain.handle('search-notes', async (_, query: string) => {
-      const allNotes = getAllNotes();
-      const results: SearchResult[] = [];
-
-      for (const note of allNotes) {
-        const matchInTitle = note.title.toLowerCase().includes(query.toLowerCase());
-
-        // Load note content to search
-        const content = await loadNoteContent(note.filePath);
-        const matchInContent = content.toLowerCase().includes(query.toLowerCase());
-
-        if (matchInTitle || matchInContent) {
-          results.push({
-            note,
-            matchType: matchInTitle ? 'title' : 'content',
-            snippet: matchInContent ? extractSnippet(content, query) : undefined
-          });
-        }
+      try {
+        return await searchNotes(query);
+      } catch (err) {
+        console.error('[main] search-notes failed', err);
+        // Fallback: return empty results on error
+        return [] as SearchResult[];
       }
-
-      return results;
     });
 
     function extractSnippet(content: string, query: string, radius = 50): string {
