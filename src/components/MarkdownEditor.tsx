@@ -25,17 +25,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const lastSavedTitleRef = useRef('');
   const currentNoteIdRef = useRef<number | null>(null);
 
-  // Editor font options (these should match the @font-face names you added in MarkdownThemes.css)
+  // Editor font options — reduced to just Syne Mono and Red Hat Mono
   const editorFontOptions: { key: string; label: string; family: string }[] = [
-    { key: 'fira', label: 'Fira Code', family: "'Fira Code', 'Menlo', 'Monaco', monospace" },
-    { key: 'ubuntu', label: 'Ubuntu Mono', family: "'Ubuntu Mono', 'Menlo', 'Monaco', monospace" },
     { key: 'syne', label: 'Syne Mono', family: "'Syne Mono', 'Menlo', 'Monaco', monospace" },
-    { key: 'suse', label: 'SUSE Mono', family: "'SUSE Mono', 'Menlo', 'Monaco', monospace" },
-    { key: 'xanh', label: 'Xanh Mono', family: "'Xanh Mono', 'Menlo', 'Monaco', monospace" },
-    { key: 'libertinus', label: 'Libertinus Mono', family: "'Libertinus Mono', 'Menlo', 'Monaco', monospace" },
-    { key: 'kode', label: 'Kode Mono', family: "'Kode Mono', 'Menlo', 'Monaco', monospace" },
     { key: 'redhat', label: 'Red Hat Mono', family: "'Red Hat Mono', 'Menlo', 'Monaco', monospace" },
-    { key: 'nova', label: 'Nova Mono', family: "'Nova Mono', 'Menlo', 'Monaco', monospace" },
   ];
   // Default editor font (will be overridden by saved preference if present)
   const [editorFont, setEditorFont] = useState<string>(editorFontOptions[0].family);
@@ -140,23 +133,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   };
 
   // Preload the selected font so switching between edit/view is immediate.
-  // This uses the Font Loading API to request the primary family defined in the
-  // editorFont value (which is a CSS font-family string with fallbacks).
   useEffect(() => {
     const primary = getPrimaryFamily(editorFont);
     if (!primary) return;
 
-    // document.fonts.load will use the @font-face declarations to load the font.
     try {
       if ((document as any).fonts && typeof (document as any).fonts.load === 'function') {
-        // Request a load (size value doesn't matter much, using 12px)
-        // we intentionally don't await here; it's a background preload.
-        void (document as any).fonts.load(`12px "${primary}"`).then(() => {
-          // loaded (no-op)
-        }).catch((err: any) => {
-          // load failed — non-fatal
-          // console.debug('Font preload failed for', primary, err);
-        });
+        void (document as any).fonts.load(`12px "${primary}"`).catch(() => {});
       }
     } catch (err) {
       // ignore
@@ -525,45 +508,71 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   };
 
+  // toolbar layout styles: two flex areas (left/right) and fixed toolbar height/line-height
+  const toolbarStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    height: '44px',       // fixed height to avoid 1px difference when toggling modes
+    lineHeight: '44px',
+    padding: '0 8px',
+  };
+  const leftToolsStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  };
+  const rightToolsStyle: React.CSSProperties = {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  };
+
   return (
     <div className="markdown-editor">
-      <div className="editor-toolbar">
-        <button
-          className={`toolbar-toggle-btn ${!showPreview ? 'active' : ''}`}
-          onClick={() => onTogglePreview(!showPreview)}
-        >
-          {showPreview ? 'Edit' : 'View'}
-        </button>
+      <div className="editor-toolbar" style={toolbarStyle}>
+        <div style={leftToolsStyle}>
+          <button
+            className={`toolbar-toggle-btn ${!showPreview ? 'active' : ''}`}
+            onClick={() => onTogglePreview(!showPreview)}
+          >
+            {showPreview ? 'Edit' : 'View'}
+          </button>
 
-        {!showPreview && (
-          <div className="markdown-toolbar">
-            <button className={`toolbar-btn-icon ${activeFormats.has('bold') ? 'active' : ''}`} onClick={() => wrapSelection('**')} title="Bold">
-              <strong>B</strong>
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('italic') ? 'active' : ''}`} onClick={() => wrapSelection('*')} title="Italic">
-              <em>I</em>
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('strikethrough') ? 'active' : ''}`} onClick={() => wrapSelection('~~')} title="Strikethrough">
-              <span style={{ textDecoration: 'line-through' }}>S</span>
-            </button>
-            <span className="toolbar-divider">|</span>
-            <button className={`toolbar-btn-icon ${activeFormats.has('h1') ? 'active' : ''}`} onClick={() => insertHeading(1)} title="Heading 1">H1</button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('h2') ? 'active' : ''}`} onClick={() => insertHeading(2)} title="Heading 2">H2</button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('h3') ? 'active' : ''}`} onClick={() => insertHeading(3)} title="Heading 3">H3</button>
-            <span className="toolbar-divider">|</span>
-            <button className="toolbar-btn-icon" onClick={() => wrapSelection('[', '](url)')} title="Link">🔗</button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('code') ? 'active' : ''}`} onClick={() => wrapSelection('`')} title="Inline Code">{'<>'}</button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('codeblock') ? 'active' : ''}`} onClick={() => wrapSelection('```\n', '\n```')} title="Code Block">{'{ }'}</button>
-            <span className="toolbar-divider">|</span>
-            <button className={`toolbar-btn-icon ${activeFormats.has('bullet') ? 'active' : ''}`} onClick={() => prependToLines('- ')} title="Bulleted List">≡</button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('number') ? 'active' : ''}`} onClick={() => prependToLines('', true)} title="Numbered List">#</button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">"</button>
-            <button className="toolbar-btn-icon" onClick={() => insertAtCursor('\n---\n')} title="Horizontal Rule">—</button>
-          </div>
-        )}
+          {/* left-aligned text editing tools - only in edit mode */}
+          {!showPreview && (
+            <div className="markdown-toolbar">
+              <button className={`toolbar-btn-icon ${activeFormats.has('bold') ? 'active' : ''}`} onClick={() => wrapSelection('**')} title="Bold">
+                <strong>B</strong>
+              </button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('italic') ? 'active' : ''}`} onClick={() => wrapSelection('*')} title="Italic">
+                <em>I</em>
+              </button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('strikethrough') ? 'active' : ''}`} onClick={() => wrapSelection('~~')} title="Strikethrough">
+                <span style={{ textDecoration: 'line-through' }}>S</span>
+              </button>
+              <span className="toolbar-divider">|</span>
+              <button className={`toolbar-btn-icon ${activeFormats.has('h1') ? 'active' : ''}`} onClick={() => insertHeading(1)} title="Heading 1">H1</button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('h2') ? 'active' : ''}`} onClick={() => insertHeading(2)} title="Heading 2">H2</button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('h3') ? 'active' : ''}`} onClick={() => insertHeading(3)} title="Heading 3">H3</button>
+              <span className="toolbar-divider">|</span>
+              <button className="toolbar-btn-icon" onClick={() => wrapSelection('[', '](url)')} title="Link">🔗</button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('code') ? 'active' : ''}`} onClick={() => wrapSelection('`')} title="Inline Code">{'<>'}</button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('codeblock') ? 'active' : ''}`} onClick={() => wrapSelection('```\n', '\n```')} title="Code Block">{'{ }'}</button>
+              <span className="toolbar-divider">|</span>
+              <button className={`toolbar-btn-icon ${activeFormats.has('bullet') ? 'active' : ''}`} onClick={() => prependToLines('- ')} title="Bulleted List">≡</button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('number') ? 'active' : ''}`} onClick={() => prependToLines('', true)} title="Numbered List">#</button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">"</button>
+              <button className="toolbar-btn-icon" onClick={() => insertAtCursor('\n---\n')} title="Horizontal Rule">—</button>
+            </div>
+          )}
+        </div>
 
-        {showPreview && (
-          <>
+        {/* right-aligned controls (size/spacings/fonts/style) */}
+        <div style={rightToolsStyle}>
+          {/* In view mode we keep the Style selector (applies to preview rendering) */}
+          {showPreview && (
             <div className="style-selector">
               <label className="selector-label">Style:</label>
               <select value={viewStyle} onChange={(e) => handleStyleChange(e.target.value)}>
@@ -576,39 +585,43 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
                 <option value="script">Script</option>
               </select>
             </div>
-            <div className="style-selector">
-              <label className="selector-label">Size:</label>
-              <select value={fontSize} onChange={(e) => handleFontSizeChange(e.target.value)}>
-                <option value="xs">XS</option>
-                <option value="s">S</option>
-                <option value="m">M</option>
-                <option value="l">L</option>
-                <option value="xl">XL</option>
-              </select>
-            </div>
-            <div className="style-selector">
-              <label className="selector-label">Spacing:</label>
-              <select value={spacing} onChange={(e) => handleSpacingChange(e.target.value)}>
-                <option value="tight">Tight</option>
-                <option value="compact">Compact</option>
-                <option value="cozy">Cozy</option>
-                <option value="wide">Wide</option>
-              </select>
-            </div>
+          )}
 
-            {/* Editor Font selector (uses the same style as other selectors) */}
-            <div className="style-selector">
-              <label className="selector-label">Editor Font:</label>
-              <select value={editorFont} onChange={(e) => handleEditorFontChange(e.target.value)}>
-                {editorFontOptions.map((opt) => (
-                  <option key={opt.key} value={opt.family}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </>
-        )}
+          {/* Size selector - available in both edit and view mode */}
+          <div className="style-selector">
+            <label className="selector-label">Size:</label>
+            <select value={fontSize} onChange={(e) => handleFontSizeChange(e.target.value)}>
+              <option value="xs">XS</option>
+              <option value="s">S</option>
+              <option value="m">M</option>
+              <option value="l">L</option>
+              <option value="xl">XL</option>
+            </select>
+          </div>
+
+          {/* Spacing selector - available in both edit and view mode */}
+          <div className="style-selector">
+            <label className="selector-label">Spacing:</label>
+            <select value={spacing} onChange={(e) => handleSpacingChange(e.target.value)}>
+              <option value="tight">Tight</option>
+              <option value="compact">Compact</option>
+              <option value="cozy">Cozy</option>
+              <option value="wide">Wide</option>
+            </select>
+          </div>
+
+          {/* Editor Font selector - reduced to Syne Mono and Red Hat Mono */}
+          <div className="style-selector">
+            <label className="selector-label">Editor Font:</label>
+            <select value={editorFont} onChange={(e) => handleEditorFontChange(e.target.value)}>
+              {editorFontOptions.map((opt) => (
+                <option key={opt.key} value={opt.family}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
         {isOnFirstLine && <span className="auto-save-status">Auto-save paused (editing title)</span>}
       </div>
