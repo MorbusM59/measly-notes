@@ -15,9 +15,17 @@ interface MarkdownEditorProps {
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview }) => {
   const [content, setContent] = useState('');
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
+
+  // View (preview) settings
   const [viewStyle, setViewStyle] = useState<string>('clean');
-  const [fontSize, setFontSize] = useState<string>('m');
-  const [spacing, setSpacing] = useState<string>('cozy');
+  const [viewFontSize, setViewFontSize] = useState<string>('m');
+  const [viewSpacing, setViewSpacing] = useState<string>('cozy');
+
+  // Editor settings (separate from view)
+  const [editorStyle, setEditorStyle] = useState<string>('syne');
+  const [editorFontSize, setEditorFontSize] = useState<string>('m');
+  const [editorSpacing, setEditorSpacing] = useState<string>('cozy');
+
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -25,13 +33,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const lastSavedTitleRef = useRef('');
   const currentNoteIdRef = useRef<number | null>(null);
 
-  // Editor font options — reduced to just Syne Mono and Red Hat Mono
-  const editorFontOptions: { key: string; label: string; family: string }[] = [
+  // Editor style options — reduced to Syne Mono and Red Hat Mono.
+  // Each style maps to a font-family stack. These style names are the "editor styles"
+  // you requested — they can also be used in CSS if you add corresponding classes.
+  const editorStyleOptions: { key: string; label: string; family: string }[] = [
     { key: 'syne', label: 'Syne Mono', family: "'Syne Mono', 'Menlo', 'Monaco', monospace" },
     { key: 'redhat', label: 'Red Hat Mono', family: "'Red Hat Mono', 'Menlo', 'Monaco', monospace" },
   ];
-  // Default editor font (will be overridden by saved preference if present)
-  const [editorFont, setEditorFont] = useState<string>(editorFontOptions[0].family);
+
+  const getEditorFamily = (styleKey: string): string => {
+    const opt = editorStyleOptions.find(o => o.key === styleKey);
+    return opt ? opt.family : editorStyleOptions[0].family;
+  };
 
   // Helper: extract the primary font-family name from a CSS font-family string
   // Example: "'Fira Code', 'Menlo', 'Monaco', monospace" -> Fira Code
@@ -99,42 +112,59 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [showPreview]);
 
-  // Load and persist view style, font size, spacing and editor font
+  // Load and persist view/editor settings.
+  // For backward compatibility: read legacy keys 'markdown-font-size' and 'markdown-spacing'
+  // as fallbacks for view settings.
   useEffect(() => {
-    const savedStyle = localStorage.getItem('markdown-view-style');
-    const savedFontSize = localStorage.getItem('markdown-font-size');
-    const savedSpacing = localStorage.getItem('markdown-spacing');
-    const savedEditorFont = localStorage.getItem('markdown-editor-font');
+    const savedViewStyle = localStorage.getItem('markdown-view-style');
+    const savedViewFontSize = localStorage.getItem('markdown-view-font-size') || localStorage.getItem('markdown-font-size');
+    const savedViewSpacing = localStorage.getItem('markdown-view-spacing') || localStorage.getItem('markdown-spacing');
 
-    if (savedStyle) setViewStyle(savedStyle);
-    if (savedFontSize) setFontSize(savedFontSize);
-    if (savedSpacing) setSpacing(savedSpacing);
-    if (savedEditorFont) setEditorFont(savedEditorFont);
+    const savedEditorStyle = localStorage.getItem('markdown-editor-style');
+    const savedEditorFontSize = localStorage.getItem('markdown-editor-font-size');
+    const savedEditorSpacing = localStorage.getItem('markdown-editor-spacing');
+
+    if (savedViewStyle) setViewStyle(savedViewStyle);
+    if (savedViewFontSize) setViewFontSize(savedViewFontSize);
+    if (savedViewSpacing) setViewSpacing(savedViewSpacing);
+
+    if (savedEditorStyle) setEditorStyle(savedEditorStyle);
+    if (savedEditorFontSize) setEditorFontSize(savedEditorFontSize);
+    if (savedEditorSpacing) setEditorSpacing(savedEditorSpacing);
   }, []);
 
-  const handleStyleChange = (style: string) => {
+  // View handlers
+  const handleViewStyleChange = (style: string) => {
     setViewStyle(style);
     localStorage.setItem('markdown-view-style', style);
   };
-
-  const handleFontSizeChange = (size: string) => {
-    setFontSize(size);
-    localStorage.setItem('markdown-font-size', size);
+  const handleViewFontSizeChange = (size: string) => {
+    setViewFontSize(size);
+    localStorage.setItem('markdown-view-font-size', size);
+  };
+  const handleViewSpacingChange = (spacingValue: string) => {
+    setViewSpacing(spacingValue);
+    localStorage.setItem('markdown-view-spacing', spacingValue);
   };
 
-  const handleSpacingChange = (spacingValue: string) => {
-    setSpacing(spacingValue);
-    localStorage.setItem('markdown-spacing', spacingValue);
+  // Editor handlers
+  const handleEditorStyleChange = (style: string) => {
+    setEditorStyle(style);
+    localStorage.setItem('markdown-editor-style', style);
+  };
+  const handleEditorFontSizeChange = (size: string) => {
+    setEditorFontSize(size);
+    localStorage.setItem('markdown-editor-font-size', size);
+  };
+  const handleEditorSpacingChange = (spacingValue: string) => {
+    setEditorSpacing(spacingValue);
+    localStorage.setItem('markdown-editor-spacing', spacingValue);
   };
 
-  const handleEditorFontChange = (value: string) => {
-    setEditorFont(value);
-    localStorage.setItem('markdown-editor-font', value);
-  };
-
-  // Preload the selected font so switching between edit/view is immediate.
+  // Preload the selected editor font so switching between edit/view is immediate.
   useEffect(() => {
-    const primary = getPrimaryFamily(editorFont);
+    const family = getEditorFamily(editorStyle);
+    const primary = getPrimaryFamily(family);
     if (!primary) return;
 
     try {
@@ -144,7 +174,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     } catch (err) {
       // ignore
     }
-  }, [editorFont]);
+  }, [editorStyle]);
 
   // cursor / first line detection
   const checkCursorPosition = useCallback(() => {
@@ -529,6 +559,34 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     gap: '8px',
   };
 
+  // Helper: map size/spacing tokens to actual values for the editor textarea
+  const sizeToPx = (size: string): number => {
+    switch (size) {
+      case 'xs': return 12;
+      case 's': return 14;
+      case 'm': return 16;
+      case 'l': return 18;
+      case 'xl': return 20;
+      default: return 16;
+    }
+  };
+  const spacingToLineHeight = (spacingVal: string): number => {
+    switch (spacingVal) {
+      case 'tight': return 1.2;
+      case 'compact': return 1.4;
+      case 'cozy': return 1.6;
+      case 'wide': return 1.8;
+      default: return 1.6;
+    }
+  };
+
+  // derive inline styles for editor textarea based on editor settings
+  const editorInlineStyle: React.CSSProperties = {
+    fontFamily: getEditorFamily(editorStyle),
+    fontSize: `${sizeToPx(editorFontSize)}px`,
+    lineHeight: `${spacingToLineHeight(editorSpacing)}`,
+  };
+
   return (
     <div className="markdown-editor">
       <div className="editor-toolbar" style={toolbarStyle}>
@@ -569,58 +627,79 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           )}
         </div>
 
-        {/* right-aligned controls (size/spacings/fonts/style) */}
+        {/* right-aligned controls */}
         <div style={rightToolsStyle}>
-          {/* In view mode we keep the Style selector (applies to preview rendering) */}
-          {showPreview && (
-            <div className="style-selector">
-              <label className="selector-label">Style:</label>
-              <select value={viewStyle} onChange={(e) => handleStyleChange(e.target.value)}>
-                <option value="clean">Clean</option>
-                <option value="narrow">Narrow</option>
-                <option value="print">Print</option>
-                <option value="modern">Modern</option>
-                <option value="cute">Cute</option>
-                <option value="hand">Hand</option>
-                <option value="script">Script</option>
-              </select>
-            </div>
+          {showPreview ? (
+            // View mode controls (style affects preview rendering)
+            <>
+              <div className="style-selector">
+                <label className="selector-label">Style:</label>
+                <select value={viewStyle} onChange={(e) => handleViewStyleChange(e.target.value)}>
+                  <option value="clean">Clean</option>
+                  <option value="narrow">Narrow</option>
+                  <option value="print">Print</option>
+                  <option value="modern">Modern</option>
+                  <option value="cute">Cute</option>
+                  <option value="hand">Hand</option>
+                  <option value="script">Script</option>
+                </select>
+              </div>
+
+              <div className="style-selector">
+                <label className="selector-label">Size:</label>
+                <select value={viewFontSize} onChange={(e) => handleViewFontSizeChange(e.target.value)}>
+                  <option value="xs">XS</option>
+                  <option value="s">S</option>
+                  <option value="m">M</option>
+                  <option value="l">L</option>
+                  <option value="xl">XL</option>
+                </select>
+              </div>
+
+              <div className="style-selector">
+                <label className="selector-label">Spacing:</label>
+                <select value={viewSpacing} onChange={(e) => handleViewSpacingChange(e.target.value)}>
+                  <option value="tight">Tight</option>
+                  <option value="compact">Compact</option>
+                  <option value="cozy">Cozy</option>
+                  <option value="wide">Wide</option>
+                </select>
+              </div>
+            </>
+          ) : (
+            // Edit mode controls (style affects editor rendering)
+            <>
+              <div className="style-selector">
+                <label className="selector-label">Style:</label>
+                <select value={editorStyle} onChange={(e) => handleEditorStyleChange(e.target.value)}>
+                  {editorStyleOptions.map(opt => (
+                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="style-selector">
+                <label className="selector-label">Size:</label>
+                <select value={editorFontSize} onChange={(e) => handleEditorFontSizeChange(e.target.value)}>
+                  <option value="xs">XS</option>
+                  <option value="s">S</option>
+                  <option value="m">M</option>
+                  <option value="l">L</option>
+                  <option value="xl">XL</option>
+                </select>
+              </div>
+
+              <div className="style-selector">
+                <label className="selector-label">Spacing:</label>
+                <select value={editorSpacing} onChange={(e) => handleEditorSpacingChange(e.target.value)}>
+                  <option value="tight">Tight</option>
+                  <option value="compact">Compact</option>
+                  <option value="cozy">Cozy</option>
+                  <option value="wide">Wide</option>
+                </select>
+              </div>
+            </>
           )}
-
-          {/* Size selector - available in both edit and view mode */}
-          <div className="style-selector">
-            <label className="selector-label">Size:</label>
-            <select value={fontSize} onChange={(e) => handleFontSizeChange(e.target.value)}>
-              <option value="xs">XS</option>
-              <option value="s">S</option>
-              <option value="m">M</option>
-              <option value="l">L</option>
-              <option value="xl">XL</option>
-            </select>
-          </div>
-
-          {/* Spacing selector - available in both edit and view mode */}
-          <div className="style-selector">
-            <label className="selector-label">Spacing:</label>
-            <select value={spacing} onChange={(e) => handleSpacingChange(e.target.value)}>
-              <option value="tight">Tight</option>
-              <option value="compact">Compact</option>
-              <option value="cozy">Cozy</option>
-              <option value="wide">Wide</option>
-            </select>
-          </div>
-
-          {/* Editor Font selector - reduced to Syne Mono and Red Hat Mono */}
-          <div className="style-selector">
-            <label className="selector-label">Editor Font:</label>
-            <select value={editorFont} onChange={(e) => handleEditorFontChange(e.target.value)}>
-              {editorFontOptions.map((opt) => (
-                <option key={opt.key} value={opt.family}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
 
         {isOnFirstLine && <span className="auto-save-status">Auto-save paused (editing title)</span>}
@@ -638,11 +717,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             placeholder={`# Note Title
 
 Start typing your note here...`}
-            // Apply selected editor font
-            style={{ fontFamily: editorFont }}
+            // Apply selected editor style/size/spacing via inline style so editor settings
+            // only affect the edit mode.
+            style={editorInlineStyle}
           />
         ) : (
-          <div className={`markdown-preview style-${viewStyle} size-${fontSize} spacing-${spacing}`}>
+          <div className={`markdown-preview style-${viewStyle} size-${viewFontSize} spacing-${viewSpacing}`}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
