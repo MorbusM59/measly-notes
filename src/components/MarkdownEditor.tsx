@@ -328,23 +328,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   };
 
   // Sanitize pasted text: prefer plain text and strip links/HTML-rich data.
+  // IMPORTANT: we no longer strip http(s) URLs so users can paste links as regular text.
   const sanitizePastedText = (text: string): string => {
     if (!text) return '';
 
-    // Replace markdown links [label](url) with the label
+    // Replace markdown links [label](url) with the label (preserve readable text)
     let out = text.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');
 
-    // Remove protocol links like https://... or http://...
-    out = out.replace(/https?:\/\/\S+/gi, '');
-
-    // Remove www.-style links
-    out = out.replace(/www\.\S+/gi, '');
-
-    // Remove mailto: links
-    out = out.replace(/mailto:\S+/gi, '');
-
-    // Normalize whitespace and trim
+    // Normalize whitespace and trim. Also remove stray CRLFs normalization.
     out = out.replace(/\r\n/g, '\n').replace(/\s+$/g, '').trim();
+
+    // Strip HTML tags if any (fallback)
+    out = out.replace(/<\/?[^>]+(>|$)/g, '');
 
     return out;
   };
@@ -371,7 +366,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     if (sanitized) {
       insertAtCursor(sanitized);
     }
-    // If sanitized is empty (e.g. the paste was just a URL and we stripped it), do nothing.
+    // If sanitized is empty, do nothing.
   };
 
   const prependToLines = (prefix: string, numbered = false) => {
@@ -560,7 +555,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   return (
     <div className="markdown-editor">
       <div className="editor-toolbar">
-        <button
+        <button 
           className={`toolbar-toggle-btn ${!showPreview ? 'active' : ''}`}
           onClick={() => onTogglePreview(!showPreview)}
         >
@@ -670,7 +665,39 @@ Start typing your note here...`}
           />
         ) : (
           <div className={`markdown-preview style-${viewStyle} size-${fontSize} spacing-${spacing}`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              // Custom link handling:
+              // - If the rendered link text equals the href (i.e. a bare/autolink), render as plain text.
+              // - Otherwise (explicit markdown link like [label](url)) render as a safe anchor that opens in a new tab.
+              components={{
+                a: ({ node, ...props }) => {
+                  const href = (props as any).href as string | undefined;
+                  const children = props.children;
+                  // derive plain text of children
+                  let childText = '';
+                  if (Array.isArray(children)) {
+                    childText = children.map(c => (typeof c === 'string' ? c : (c && (c as any).props?.children) || '')).join('');
+                  } else if (typeof children === 'string') {
+                    childText = children;
+                  } else if (children && (children as any).props?.children) {
+                    childText = (children as any).props.children;
+                  }
+
+                  // If the visible link text is exactly the href (autolink/bare URL), render as plain text
+                  if (href && childText && childText.trim() === href.trim()) {
+                    return <span>{childText}</span>;
+                  }
+
+                  // Otherwise render a safe anchor (explicit markdown link)
+                  return (
+                    <a href={href} target="_blank" rel="noopener noreferrer">
+                      {props.children}
+                    </a>
+                  );
+                }
+              }}
+            >
               {content}
             </ReactMarkdown>
           </div>
