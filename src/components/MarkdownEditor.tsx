@@ -25,6 +25,30 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const lastSavedTitleRef = useRef('');
   const currentNoteIdRef = useRef<number | null>(null);
 
+  // Editor font options (these should match the @font-face names you added in MarkdownThemes.css)
+  const editorFontOptions: { key: string; label: string; family: string }[] = [
+    { key: 'fira', label: 'Fira Code', family: "'Fira Code', 'Menlo', 'Monaco', monospace" },
+    { key: 'ubuntu', label: 'Ubuntu Mono', family: "'Ubuntu Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'syne', label: 'Syne Mono', family: "'Syne Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'suse', label: 'SUSE Mono', family: "'SUSE Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'xanh', label: 'Xanh Mono', family: "'Xanh Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'libertinus', label: 'Libertinus Mono', family: "'Libertinus Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'kode', label: 'Kode Mono', family: "'Kode Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'redhat', label: 'Red Hat Mono', family: "'Red Hat Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'nova', label: 'Nova Mono', family: "'Nova Mono', 'Menlo', 'Monaco', monospace" },
+  ];
+  // Default editor font (will be overridden by saved preference if present)
+  const [editorFont, setEditorFont] = useState<string>(editorFontOptions[0].family);
+
+  // Helper: extract the primary font-family name from a CSS font-family string
+  // Example: "'Fira Code', 'Menlo', 'Monaco', monospace" -> Fira Code
+  const getPrimaryFamily = (fontFamilyValue: string | null | undefined): string | null => {
+    if (!fontFamilyValue) return null;
+    const first = fontFamilyValue.split(',')[0].trim();
+    // Remove surrounding quotes if present
+    return first.replace(/^['"]|['"]$/g, '') || null;
+  };
+
   // When entering view mode, clear any pending autosave so nothing runs during preview.
   useEffect(() => {
     if (showPreview) {
@@ -82,15 +106,17 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [showPreview]);
 
-  // Load and persist view style, font size, and spacing
+  // Load and persist view style, font size, spacing and editor font
   useEffect(() => {
     const savedStyle = localStorage.getItem('markdown-view-style');
     const savedFontSize = localStorage.getItem('markdown-font-size');
     const savedSpacing = localStorage.getItem('markdown-spacing');
+    const savedEditorFont = localStorage.getItem('markdown-editor-font');
 
     if (savedStyle) setViewStyle(savedStyle);
     if (savedFontSize) setFontSize(savedFontSize);
     if (savedSpacing) setSpacing(savedSpacing);
+    if (savedEditorFont) setEditorFont(savedEditorFont);
   }, []);
 
   const handleStyleChange = (style: string) => {
@@ -107,6 +133,35 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setSpacing(spacingValue);
     localStorage.setItem('markdown-spacing', spacingValue);
   };
+
+  const handleEditorFontChange = (value: string) => {
+    setEditorFont(value);
+    localStorage.setItem('markdown-editor-font', value);
+  };
+
+  // Preload the selected font so switching between edit/view is immediate.
+  // This uses the Font Loading API to request the primary family defined in the
+  // editorFont value (which is a CSS font-family string with fallbacks).
+  useEffect(() => {
+    const primary = getPrimaryFamily(editorFont);
+    if (!primary) return;
+
+    // document.fonts.load will use the @font-face declarations to load the font.
+    try {
+      if ((document as any).fonts && typeof (document as any).fonts.load === 'function') {
+        // Request a load (size value doesn't matter much, using 12px)
+        // we intentionally don't await here; it's a background preload.
+        void (document as any).fonts.load(`12px "${primary}"`).then(() => {
+          // loaded (no-op)
+        }).catch((err: any) => {
+          // load failed — non-fatal
+          // console.debug('Font preload failed for', primary, err);
+        });
+      }
+    } catch (err) {
+      // ignore
+    }
+  }, [editorFont]);
 
   // cursor / first line detection
   const checkCursorPosition = useCallback(() => {
@@ -540,6 +595,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
                 <option value="wide">Wide</option>
               </select>
             </div>
+
+            {/* Editor Font selector (uses the same style as other selectors) */}
+            <div className="style-selector">
+              <label className="selector-label">Editor Font:</label>
+              <select value={editorFont} onChange={(e) => handleEditorFontChange(e.target.value)}>
+                {editorFontOptions.map((opt) => (
+                  <option key={opt.key} value={opt.family}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </>
         )}
 
@@ -558,6 +625,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             placeholder={`# Note Title
 
 Start typing your note here...`}
+            // Apply selected editor font
+            style={{ fontFamily: editorFont }}
           />
         ) : (
           <div className={`markdown-preview style-${viewStyle} size-${fontSize} spacing-${spacing}`}>
