@@ -26,25 +26,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Track the currently loaded note id so we only reload content on an actual note switch
   const currentNoteIdRef = useRef<number | null>(null);
 
-  // Expose forceSave method via window for App to call
-  useEffect(() => {
-    (window as any).forceSaveCurrentNote = async () => {
-      if (note && content) {
-        // Clear any pending auto-save
-        if (autoSaveTimeoutRef.current) {
-          clearTimeout(autoSaveTimeoutRef.current);
-          autoSaveTimeoutRef.current = null;
-        }
-        // Save immediately
-        await autoSave();
-      }
-    };
-
-    return () => {
-      delete (window as any).forceSaveCurrentNote;
-    };
-  }, [note, content]);
-
   // When entering view mode, clear any pending autosave so nothing runs during preview.
   useEffect(() => {
     if (showPreview) {
@@ -328,7 +309,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   };
 
   // Sanitize pasted text: prefer plain text and strip links/HTML-rich data.
-  // IMPORTANT: we no longer strip http(s) URLs so users can paste links as regular text.
+  // IMPORTANT: we preserve URLs when pasted (user can intentionally paste URLs into markdown)
   const sanitizePastedText = (text: string): string => {
     if (!text) return '';
 
@@ -552,6 +533,21 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     );
   }
 
+  // Helper to decide if an href is allowed to be rendered as an anchor
+  const isSafeHref = (href: string | undefined): boolean => {
+    if (!href) return false;
+    // Only allow absolute http(s) and common safe schemes (mailto, tel)
+    try {
+      // Try to parse URL - if parsing fails, treat as non-safe (prevents javascript: and similar)
+      const parsed = new URL(href);
+      const allowed = ['http:', 'https:', 'mailto:', 'tel:'];
+      return allowed.includes(parsed.protocol);
+    } catch (err) {
+      // Not an absolute URL; treat as plain text to avoid accidental navigation
+      return false;
+    }
+  };
+
   return (
     <div className="markdown-editor">
       <div className="editor-toolbar">
@@ -561,7 +557,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         >
           {showPreview ? 'Edit' : 'View'}
         </button>
-
+        
         {!showPreview && (
           <div className="markdown-toolbar">
             <button className={`toolbar-btn-icon ${activeFormats.has('bold') ? 'active' : ''}`} onClick={() => wrapSelection('**')} title="Bold">
@@ -644,12 +640,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             </div>
           </>
         )}
-
+        
         {isOnFirstLine && (
           <span className="auto-save-status">Auto-save paused (editing title)</span>
         )}
       </div>
-
+      
       <div className="editor-content">
         {!showPreview ? (
           <textarea
@@ -667,9 +663,6 @@ Start typing your note here...`}
           <div className={`markdown-preview style-${viewStyle} size-${fontSize} spacing-${spacing}`}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
-              // Custom link handling:
-              // - If the rendered link text equals the href (i.e. a bare/autolink), render as plain text.
-              // - Otherwise (explicit markdown link like [label](url)) render as a safe anchor that opens in a new tab.
               components={{
                 a: ({ node, ...props }) => {
                   const href = (props as any).href as string | undefined;
@@ -684,17 +677,22 @@ Start typing your note here...`}
                     childText = (children as any).props.children;
                   }
 
-                  // If the visible link text is exactly the href (autolink/bare URL), render as plain text
+                  // If link text equals href (bare/autolink), render as plain text.
                   if (href && childText && childText.trim() === href.trim()) {
                     return <span>{childText}</span>;
                   }
 
-                  // Otherwise render a safe anchor (explicit markdown link)
-                  return (
-                    <a href={href} target="_blank" rel="noopener noreferrer">
-                      {props.children}
-                    </a>
-                  );
+                  // Only render anchors for allowed protocols and absolute URLs.
+                  if (isSafeHref(href)) {
+                    return (
+                      <a href={href} target="_blank" rel="noopener noreferrer">
+                        {props.children}
+                      </a>
+                    );
+                  }
+
+                  // Unsafe or relative link → render as plain text (no clickable link).
+                  return <span>{props.children}</span>;
                 }
               }}
             >

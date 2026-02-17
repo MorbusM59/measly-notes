@@ -106,4 +106,7 @@ export interface IElectronAPI {
   getNotesByPrimaryTag: () => Promise<{ [tagName: string]: Note[] }>;
   getCategoryHierarchy: () => Promise<CategoryHierarchyResult>;
   getLastEditedNote: () => Promise<Note | null>;
+
+  // Runtime controls
+  setSpellcheckerLanguages: (langs: string[]) => Promise<{ ok: boolean; error?: string }>;
 }
