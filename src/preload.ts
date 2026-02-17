@@ -35,7 +35,8 @@ function assertStringArray(v: unknown, name = 'value'): asserts v is string[] {
 const electronAPI: IElectronAPI & {
   setSpellcheckerLanguages: (langs: string[]) => Promise<{ ok: boolean; error?: string }>;
   requestForceSave: () => Promise<{ ok: boolean }>;
-  onForceSave: (cb: () => void) => { unsubscribe: () => void };
+  onForceSave: (cb: (requestId?: string) => void) => { unsubscribe: () => void };
+  forceSaveComplete: (requestId?: string) => void;
 } = {
   // Notes
   createNote: async (title: string) => {
@@ -147,7 +148,8 @@ const electronAPI: IElectronAPI & {
     }
   },
 
-  // Request a force-save: main will notify renderer(s) to run their save handlers.
+  // Force-save flow: request is routed via main (so focused window receives do-force-save),
+  // and renderer will respond with forceSaveComplete which main waits for.
   requestForceSave: async () => {
     try {
       const res = await ipcRenderer.invoke('request-force-save');
@@ -158,12 +160,12 @@ const electronAPI: IElectronAPI & {
   },
 
   // Register a local callback that will be invoked when main broadcasts the do-force-save event.
-  onForceSave: (cb: () => void) => {
-    const wrapper = (_event: IpcRendererEvent) => {
+  // The callback receives the requestId (string) if provided.
+  onForceSave: (cb: (requestId?: string) => void) => {
+    const wrapper = (_event: IpcRendererEvent, requestId?: string) => {
       try {
-        cb();
+        cb(requestId);
       } catch (err) {
-        // swallow to avoid crashing renderer
         console.warn('onForceSave handler error', err);
       }
     };
@@ -173,6 +175,16 @@ const electronAPI: IElectronAPI & {
         ipcRenderer.removeListener('do-force-save', wrapper);
       },
     };
+  },
+
+  // Called by renderer to notify main that the force-save for requestId is complete.
+  // This is an untrusted notification so keep it simple (main will verify sender).
+  forceSaveComplete: (requestId?: string) => {
+    try {
+      ipcRenderer.send('force-save-complete', requestId);
+    } catch (err) {
+      // swallow - non-fatal
+    }
   },
 };
 

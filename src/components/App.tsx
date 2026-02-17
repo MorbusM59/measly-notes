@@ -48,12 +48,13 @@ export const App: React.FC = () => {
 
   // Helper to toggle preview mode and force-save before entering preview
   const togglePreview = async (next: boolean) => {
-    // If entering preview mode, force a save first (so preview renders current content).
-    if (next && (window as any).forceSaveCurrentNote) {
+    // If entering preview mode, request a force-save first (so preview renders current content).
+    if (next) {
       try {
-        await (window as any).forceSaveCurrentNote();
+        // Use the validated preload API
+        await (window as any).electronAPI.requestForceSave();
       } catch (err) {
-        console.warn('forceSaveCurrentNote failed', err);
+        console.warn('requestForceSave failed', err);
       }
     }
 
@@ -83,27 +84,36 @@ export const App: React.FC = () => {
   }, [showPreview]);
 
   const handleCreateNote = async () => {
-    // Force save the current note before creating a new one
-    if ((window as any).forceSaveCurrentNote) {
-      await (window as any).forceSaveCurrentNote();
+    // Request a force-save of the current note before creating a new one
+    try {
+      await (window as any).electronAPI.requestForceSave();
+    } catch (err) {
+      console.warn('requestForceSave failed', err);
     }
 
     // Ensure edit mode for newly-created note
     setShowPreview(false);
     localStorage.setItem('markdown-show-preview', 'false');
-    
+
     // Create note with default title and pre-filled content
     const note = await window.electronAPI.createNote('Untitled');
-    
+
     // Set initial markdown content with cursor position placeholder
     const initialContent = '# ';
     await window.electronAPI.saveNote(note.id, initialContent);
-    
+
     setSelectedNote(note);
     setRefreshKey(k => k + 1);
   };
 
-  const handleSelectNote = (note: Note) => {
+  // When a note is selected from the sidebar, request a force-save first (flush pending edits),
+  // then update selectedNote. This prevents losing the current in-editor state when switching notes.
+  const handleSelectNote = async (note: Note) => {
+    try {
+      await (window as any).electronAPI.requestForceSave();
+    } catch (err) {
+      console.warn('requestForceSave failed on note select', err);
+    }
     setSelectedNote(note);
   };
 
@@ -149,7 +159,7 @@ export const App: React.FC = () => {
         setSelectedNote(null);
       }
     }
-    
+
     // Refresh the sidebar
     setRefreshKey(k => k + 1);
     setSidebarRefreshTrigger(t => t + 1);
@@ -203,7 +213,7 @@ export const App: React.FC = () => {
         width={sidebarWidth}
         onNoteDelete={handleNoteDelete}
       />
-      <div 
+      <div
         className="sidebar-divider"
         onMouseDown={handleMouseDown}
       />

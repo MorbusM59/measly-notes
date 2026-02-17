@@ -23,7 +23,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef('');
   const lastSavedTitleRef = useRef('');
-  // Track the currently loaded note id so we only reload content on an actual note switch
   const currentNoteIdRef = useRef<number | null>(null);
 
   // When entering view mode, clear any pending autosave so nothing runs during preview.
@@ -39,11 +38,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Load note content when note changes
   useEffect(() => {
     if (note) {
-      // If the selected note is the same id we already have loaded, avoid reloading the content.
-      // This prevents parent-driven updates (title/lastEdited) from clobbering the editor state
-      // and resetting the cursor position.
+      // If same note id already loaded, only update title ref (avoid clobbering editor)
       if (currentNoteIdRef.current === note.id) {
-        // Update saved title ref so future saves don't re-send unchanged titles
         lastSavedTitleRef.current = note.title;
         return;
       }
@@ -54,23 +50,22 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         lastSavedContentRef.current = noteContent;
         lastSavedTitleRef.current = note.title;
 
-        // Focus textarea and position cursor after content is loaded only if we are in edit mode
+        // Focus & position cursor for edit mode
         if (!showPreview) {
           setTimeout(() => {
             const textarea = textareaRef.current;
             if (textarea) {
               textarea.focus();
-
-              // Position cursor after "# " for new notes
               if (noteContent === '# ') {
                 textarea.setSelectionRange(2, 2);
               } else {
-                // For existing notes, position at end
                 textarea.setSelectionRange(noteContent.length, noteContent.length);
               }
             }
           }, 10);
         }
+      }).catch(err => {
+        console.warn('loadNote failed', err);
       });
     } else {
       setContent('');
@@ -80,7 +75,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [note, showPreview]);
 
-  // If the global mode switches to edit, focus the textarea
+  // If switched to edit mode, focus textarea
   useEffect(() => {
     if (!showPreview) {
       setTimeout(() => textareaRef.current?.focus(), 10);
@@ -93,15 +88,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const savedFontSize = localStorage.getItem('markdown-font-size');
     const savedSpacing = localStorage.getItem('markdown-spacing');
 
-    if (savedStyle) {
-      setViewStyle(savedStyle);
-    }
-    if (savedFontSize) {
-      setFontSize(savedFontSize);
-    }
-    if (savedSpacing) {
-      setSpacing(savedSpacing);
-    }
+    if (savedStyle) setViewStyle(savedStyle);
+    if (savedFontSize) setFontSize(savedFontSize);
+    if (savedSpacing) setSpacing(savedSpacing);
   }, []);
 
   const handleStyleChange = (style: string) => {
@@ -119,107 +108,113 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     localStorage.setItem('markdown-spacing', spacingValue);
   };
 
-  // Check if cursor is on first line
+  // cursor / first line detection
   const checkCursorPosition = useCallback(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
     const cursorPos = textarea.selectionStart;
     const textBeforeCursor = content.substring(0, cursorPos);
     const lines = textBeforeCursor.split('\n');
-    const isFirstLine = lines.length === 1;
-    setIsOnFirstLine(isFirstLine);
+    setIsOnFirstLine(lines.length === 1);
   }, [content]);
 
-  // Extract title from first line
+  // extract title
   const extractTitle = useCallback((text: string): string => {
     const lines = text.split('\n');
     const firstLine = lines[0] || '';
-
-    // Check if first line starts with # (markdown heading)
     if (firstLine.startsWith('# ')) {
       return firstLine.substring(2).trim();
     }
-
     return 'Untitled';
   }, []);
 
-  // Auto-save function
+  // autoSave (returns a promise)
   const autoSave = useCallback(async () => {
-    if (!note || !content) return;
-
-    // Only save if content has changed
+    if (!note || content == null) return;
     if (content === lastSavedContentRef.current) return;
 
-    // Save content; new API returns the updated Note
     const savedNote = await window.electronAPI.saveNote(note.id, content);
     lastSavedContentRef.current = content;
 
-    // Update title if it has changed
     const newTitle = extractTitle(content);
     if (newTitle !== lastSavedTitleRef.current && newTitle !== 'Untitled') {
       await window.electronAPI.updateNoteTitle(note.id, newTitle);
       lastSavedTitleRef.current = newTitle;
 
-      // Notify parent about note update using updated note object if available
       if (onNoteUpdate) {
-        // If save returned an updated note, use it; otherwise, synthesize minimal update
-        if (savedNote) {
-          onNoteUpdate(savedNote);
-        } else {
-          onNoteUpdate({ ...note, title: newTitle });
-        }
+        if (savedNote) onNoteUpdate(savedNote);
+        else onNoteUpdate({ ...note, title: newTitle });
       }
     } else {
-      // Title unchanged - still notify parent about lastEdited via savedNote if present
-      if (onNoteUpdate && savedNote) {
-        onNoteUpdate(savedNote);
-      }
+      if (onNoteUpdate && savedNote) onNoteUpdate(savedNote);
     }
   }, [note, content, extractTitle, onNoteUpdate]);
 
-  // Check active formatting at current selection
+  // Register force-save listener from preload API; accept requestId and respond when done
+  useEffect(() => {
+    let unsub: { unsubscribe: () => void } | null = null;
+    try {
+      const api = (window as any).electronAPI;
+      if (api && typeof api.onForceSave === 'function') {
+        unsub = api.onForceSave(async (requestId?: string) => {
+          if (autoSaveTimeoutRef.current) {
+            clearTimeout(autoSaveTimeoutRef.current);
+            autoSaveTimeoutRef.current = null;
+          }
+          try {
+            await autoSave();
+          } catch (err) {
+            // ignore save errors; still signal completion
+            console.warn('autoSave during force-save failed', err);
+          } finally {
+            try {
+              api.forceSaveComplete?.(requestId);
+            } catch (_) {}
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to register onForceSave:', err);
+    }
+    return () => {
+      try { unsub?.unsubscribe(); } catch {}
+    };
+  }, [autoSave, note, content]);
+
+  // formatting detection
   const checkFormatting = useCallback(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const active = new Set<string>();
 
-    // Only check if there's a selection or cursor position
     if (start === end && start === 0) {
       setActiveFormats(active);
       return;
     }
 
     if (start >= 2 && end <= content.length - 2) {
-      if (content.substring(start - 2, start) === '**' && content.substring(end, end + 2) === '**') {
-        active.add('bold');
-      }
+      if (content.substring(start - 2, start) === '**' && content.substring(end, end + 2) === '**') active.add('bold');
     }
     if (start >= 1 && end <= content.length - 1) {
       const beforeChar = content.substring(start - 1, start);
       const afterChar = content.substring(end, end + 1);
       const beforeBefore = start >= 2 ? content.substring(start - 2, start - 1) : '';
       const afterAfter = end <= content.length - 2 ? content.substring(end + 1, end + 2) : '';
-      if (beforeChar === '*' && afterChar === '*' && beforeBefore !== '*' && afterAfter !== '*') {
-        active.add('italic');
-      }
+      if (beforeChar === '*' && afterChar === '*' && beforeBefore !== '*' && afterAfter !== '*') active.add('italic');
     }
     if (start >= 2 && end <= content.length - 2) {
-      if (content.substring(start - 2, start) === '~~' && content.substring(end, end + 2) === '~~') {
-        active.add('strikethrough');
-      }
+      if (content.substring(start - 2, start) === '~~' && content.substring(end, end + 2) === '~~') active.add('strikethrough');
     }
     if (start >= 1 && end <= content.length - 1) {
-      if (content.substring(start - 1, start) === '`' && content.substring(end, end + 1) === '`') {
-        active.add('code');
-      }
+      if (content.substring(start - 1, start) === '`' && content.substring(end, end + 1) === '`') active.add('code');
     }
+
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
     const lineEnd = content.indexOf('\n', end);
     const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
+
     if (lineStart >= 4) {
       const prevLine = content.lastIndexOf('\n', lineStart - 2);
       const prevLineContent = content.substring(prevLine + 1, lineStart - 1);
@@ -227,55 +222,44 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const nextLineStart = actualLineEnd + 1;
         const nextLineEnd = content.indexOf('\n', nextLineStart);
         const nextLineContent = content.substring(nextLineStart, nextLineEnd === -1 ? content.length : nextLineEnd);
-        if (nextLineContent.trim() === '```') {
-          active.add('codeblock');
-        }
+        if (nextLineContent.trim() === '```') active.add('codeblock');
       }
     }
+
     const currentLineContent = content.substring(lineStart, actualLineEnd);
-    if (currentLineContent.startsWith('# ')) {
-      active.add('h1');
-    } else if (currentLineContent.startsWith('## ')) {
-      active.add('h2');
-    } else if (currentLineContent.startsWith('### ')) {
-      active.add('h3');
-    } else if (currentLineContent.startsWith('> ')) {
-      active.add('blockquote');
-    } else if (currentLineContent.match(/^- /)) {
-      active.add('bullet');
-    } else if (currentLineContent.match(/^\d+\. /)) {
-      active.add('number');
-    }
+    if (currentLineContent.startsWith('# ')) active.add('h1');
+    else if (currentLineContent.startsWith('## ')) active.add('h2');
+    else if (currentLineContent.startsWith('### ')) active.add('h3');
+    else if (currentLineContent.startsWith('> ')) active.add('blockquote');
+    else if (currentLineContent.match(/^- /)) active.add('bullet');
+    else if (currentLineContent.match(/^\d+\. /)) active.add('number');
 
     setActiveFormats(active);
   }, [content]);
 
-  // Markdown formatting functions
+  // Formatting helpers
   const wrapSelection = (before: string, after: string = before) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const selectedText = content.substring(start, end);
 
-    // Check if the selection is already wrapped
-    const isWrapped = start >= before.length &&
-                     end <= content.length - after.length &&
-                     content.substring(start - before.length, start) === before &&
-                     content.substring(end, end + after.length) === after;
+    const isWrapped =
+      start >= before.length &&
+      end <= content.length - after.length &&
+      content.substring(start - before.length, start) === before &&
+      content.substring(end, end + after.length) === after;
 
     let newText: string;
     let newSelectionStart: number;
     let newSelectionEnd: number;
 
     if (isWrapped) {
-      // Remove formatting
       newText = content.substring(0, start - before.length) + selectedText + content.substring(end + after.length);
       newSelectionStart = start - before.length;
       newSelectionEnd = end - before.length;
     } else {
-      // Add formatting
       newText = content.substring(0, start) + before + selectedText + after + content.substring(end);
       newSelectionStart = start + before.length;
       newSelectionEnd = end + before.length;
@@ -284,7 +268,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setContent(newText);
     handleContentChange(newText);
 
-    // Restore focus and selection
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(newSelectionStart, newSelectionEnd);
@@ -295,105 +278,46 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const insertAtCursor = (text: string) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
     const start = textarea.selectionStart;
     const newText = content.substring(0, start) + text + content.substring(start);
-
     setContent(newText);
     handleContentChange(newText);
-
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(start + text.length, start + text.length);
     }, 0);
   };
 
-  // Sanitize pasted text: prefer plain text and strip links/HTML-rich data.
-  // IMPORTANT: we preserve URLs when pasted (user can intentionally paste URLs into markdown)
-  const sanitizePastedText = (text: string): string => {
-    if (!text) return '';
-
-    // Replace markdown links [label](url) with the label (preserve readable text)
-    let out = text.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');
-
-    // Normalize whitespace and trim. Also remove stray CRLFs normalization.
-    out = out.replace(/\r\n/g, '\n').replace(/\s+$/g, '').trim();
-
-    // Strip HTML tags if any (fallback)
-    out = out.replace(/<\/?[^>]+(>|$)/g, '');
-
-    return out;
-  };
-
-  // Intercept paste events on the textarea to ensure we only insert plain, sanitized text.
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    e.preventDefault();
-
-    // Prefer plain text from the clipboard
-    let plain = e.clipboardData.getData('text/plain') || '';
-
-    // Fallback: if there's no plain text, try to extract visible text from HTML clipboard data
-    if (!plain) {
-      const html = e.clipboardData.getData('text/html') || '';
-      if (html) {
-        // Create a temporary DOM node to strip tags and get visible text
-        const tmp = document.createElement('div');
-        tmp.innerHTML = html;
-        plain = tmp.textContent || tmp.innerText || '';
-      }
-    }
-
-    const sanitized = sanitizePastedText(plain);
-    if (sanitized) {
-      insertAtCursor(sanitized);
-    }
-    // If sanitized is empty, do nothing.
-  };
-
   const prependToLines = (prefix: string, numbered = false) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-
-    // Find the start and end of the lines
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
     const lineEnd = content.indexOf('\n', end);
     const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
-
     const selectedLines = content.substring(lineStart, actualLineEnd);
     const lines = selectedLines.split('\n');
 
-    // Check if all lines already have the prefix
     const allHavePrefix = lines.every(line => {
-      if (numbered) {
-        return line.match(/^\d+\. /);
-      }
+      if (numbered) return line.match(/^\d+\. /);
       return line.startsWith(prefix);
     });
 
     let newLines: string[];
     if (allHavePrefix) {
-      // Remove prefix
       newLines = lines.map(line => {
-        if (numbered) {
-          return line.replace(/^\d+\. /, '');
-        }
+        if (numbered) return line.replace(/^\d+\. /, '');
         return line.startsWith(prefix) ? line.substring(prefix.length) : line;
       });
     } else {
-      // Add prefix
       newLines = lines.map((line, index) => {
-        if (numbered) {
-          return `${index + 1}. ${line}`;
-        }
+        if (numbered) return `${index + 1}. ${line}`;
         return `${prefix}${line}`;
       });
     }
 
     const newText = content.substring(0, lineStart) + newLines.join('\n') + content.substring(actualLineEnd);
-
     setContent(newText);
     handleContentChange(newText);
 
@@ -406,36 +330,24 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const insertHeading = (level: number) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
     const start = textarea.selectionStart;
-
-    // Find the start of the current line
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
     const lineEnd = content.indexOf('\n', start);
     const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
     const currentLine = content.substring(lineStart, actualLineEnd);
-
     const prefix = '#'.repeat(level) + ' ';
-
-    // Check if line already has this heading level
     const hasHeading = currentLine.startsWith(prefix);
 
     let newText: string;
     let newCursorPos: number;
 
     if (hasHeading) {
-      // Remove heading
       newText = content.substring(0, lineStart) + currentLine.substring(prefix.length) + content.substring(actualLineEnd);
       newCursorPos = start - prefix.length;
     } else {
-      // Remove any existing heading first (markdown supports heading levels 1-6)
       let cleanLine = currentLine;
       const headingMatch = currentLine.match(/^#{1,6} /);
-      if (headingMatch) {
-        cleanLine = currentLine.substring(headingMatch[0].length);
-      }
-
-      // Add new heading
+      if (headingMatch) cleanLine = currentLine.substring(headingMatch[0].length);
       newText = content.substring(0, lineStart) + prefix + cleanLine + content.substring(actualLineEnd);
       newCursorPos = headingMatch ? start - headingMatch[0].length + prefix.length : start + prefix.length;
     }
@@ -450,51 +362,68 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }, 0);
   };
 
-  // Handle content change with debounced auto-save
+  // sanitize pasted text (preserve URLs)
+  const sanitizePastedText = (text: string): string => {
+    if (!text) return '';
+    let out = text.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');
+    out = out.replace(/\r\n/g, '\n').replace(/\s+$/g, '').trim();
+    out = out.replace(/<\/?[^>]+(>|$)/g, '');
+    return out;
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    let plain = e.clipboardData.getData('text/plain') || '';
+    if (!plain) {
+      const html = e.clipboardData.getData('text/html') || '';
+      if (html) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        plain = tmp.textContent || tmp.innerText || '';
+      }
+    }
+    const sanitized = sanitizePastedText(plain);
+    if (sanitized) insertAtCursor(sanitized);
+  };
+
+  // content change handler with debounced save
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
 
-    // Clear existing timeout
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current);
     }
 
-    // Don't auto-save while on first line or while in preview mode
     if (!isOnFirstLine && note && !showPreview) {
       autoSaveTimeoutRef.current = setTimeout(() => {
-        autoSave();
+        void autoSave();
       }, 1000);
     }
   };
 
-  // Handle Enter key: save immediately when a new line is started (but not when editing title).
   const handleTextareaKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
-      // Only save when not on the first line and when a note exists and content has changed
       if (!isOnFirstLine && note && content !== lastSavedContentRef.current) {
         if (autoSaveTimeoutRef.current) {
           clearTimeout(autoSaveTimeoutRef.current);
           autoSaveTimeoutRef.current = null;
         }
-        autoSave();
+        void autoSave();
       }
     }
   };
 
-  // Handle cursor position change
+  // selection listeners
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-
     const handleSelectionChange = () => {
       checkCursorPosition();
       checkFormatting();
     };
-
     textarea.addEventListener('click', handleSelectionChange);
     textarea.addEventListener('keyup', handleSelectionChange);
     textarea.addEventListener('select', handleSelectionChange);
-
     return () => {
       textarea.removeEventListener('click', handleSelectionChange);
       textarea.removeEventListener('keyup', handleSelectionChange);
@@ -502,24 +431,20 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     };
   }, [checkCursorPosition, checkFormatting]);
 
-  // Trigger auto-save when moving off first line
+  // trigger auto-save when moving off first line
   useEffect(() => {
     if (!isOnFirstLine && note && content !== lastSavedContentRef.current) {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
       autoSaveTimeoutRef.current = setTimeout(() => {
-        autoSave();
+        void autoSave();
       }, 1000);
     }
   }, [isOnFirstLine, note, content, autoSave]);
 
-  // Cleanup on unmount
+  // cleanup
   useEffect(() => {
     return () => {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
     };
   }, []);
 
@@ -533,17 +458,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     );
   }
 
-  // Helper to decide if an href is allowed to be rendered as an anchor
+  // safe href check
   const isSafeHref = (href: string | undefined): boolean => {
     if (!href) return false;
-    // Only allow absolute http(s) and common safe schemes (mailto, tel)
     try {
-      // Try to parse URL - if parsing fails, treat as non-safe (prevents javascript: and similar)
       const parsed = new URL(href);
       const allowed = ['http:', 'https:', 'mailto:', 'tel:'];
       return allowed.includes(parsed.protocol);
-    } catch (err) {
-      // Not an absolute URL; treat as plain text to avoid accidental navigation
+    } catch {
       return false;
     }
   };
@@ -551,13 +473,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   return (
     <div className="markdown-editor">
       <div className="editor-toolbar">
-        <button 
+        <button
           className={`toolbar-toggle-btn ${!showPreview ? 'active' : ''}`}
           onClick={() => onTogglePreview(!showPreview)}
         >
           {showPreview ? 'Edit' : 'View'}
         </button>
-        
+
         {!showPreview && (
           <div className="markdown-toolbar">
             <button className={`toolbar-btn-icon ${activeFormats.has('bold') ? 'active' : ''}`} onClick={() => wrapSelection('**')} title="Bold">
@@ -570,38 +492,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               <span style={{ textDecoration: 'line-through' }}>S</span>
             </button>
             <span className="toolbar-divider">|</span>
-            <button className={`toolbar-btn-icon ${activeFormats.has('h1') ? 'active' : ''}`} onClick={() => insertHeading(1)} title="Heading 1">
-              H1
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('h2') ? 'active' : ''}`} onClick={() => insertHeading(2)} title="Heading 2">
-              H2
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('h3') ? 'active' : ''}`} onClick={() => insertHeading(3)} title="Heading 3">
-              H3
-            </button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('h1') ? 'active' : ''}`} onClick={() => insertHeading(1)} title="Heading 1">H1</button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('h2') ? 'active' : ''}`} onClick={() => insertHeading(2)} title="Heading 2">H2</button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('h3') ? 'active' : ''}`} onClick={() => insertHeading(3)} title="Heading 3">H3</button>
             <span className="toolbar-divider">|</span>
-            <button className="toolbar-btn-icon" onClick={() => wrapSelection('[', '](url)')} title="Link">
-              🔗
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('code') ? 'active' : ''}`} onClick={() => wrapSelection('`')} title="Inline Code">
-              {'<>'}
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('codeblock') ? 'active' : ''}`} onClick={() => wrapSelection('```\n', '\n```')} title="Code Block">
-              {'{ }'}
-            </button>
+            <button className="toolbar-btn-icon" onClick={() => wrapSelection('[', '](url)')} title="Link">🔗</button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('code') ? 'active' : ''}`} onClick={() => wrapSelection('`')} title="Inline Code">{'<>'}</button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('codeblock') ? 'active' : ''}`} onClick={() => wrapSelection('```\n', '\n```')} title="Code Block">{'{ }'}</button>
             <span className="toolbar-divider">|</span>
-            <button className={`toolbar-btn-icon ${activeFormats.has('bullet') ? 'active' : ''}`} onClick={() => prependToLines('- ')} title="Bulleted List">
-              ≡
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('number') ? 'active' : ''}`} onClick={() => prependToLines('', true)} title="Numbered List">
-              #
-            </button>
-            <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">
-              "
-            </button>
-            <button className="toolbar-btn-icon" onClick={() => insertAtCursor('\n---\n')} title="Horizontal Rule">
-              —
-            </button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('bullet') ? 'active' : ''}`} onClick={() => prependToLines('- ')} title="Bulleted List">≡</button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('number') ? 'active' : ''}`} onClick={() => prependToLines('', true)} title="Numbered List">#</button>
+            <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">"</button>
+            <button className="toolbar-btn-icon" onClick={() => insertAtCursor('\n---\n')} title="Horizontal Rule">—</button>
           </div>
         )}
 
@@ -640,12 +542,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             </div>
           </>
         )}
-        
-        {isOnFirstLine && (
-          <span className="auto-save-status">Auto-save paused (editing title)</span>
-        )}
+
+        {isOnFirstLine && <span className="auto-save-status">Auto-save paused (editing title)</span>}
       </div>
-      
+
       <div className="editor-content">
         {!showPreview ? (
           <textarea
@@ -667,7 +567,6 @@ Start typing your note here...`}
                 a: ({ node, ...props }) => {
                   const href = (props as any).href as string | undefined;
                   const children = props.children;
-                  // derive plain text of children
                   let childText = '';
                   if (Array.isArray(children)) {
                     childText = children.map(c => (typeof c === 'string' ? c : (c && (c as any).props?.children) || '')).join('');
@@ -677,12 +576,12 @@ Start typing your note here...`}
                     childText = (children as any).props.children;
                   }
 
-                  // If link text equals href (bare/autolink), render as plain text.
+                  // If the visible link text is exactly the href (bare/autolink), render as plain text.
                   if (href && childText && childText.trim() === href.trim()) {
                     return <span>{childText}</span>;
                   }
 
-                  // Only render anchors for allowed protocols and absolute URLs.
+                  // Only render anchors for allowed absolute protocols.
                   if (isSafeHref(href)) {
                     return (
                       <a href={href} target="_blank" rel="noopener noreferrer">
@@ -691,7 +590,7 @@ Start typing your note here...`}
                     );
                   }
 
-                  // Unsafe or relative link → render as plain text (no clickable link).
+                  // Unsafe or relative link → render as plain text.
                   return <span>{props.children}</span>;
                 }
               }}
