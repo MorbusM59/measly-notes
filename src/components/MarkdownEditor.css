@@ -163,14 +163,22 @@
   font-style: italic;
 }
 
+/* --- Fix flex overflow + ensure textarea wraps correctly --- */
+
+/* editor-content should not produce its own scrollbar */
 .editor-content {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;  /* textarea will scroll internally */
+  min-height: 0;     /* allows the flex child to shrink properly */
+  min-width: 0;      /* IMPORTANT: allow child to shrink and avoid flex overflow */
 }
 
+/* textarea should manage scrolling and wrapping itself */
 .markdown-textarea {
+  display: block;
   width: 100%;
   height: 100%;
+  box-sizing: border-box; /* include padding in height calculation */
   padding: 20px;
   border: none;
   resize: none;
@@ -178,6 +186,27 @@
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   line-height: 1.6;
   outline: none;
+
+  /* scrolling handled inside textarea */
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+
+  /* make wrapping robust */
+  white-space: pre-wrap;       /* preserve user linebreaks, but wrap long lines */
+  word-wrap: break-word;       /* legacy */
+  overflow-wrap: anywhere;     /* break long words/URLs when needed */
+  word-break: break-word;
+
+  /* avoid forcing horizontal overflow from min-size */
+  min-width: 0;
+}
+
+/* some editor-style classes may override padding — keep the wrapping rules global */
+.markdown-textarea.editor-style-syne,
+.markdown-textarea.editor-style-redhat {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-preview {
@@ -191,4 +220,113 @@
   text-align: center;
   color: #999;
   font-size: 16px;
+}
+
+/* Editor-only styles: Red Hat (rounded/refined) and Syne (edgy/gritty)
+   These apply to the textarea via class names:
+     className={`markdown-textarea editor-style-${editorStyle} size-${editorFontSize} spacing-${editorSpacing}`}
+*/
+
+/* --- Size classes for editor textarea --- */
+.markdown-textarea.size-xs { font-size: 12px; }
+.markdown-textarea.size-s  { font-size: 14px; }
+.markdown-textarea.size-m  { font-size: 16px; }
+.markdown-textarea.size-l  { font-size: 18px; }
+.markdown-textarea.size-xl { font-size: 20px; }
+
+/* --- Spacing (line-height) classes for editor textarea --- */
+.markdown-textarea.spacing-tight   { line-height: 1.2; }
+.markdown-textarea.spacing-compact { line-height: 1.4; }
+.markdown-textarea.spacing-cozy    { line-height: 1.6; }
+.markdown-textarea.spacing-wide    { line-height: 1.8; }
+
+/* --- RED HAT: rounded, refined, calm --- */
+.markdown-textarea.editor-style-redhat {
+  font-family: 'Red Hat Mono', 'Menlo', 'Monaco', monospace;
+  color: #082135;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border: 1px solid rgba(4, 32, 63, 0.06);
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow:
+    0 6px 18px rgba(15, 40, 66, 0.04),
+    inset 0 1px 0 rgba(255,255,255,0.7);
+  /* gentle ruled rhythm */
+  background-image:
+    linear-gradient(to bottom, rgba(8,33,53,0.02) 1px, transparent 1px);
+  background-size: 100% 30px;
+  /* subtle text treatment */
+  text-shadow: 0 0 0 rgba(0,0,0,0);
+  caret-color: #0b4fa8;
+  transition: box-shadow 120ms ease, background-color 120ms ease;
+}
+
+/* selection + placeholder */
+.markdown-textarea.editor-style-redhat::selection { background: rgba(11,79,168,0.16); color: #021226; }
+.markdown-textarea.editor-style-redhat::placeholder { color: #9aa6b3; }
+
+/* subtle line indicator on focus */
+.markdown-textarea.editor-style-redhat:focus {
+  box-shadow:
+    0 8px 22px rgba(11,79,168,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.8);
+  border-color: rgba(11,79,168,0.18);
+}
+
+/* --- SYNE: carved, edgy, punky, gritty --- */
+.markdown-textarea.editor-style-syne {
+  font-family: 'Syne Mono', 'Menlo', 'Monaco', monospace;
+  color: #1b1430;
+  /* darker, textured surface */
+  background:
+    linear-gradient(180deg, #f6f6f9 0%, #ffffff 40%),
+    repeating-linear-gradient( -45deg, rgba(20,10,40,0.015) 0 1px, transparent 1px 8px );
+  border: 1px solid rgba(27,20,48,0.08);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.7),
+    0 6px 20px rgba(16,6,30,0.04);
+  /* tighter rhythm for Syne to feel denser */
+  background-size: 100% 28px, auto;
+  /* a touch of carved ink edge with a soft text-shadow to emphasize glyph shape */
+  text-shadow: 0 0.4px 0 rgba(255,255,255,0.45), 0 0 0 rgba(0,0,0,0);
+  caret-color: #6f2bd6;
+  transition: border-color 120ms ease, transform 60ms ease;
+}
+
+/* selection + placeholder */
+.markdown-textarea.editor-style-syne::selection { background: rgba(111,43,214,0.12); color: #111; }
+.markdown-textarea.editor-style-syne::placeholder { color: #b5a8c9; }
+
+/* focus accent — slightly more assertive for Syne */
+.markdown-textarea.editor-style-syne:focus {
+  border-color: rgba(111,43,214,0.22);
+  transform: translateY(-0.5px);
+}
+
+/* --- General textarea polish (applies to all editor styles) --- */
+.markdown-textarea {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  caret-color: auto;
+  /* keep some default padding; editor-style classes override as needed */
+  padding: 16px;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+
+/* If you want to ensure code-like ligature behaviour is consistent */
+.markdown-textarea { font-variant-ligatures: none; }
+
+/* mobile tweak */
+@media (max-width: 600px) {
+  .markdown-textarea { padding: 12px; }
+  .markdown-textarea.editor-style-redhat { background-size: 100% 28px; }
+  .markdown-textarea.editor-style-syne { background-size: 100% 24px, auto; }
 }

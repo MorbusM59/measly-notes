@@ -509,6 +509,35 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [isOnFirstLine, note, content, autoSave]);
 
+  // add this near the other useEffect hooks (after font preload effect)
+  useEffect(() => {
+    const reflowTextarea = () => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      // quick hide/show to force layout reflow without visually noticeable flicker
+      ta.style.display = 'none';
+      // read a layout property to force reflow
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      ta.offsetHeight;
+      ta.style.display = '';
+    };
+
+    // If Font Loading API available, wait for fonts to be ready, then reflow.
+    if ((document as any).fonts && (document as any).fonts.ready) {
+      (document as any).fonts.ready.then(() => {
+        // run after next paint to be safe
+        requestAnimationFrame(() => requestAnimationFrame(reflowTextarea));
+      }).catch(() => {
+        // fallback: still attempt a reflow shortly after mount
+        setTimeout(reflowTextarea, 100);
+      });
+    } else {
+      // fallback if Font Loading API not present
+      const t = setTimeout(reflowTextarea, 100);
+      return () => clearTimeout(t);
+    }
+  }, [editorStyle]);
+
   // cleanup
   useEffect(() => {
     return () => {
@@ -709,17 +738,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         {!showPreview ? (
           <textarea
             ref={textareaRef}
-            className="markdown-textarea"
+            className={`markdown-textarea editor-style-${editorStyle} size-${editorFontSize} spacing-${editorSpacing}`}
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
             onKeyUp={handleTextareaKeyUp}
             onPaste={handlePaste}
             placeholder={`# Note Title
 
-Start typing your note here...`}
-            // Apply selected editor style/size/spacing via inline style so editor settings
-            // only affect the edit mode.
-            style={editorInlineStyle}
+          Start typing your note here...`}
           />
         ) : (
           <div className={`markdown-preview style-${viewStyle} size-${viewFontSize} spacing-${viewSpacing}`}>
