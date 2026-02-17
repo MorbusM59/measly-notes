@@ -227,7 +227,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Add tag (spaces will become '-')"
+            placeholder="Type to add tag..."
           />
         </div>
         <button
