@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
 import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote,
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
@@ -63,6 +63,48 @@ const createWindow = (): void => {
       }
     });
 
+    // Prevent navigation and always open external links in the OS default browser.
+    // This ensures the app never navigates away to remote content.
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+      if (url) {
+        event.preventDefault();
+        try {
+          shell.openExternal(url);
+        } catch (err) {
+          console.warn('[main] failed to open external URL from will-navigate:', url, err);
+        }
+      }
+    });
+
+    // Prefer setWindowOpenHandler where available
+    try {
+      // cast to any to avoid strict signature mismatch across Electron versions
+      const wcAny = mainWindow.webContents as any;
+      if (wcAny.setWindowOpenHandler) {
+        wcAny.setWindowOpenHandler(({ url }: { url: string }) => {
+          try {
+            shell.openExternal(url);
+          } catch (err) {
+            console.warn('[main] failed to open external URL from setWindowOpenHandler:', url, err);
+          }
+          return { action: 'deny' };
+        });
+      }
+      // Fallback for older Electron versions that emit 'new-window'
+      wcAny.on && wcAny.on('new-window', (event: any, url: any) => {
+        try {
+          event.preventDefault();
+        } catch (_) {}
+        try {
+          shell.openExternal(String(url));
+        } catch (err) {
+          console.warn('[main] failed to open external URL from new-window fallback:', url, err);
+        }
+      });
+    } catch (err) {
+      console.warn('[main] window-open handlers setup failed:', err);
+    }
+
     mainWindow.on('closed', () => {
       console.log('[main] mainWindow closed');
       mainWindow = null;
@@ -121,6 +163,47 @@ app.whenReady().then(async () => {
     // Ensure English and German spellchecking are set by default on every machine.
     // Note: on Linux you may need Hunspell dictionaries available to Chromium for this to work.
     await setDefaultSpellCheckerLanguages(['en-US', 'de-DE']);
+
+    // Block outgoing http(s) requests initiated by the renderer, but whitelist local/dev hosts
+    try {
+      const whitelistHostnames = new Set(['localhost', '127.0.0.1', '::1']);
+      // If MAIN_WINDOW_WEBPACK_ENTRY is a http(s) URL (dev), whitelist its host as well
+      try {
+        if (typeof MAIN_WINDOW_WEBPACK_ENTRY === 'string' && MAIN_WINDOW_WEBPACK_ENTRY.startsWith('http')) {
+          const mainHost = new URL(MAIN_WINDOW_WEBPACK_ENTRY).hostname;
+          whitelistHostnames.add(mainHost);
+        }
+      } catch (_) {}
+
+      session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details: any, callback: (response: { cancel: boolean }) => void) => {
+        try {
+          const urlStr: string = details.url || '';
+          // Allow file protocol
+          if (urlStr.startsWith('file:')) {
+            return callback({ cancel: false });
+          }
+          // Safely parse hostname and allow localhost/dev server traffic
+          let hostname = '';
+          try {
+            hostname = new URL(urlStr).hostname;
+          } catch (err) {
+            // If parsing fails, be conservative and block
+            return callback({ cancel: true });
+          }
+          if (whitelistHostnames.has(hostname)) {
+            return callback({ cancel: false });
+          }
+          // Otherwise cancel any external HTTP/S request originating from renderer
+          return callback({ cancel: true });
+        } catch (err) {
+          // On any unexpected error, cancel to be safe
+          return callback({ cancel: true });
+        }
+      });
+      console.log('[main] renderer http/https requests will be blocked (whitelist applied).');
+    } catch (err) {
+      console.warn('[main] could not install webRequest block handler:', err);
+    }
   } catch (err) {
     console.error('[main] initialization error', err && (err as any).stack ? (err as any).stack : err);
     // Rethrow so the process fails visibly
