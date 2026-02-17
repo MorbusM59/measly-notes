@@ -15,6 +15,20 @@ import { SearchResult } from './shared/types';
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
+// Basic validators for main-side IPC defense-in-depth
+function isString(v: unknown): v is string {
+  return typeof v === 'string';
+}
+function isNonEmptyString(v: unknown): v is string {
+  return isString(v) && v.trim().length > 0;
+}
+function isPositiveInteger(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every(i => typeof i === 'string');
+}
+
 // Global error handlers to make crashes visible in the terminal
 process.on('uncaughtException', (err) => {
   console.error('[main] uncaughtException', err && err.stack ? err.stack : err);
@@ -122,7 +136,7 @@ const createWindow = (): void => {
       }
     });
 
-    // Prefer setWindowOpenHandler where available (typed-safe use)
+    // setWindowOpenHandler or fallback
     try {
       const wcAny = mainWindow.webContents as any;
       if (wcAny && typeof wcAny.setWindowOpenHandler === 'function') {
@@ -140,7 +154,6 @@ const createWindow = (): void => {
           return { action: 'deny' };
         });
       } else if (wcAny && typeof wcAny.on === 'function') {
-        // Fallback for older Electron versions: listen to 'new-window'
         wcAny.on('new-window', (event: any, url: any) => {
           try {
             event.preventDefault();
@@ -187,17 +200,12 @@ const createWindow = (): void => {
 // Helper: set default spellchecker languages (multiple)
 async function setDefaultSpellCheckerLanguages(langs: string[]) {
   try {
-    // setSpellCheckerLanguages is available on session in recent Electron/Chromium builds
-    // This call may be a no-op on some platforms if dictionaries aren't available.
     await session.defaultSession.setSpellCheckerLanguages(langs);
 
-    // Try to enable the spellchecker if available on this Electron version/platform.
-    // Some versions/platforms manage this differently, so ignore failures.
     if ((session.defaultSession as any).setSpellCheckerEnabled) {
       try {
         (session.defaultSession as any).setSpellCheckerEnabled(true);
       } catch (err) {
-        // Non-fatal: some platforms manage spellchecker state differently
         console.warn('[main] could not setSpellCheckerEnabled:', err);
       }
     }
@@ -218,13 +226,11 @@ app.whenReady().then(async () => {
     console.log('[main] initFileSystem OK');
 
     // Ensure English and German spellchecking are set by default on every machine.
-    // Note: on Linux you may need Hunspell dictionaries available to Chromium for this to work.
     await setDefaultSpellCheckerLanguages(['en-US', 'de-DE']);
 
     // Block outgoing http(s) requests initiated by the renderer, but whitelist local/dev hosts
     try {
       const whitelistHostnames = getInternalHostnames();
-      // Ensure we allow the dev/bundler host if MAIN_WINDOW_WEBPACK_ENTRY is remote
       try {
         if (typeof MAIN_WINDOW_WEBPACK_ENTRY === 'string' && MAIN_WINDOW_WEBPACK_ENTRY.startsWith('http')) {
           const mainHost = new URL(MAIN_WINDOW_WEBPACK_ENTRY).hostname;
@@ -235,25 +241,20 @@ app.whenReady().then(async () => {
       session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details: any, callback: (response: { cancel: boolean }) => void) => {
         try {
           const urlStr: string = details.url || '';
-          // Allow file protocol (local file loading)
           if (urlStr.startsWith('file:')) {
             return callback({ cancel: false });
           }
-          // Safely parse hostname and allow localhost/dev server traffic
           let hostname = '';
           try {
             hostname = new URL(urlStr).hostname;
           } catch (err) {
-            // If parsing fails, be conservative and block
             return callback({ cancel: true });
           }
           if (whitelistHostnames.has(hostname)) {
             return callback({ cancel: false });
           }
-          // Otherwise cancel any external HTTP/S request originating from renderer
           return callback({ cancel: true });
         } catch (err) {
-          // On any unexpected error, cancel to be safe
           return callback({ cancel: true });
         }
       });
@@ -263,19 +264,18 @@ app.whenReady().then(async () => {
     }
   } catch (err) {
     console.error('[main] initialization error', err && (err as any).stack ? (err as any).stack : err);
-    // Rethrow so the process fails visibly
     throw err;
   }
 
   try {
     console.log('[main] registering IPC handlers');
 
-    ipcMain.handle('create-note', async (_, title: string) => {
-      const note = createNote(title, '');
+    ipcMain.handle('create-note', async (_event, title: unknown) => {
+      if (!isString(title)) throw new Error('Invalid title');
+      const note = createNote(String(title), '');
       const filePath = await saveNoteContent(note.id, '');
       updateNoteFilePath(note.id, filePath);
 
-      // Ensure FTS entry exists for the new note (empty content initially)
       try {
         upsertNoteFts(note.id, note.title, '');
       } catch (err) {
@@ -289,26 +289,27 @@ app.whenReady().then(async () => {
       return updatedNote;
     });
 
-    ipcMain.handle('save-note', async (_, id: number, content: string) => {
-      const note = getNoteById(id);
+    ipcMain.handle('save-note', async (_event, id: unknown, content: unknown) => {
+      if (!isPositiveInteger(id) || !isString(content)) throw new Error('Invalid save-note args');
+      const note = getNoteById(Number(id));
       if (note) {
-        await saveNoteContent(id, content);
-        updateNote(id); // updates timestamps including lastEdited
+        await saveNoteContent(Number(id), String(content));
+        updateNote(Number(id)); // updates timestamps including lastEdited
 
-        // Update FTS index so searches will include the new content
         try {
-          upsertNoteFts(id, note.title, content);
+          upsertNoteFts(Number(id), note.title, String(content));
         } catch (err) {
           console.error('[main] failed to update FTS index for note', id, err);
         }
 
-        return getNoteById(id) ?? null;
+        return getNoteById(Number(id)) ?? null;
       }
       return null;
     });
 
-    ipcMain.handle('load-note', async (_, id: number) => {
-      const note = getNoteById(id);
+    ipcMain.handle('load-note', async (_event, id: unknown) => {
+      if (!isPositiveInteger(id)) throw new Error('Invalid id');
+      const note = getNoteById(Number(id));
       if (note) {
         return await loadNoteContent(note.filePath);
       }
@@ -319,78 +320,87 @@ app.whenReady().then(async () => {
       return getAllNotes();
     });
 
-    ipcMain.handle('delete-note', async (_, id: number) => {
-      const note = getNoteById(id);
+    ipcMain.handle('delete-note', async (_event, id: unknown) => {
+      if (!isPositiveInteger(id)) throw new Error('Invalid id');
+      const note = getNoteById(Number(id));
       if (note) {
         await deleteNoteFile(note.filePath);
-        deleteNote(id);
+        deleteNote(Number(id));
 
-        // Remove FTS entry if present
         try {
-          removeNoteFts(id);
+          removeNoteFts(Number(id));
         } catch (err) {
           console.warn('[main] failed to remove FTS entry for deleted note', id, err);
         }
       }
     });
 
-    ipcMain.handle('update-note-title', async (_, id: number, title: string) => {
-      updateNoteTitle(id, title);
+    ipcMain.handle('update-note-title', async (_event, id: unknown, title: unknown) => {
+      if (!isPositiveInteger(id) || !isString(title)) throw new Error('Invalid args');
+      updateNoteTitle(Number(id), String(title));
 
-      // keep FTS title in sync; load content to preserve FTS content column
       try {
-        const note = getNoteById(id);
+        const note = getNoteById(Number(id));
         if (note) {
           const content = await loadNoteContent(note.filePath);
-          upsertNoteFts(id, title, content);
+          upsertNoteFts(Number(id), String(title), content);
         }
       } catch (err) {
         console.warn('[main] failed to update FTS entry after title change', id, err);
       }
     });
 
-    ipcMain.handle('get-notes-page', async (_, page: number, perPage: number) => {
-      return getNotesPage(page, perPage);
+    ipcMain.handle('get-notes-page', async (_event, page: unknown, perPage: unknown) => {
+      if (!isPositiveInteger(page) || !isPositiveInteger(perPage)) throw new Error('Invalid pagination args');
+      return getNotesPage(Number(page), Number(perPage));
     });
 
     // Tag operations
-    ipcMain.handle('add-tag-to-note', async (_, noteId: number, tagName: string, position: number) => {
-      return addTagToNote(noteId, tagName, position);
+    ipcMain.handle('add-tag-to-note', async (_event, noteId: unknown, tagName: unknown, position: unknown) => {
+      if (!isPositiveInteger(noteId) || !isNonEmptyString(tagName) || typeof position !== 'number') {
+        throw new Error('Invalid args for add-tag-to-note');
+      }
+      return addTagToNote(Number(noteId), String(tagName), Number(position));
     });
 
-    ipcMain.handle('remove-tag-from-note', async (_, noteId: number, tagId: number) => {
-      removeTagFromNote(noteId, tagId);
+    ipcMain.handle('remove-tag-from-note', async (_event, noteId: unknown, tagId: unknown) => {
+      if (!isPositiveInteger(noteId) || !isPositiveInteger(tagId)) throw new Error('Invalid args');
+      removeTagFromNote(Number(noteId), Number(tagId));
     });
 
-    ipcMain.handle('reorder-note-tags', async (_, noteId: number, tagIds: number[]) => {
-      reorderNoteTags(noteId, tagIds);
+    ipcMain.handle('reorder-note-tags', async (_event, noteId: unknown, tagIds: unknown) => {
+      if (!isPositiveInteger(noteId) || !Array.isArray(tagIds)) throw new Error('Invalid args');
+      reorderNoteTags(Number(noteId), tagIds as number[]);
     });
 
-    ipcMain.handle('get-note-tags', async (_, noteId: number) => {
-      return getNoteTags(noteId);
+    ipcMain.handle('get-note-tags', async (_event, noteId: unknown) => {
+      if (!isPositiveInteger(noteId)) throw new Error('Invalid args');
+      return getNoteTags(Number(noteId));
     });
 
     ipcMain.handle('get-all-tags', async () => {
       return getAllTags();
     });
 
-    ipcMain.handle('get-top-tags', async (_, limit: number) => {
-      return getTopTags(limit);
+    ipcMain.handle('get-top-tags', async (_event, limit: unknown) => {
+      if (!isPositiveInteger(limit)) throw new Error('Invalid args');
+      return getTopTags(Number(limit));
     });
 
-    // Search operations - delegate to FTS-backed search
-    ipcMain.handle('search-notes', async (_, query: string) => {
+    // Search operations
+    ipcMain.handle('search-notes', async (_event, query: unknown) => {
+      if (!isString(query)) throw new Error('Invalid query');
       try {
-        return await searchNotes(query);
+        return await searchNotes(String(query));
       } catch (err) {
         console.error('[main] search-notes failed', err);
-        // Fallback: return empty results on error
         return [] as SearchResult[];
       }
     });
 
-    ipcMain.handle('search-notes-by-tag', async (_, tagName: string) => {
-      return searchNotesByTag(tagName);
+    ipcMain.handle('search-notes-by-tag', async (_event, tagName: unknown) => {
+      if (!isString(tagName)) throw new Error('Invalid tagName');
+      return searchNotesByTag(String(tagName));
     });
 
     ipcMain.handle('get-notes-by-primary-tag', async () => {
@@ -406,10 +416,28 @@ app.whenReady().then(async () => {
       return n ?? null;
     });
 
-    // Allow renderer to change spellchecker languages at runtime (optional)
-    ipcMain.handle('set-spellchecker-languages', async (_event, langs: string[]) => {
+    // IPC: Request force save -> main notifies the focused renderer to run their force-save handlers
+    ipcMain.handle('request-force-save', async () => {
       try {
-        await setDefaultSpellCheckerLanguages(langs);
+        const focused = BrowserWindow.getFocusedWindow() ?? mainWindow;
+        if (focused && focused.webContents) {
+          // broadcast to that window
+          focused.webContents.send('do-force-save');
+          return { ok: true };
+        }
+        // no window focused; still ok
+        return { ok: true };
+      } catch (err) {
+        console.warn('[main] request-force-save failed', err);
+        return { ok: false };
+      }
+    });
+
+    // Spellchecker languages mutation (already present)
+    ipcMain.handle('set-spellchecker-languages', async (_event, langs: unknown) => {
+      if (!isStringArray(langs)) throw new Error('Invalid langs array');
+      try {
+        await setDefaultSpellCheckerLanguages(langs as string[]);
         return { ok: true };
       } catch (err) {
         return { ok: false, error: String(err) };
@@ -438,7 +466,6 @@ app.whenReady().then(async () => {
   });
 }).catch(err => {
   console.error('[main] whenReady threw', err && (err as any).stack ? (err as any).stack : err);
-  // rethrow to make the process exit in dev so you see the error
   throw err;
 });
 

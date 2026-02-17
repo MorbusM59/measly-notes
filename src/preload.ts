@@ -1,10 +1,8 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import { IElectronAPI, Note, NoteTag, Tag, SearchResult, CategoryHierarchyResult } from './shared/types';
 
 /**
  * Simple runtime validators to avoid passing unexpected values to the main process.
- * These are intentionally minimal — they reduce accidental misuse and make it harder
- * for untrusted renderer code to invoke privileged IPCs with arbitrary payloads.
  */
 function assertString(v: unknown, name = 'value'): asserts v is string {
   if (typeof v !== 'string') {
@@ -32,16 +30,16 @@ function assertStringArray(v: unknown, name = 'value'): asserts v is string[] {
 }
 
 /**
- * Minimal, safe wrappers that call ipcRenderer.invoke after validating inputs.
- * Keep surface area small and explicit.
+ * Exposed API - minimal and validated.
  */
 const electronAPI: IElectronAPI & {
   setSpellcheckerLanguages: (langs: string[]) => Promise<{ ok: boolean; error?: string }>;
+  requestForceSave: () => Promise<{ ok: boolean }>;
+  onForceSave: (cb: () => void) => { unsubscribe: () => void };
 } = {
   // Notes
   createNote: async (title: string) => {
     assertString(title, 'title');
-    // allow empty titles (editor enforces '# '), but coerce to string
     return (await ipcRenderer.invoke('create-note', String(title))) as Note;
   },
 
@@ -147,6 +145,34 @@ const electronAPI: IElectronAPI & {
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };
     }
+  },
+
+  // Request a force-save: main will notify renderer(s) to run their save handlers.
+  requestForceSave: async () => {
+    try {
+      const res = await ipcRenderer.invoke('request-force-save');
+      return res as { ok: boolean };
+    } catch (err) {
+      return { ok: false };
+    }
+  },
+
+  // Register a local callback that will be invoked when main broadcasts the do-force-save event.
+  onForceSave: (cb: () => void) => {
+    const wrapper = (_event: IpcRendererEvent) => {
+      try {
+        cb();
+      } catch (err) {
+        // swallow to avoid crashing renderer
+        console.warn('onForceSave handler error', err);
+      }
+    };
+    ipcRenderer.on('do-force-save', wrapper);
+    return {
+      unsubscribe: () => {
+        ipcRenderer.removeListener('do-force-save', wrapper);
+      },
+    };
   },
 };
 
