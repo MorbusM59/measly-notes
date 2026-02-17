@@ -23,7 +23,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef('');
   const lastSavedTitleRef = useRef('');
-  
+  // Track the currently loaded note id so we only reload content on an actual note switch
+  const currentNoteIdRef = useRef<number | null>(null);
+
   // Expose forceSave method via window for App to call
   useEffect(() => {
     (window as any).forceSaveCurrentNote = async () => {
@@ -37,7 +39,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         await autoSave();
       }
     };
-    
+
     return () => {
       delete (window as any).forceSaveCurrentNote;
     };
@@ -56,19 +58,28 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Load note content when note changes
   useEffect(() => {
     if (note) {
+      // If the selected note is the same id we already have loaded, avoid reloading the content.
+      // This prevents parent-driven updates (title/lastEdited) from clobbering the editor state
+      // and resetting the cursor position.
+      if (currentNoteIdRef.current === note.id) {
+        // Update saved title ref so future saves don't re-send unchanged titles
+        lastSavedTitleRef.current = note.title;
+        return;
+      }
+
+      currentNoteIdRef.current = note.id;
       window.electronAPI.loadNote(note.id).then(noteContent => {
         setContent(noteContent);
         lastSavedContentRef.current = noteContent;
         lastSavedTitleRef.current = note.title;
-        
+
         // Focus textarea and position cursor after content is loaded only if we are in edit mode
         if (!showPreview) {
           setTimeout(() => {
             const textarea = textareaRef.current;
             if (textarea) {
-              // Focus the textarea
               textarea.focus();
-              
+
               // Position cursor after "# " for new notes
               if (noteContent === '# ') {
                 textarea.setSelectionRange(2, 2);
@@ -84,6 +95,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       setContent('');
       lastSavedContentRef.current = '';
       lastSavedTitleRef.current = '';
+      currentNoteIdRef.current = null;
     }
   }, [note, showPreview]);
 
@@ -99,7 +111,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const savedStyle = localStorage.getItem('markdown-view-style');
     const savedFontSize = localStorage.getItem('markdown-font-size');
     const savedSpacing = localStorage.getItem('markdown-spacing');
-    
+
     if (savedStyle) {
       setViewStyle(savedStyle);
     }
@@ -142,32 +154,32 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const extractTitle = useCallback((text: string): string => {
     const lines = text.split('\n');
     const firstLine = lines[0] || '';
-    
+
     // Check if first line starts with # (markdown heading)
     if (firstLine.startsWith('# ')) {
       return firstLine.substring(2).trim();
     }
-    
+
     return 'Untitled';
   }, []);
 
   // Auto-save function
   const autoSave = useCallback(async () => {
     if (!note || !content) return;
-    
+
     // Only save if content has changed
     if (content === lastSavedContentRef.current) return;
-    
+
     // Save content; new API returns the updated Note
     const savedNote = await window.electronAPI.saveNote(note.id, content);
     lastSavedContentRef.current = content;
-    
+
     // Update title if it has changed
     const newTitle = extractTitle(content);
     if (newTitle !== lastSavedTitleRef.current && newTitle !== 'Untitled') {
       await window.electronAPI.updateNoteTitle(note.id, newTitle);
       lastSavedTitleRef.current = newTitle;
-      
+
       // Notify parent about note update using updated note object if available
       if (onNoteUpdate) {
         // If save returned an updated note, use it; otherwise, synthesize minimal update
@@ -200,7 +212,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       return;
     }
 
-    // -- (formatting checks unchanged) --
     if (start >= 2 && end <= content.length - 2) {
       if (content.substring(start - 2, start) === '**' && content.substring(end, end + 2) === '**') {
         active.add('bold');
@@ -266,17 +277,17 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const selectedText = content.substring(start, end);
-    
+
     // Check if the selection is already wrapped
-    const isWrapped = start >= before.length && 
+    const isWrapped = start >= before.length &&
                      end <= content.length - after.length &&
                      content.substring(start - before.length, start) === before &&
                      content.substring(end, end + after.length) === after;
-    
+
     let newText: string;
     let newSelectionStart: number;
     let newSelectionEnd: number;
-    
+
     if (isWrapped) {
       // Remove formatting
       newText = content.substring(0, start - before.length) + selectedText + content.substring(end + after.length);
@@ -288,10 +299,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       newSelectionStart = start + before.length;
       newSelectionEnd = end + before.length;
     }
-    
+
     setContent(newText);
     handleContentChange(newText);
-    
+
     // Restore focus and selection
     setTimeout(() => {
       textarea.focus();
@@ -306,10 +317,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     const start = textarea.selectionStart;
     const newText = content.substring(0, start) + text + content.substring(start);
-    
+
     setContent(newText);
     handleContentChange(newText);
-    
+
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(start + text.length, start + text.length);
@@ -369,15 +380,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    
+
     // Find the start and end of the lines
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
     const lineEnd = content.indexOf('\n', end);
     const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
-    
+
     const selectedLines = content.substring(lineStart, actualLineEnd);
     const lines = selectedLines.split('\n');
-    
+
     // Check if all lines already have the prefix
     const allHavePrefix = lines.every(line => {
       if (numbered) {
@@ -385,7 +396,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       }
       return line.startsWith(prefix);
     });
-    
+
     let newLines: string[];
     if (allHavePrefix) {
       // Remove prefix
@@ -404,12 +415,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         return `${prefix}${line}`;
       });
     }
-    
+
     const newText = content.substring(0, lineStart) + newLines.join('\n') + content.substring(actualLineEnd);
-    
+
     setContent(newText);
     handleContentChange(newText);
-    
+
     setTimeout(() => {
       textarea.focus();
       checkFormatting();
@@ -421,21 +432,21 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     if (!textarea) return;
 
     const start = textarea.selectionStart;
-    
+
     // Find the start of the current line
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
     const lineEnd = content.indexOf('\n', start);
     const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
     const currentLine = content.substring(lineStart, actualLineEnd);
-    
+
     const prefix = '#'.repeat(level) + ' ';
-    
+
     // Check if line already has this heading level
     const hasHeading = currentLine.startsWith(prefix);
-    
+
     let newText: string;
     let newCursorPos: number;
-    
+
     if (hasHeading) {
       // Remove heading
       newText = content.substring(0, lineStart) + currentLine.substring(prefix.length) + content.substring(actualLineEnd);
@@ -447,15 +458,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       if (headingMatch) {
         cleanLine = currentLine.substring(headingMatch[0].length);
       }
-      
+
       // Add new heading
       newText = content.substring(0, lineStart) + prefix + cleanLine + content.substring(actualLineEnd);
       newCursorPos = headingMatch ? start - headingMatch[0].length + prefix.length : start + prefix.length;
     }
-    
+
     setContent(newText);
     handleContentChange(newText);
-    
+
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -466,12 +477,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Handle content change with debounced auto-save
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
-    
+
     // Clear existing timeout
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current);
     }
-    
+
     // Don't auto-save while on first line or while in preview mode
     if (!isOnFirstLine && note && !showPreview) {
       autoSaveTimeoutRef.current = setTimeout(() => {
@@ -549,13 +560,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   return (
     <div className="markdown-editor">
       <div className="editor-toolbar">
-        <button 
+        <button
           className={`toolbar-toggle-btn ${!showPreview ? 'active' : ''}`}
           onClick={() => onTogglePreview(!showPreview)}
         >
           {showPreview ? 'Edit' : 'View'}
         </button>
-        
+
         {!showPreview && (
           <div className="markdown-toolbar">
             <button className={`toolbar-btn-icon ${activeFormats.has('bold') ? 'active' : ''}`} onClick={() => wrapSelection('**')} title="Bold">
@@ -638,12 +649,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             </div>
           </>
         )}
-        
+
         {isOnFirstLine && (
           <span className="auto-save-status">Auto-save paused (editing title)</span>
         )}
       </div>
-      
+
       <div className="editor-content">
         {!showPreview ? (
           <textarea
