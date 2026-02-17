@@ -38,6 +38,44 @@ app.disableHardwareAcceleration();
 
 let mainWindow: BrowserWindow | null = null;
 
+// Compute internal hostnames (app origin + localhost variants) so we can block opening those externally
+function getInternalHostnames(): Set<string> {
+  const hosts = new Set<string>(['localhost', '127.0.0.1', '::1']);
+  try {
+    if (typeof MAIN_WINDOW_WEBPACK_ENTRY === 'string' && MAIN_WINDOW_WEBPACK_ENTRY.startsWith('http')) {
+      const u = new URL(MAIN_WINDOW_WEBPACK_ENTRY);
+      if (u.hostname) hosts.add(u.hostname);
+    }
+  } catch (_) {
+    // ignore parsing errors
+  }
+  return hosts;
+}
+
+// Helper: decide whether a given URL should be opened in the external browser
+function shouldOpenExternally(urlStr: string, internalHosts: Set<string>): boolean {
+  if (!urlStr) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(urlStr);
+  } catch (err) {
+    // non-HTTP URL or invalid, do not open externally
+    return false;
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    return false;
+  }
+
+  const hostname = parsed.hostname;
+  // If hostname is one of our internal hosts (dev server / localhost), do NOT open externally
+  if (internalHosts.has(hostname)) return false;
+
+  // Otherwise treat as external
+  return true;
+}
+
 const createWindow = (): void => {
   console.log('[main] createWindow() - start');
   try {
@@ -63,44 +101,63 @@ const createWindow = (): void => {
       }
     });
 
-    // Prevent navigation and always open external links in the OS default browser.
-    // This ensures the app never navigates away to remote content.
+    // Prevent navigation and always open external links in the OS default browser,
+    // but never open the app's own origin (dev server/localhost) externally.
+    const internalHosts = getInternalHostnames();
+
     mainWindow.webContents.on('will-navigate', (event, url) => {
-      if (url) {
-        event.preventDefault();
+      // Always prevent in-app navigation; decide whether to open externally
+      event.preventDefault();
+
+      if (shouldOpenExternally(url, internalHosts)) {
         try {
           shell.openExternal(url);
+          console.log('[main] opened external URL from will-navigate:', url);
         } catch (err) {
           console.warn('[main] failed to open external URL from will-navigate:', url, err);
         }
+      } else {
+        // blocked/internal navigation - do nothing
+        console.log('[main] blocked internal navigation attempt to:', url);
       }
     });
 
-    // Prefer setWindowOpenHandler where available
+    // Prefer setWindowOpenHandler where available (typed-safe use)
     try {
-      // cast to any to avoid strict signature mismatch across Electron versions
       const wcAny = mainWindow.webContents as any;
-      if (wcAny.setWindowOpenHandler) {
+      if (wcAny && typeof wcAny.setWindowOpenHandler === 'function') {
         wcAny.setWindowOpenHandler(({ url }: { url: string }) => {
-          try {
-            shell.openExternal(url);
-          } catch (err) {
-            console.warn('[main] failed to open external URL from setWindowOpenHandler:', url, err);
+          if (shouldOpenExternally(url, internalHosts)) {
+            try {
+              shell.openExternal(url);
+              console.log('[main] opened external URL from setWindowOpenHandler:', url);
+            } catch (err) {
+              console.warn('[main] failed to open external URL from setWindowOpenHandler:', url, err);
+            }
+          } else {
+            console.log('[main] denied window.open to internal URL:', url);
           }
           return { action: 'deny' };
         });
+      } else if (wcAny && typeof wcAny.on === 'function') {
+        // Fallback for older Electron versions: listen to 'new-window'
+        wcAny.on('new-window', (event: any, url: any) => {
+          try {
+            event.preventDefault();
+          } catch (_) {}
+          const urlStr = String(url || '');
+          if (shouldOpenExternally(urlStr, internalHosts)) {
+            try {
+              shell.openExternal(urlStr);
+              console.log('[main] opened external URL from new-window fallback:', urlStr);
+            } catch (err) {
+              console.warn('[main] failed to open external URL from new-window fallback:', urlStr, err);
+            }
+          } else {
+            console.log('[main] denied new-window to internal URL:', urlStr);
+          }
+        });
       }
-      // Fallback for older Electron versions that emit 'new-window'
-      wcAny.on && wcAny.on('new-window', (event: any, url: any) => {
-        try {
-          event.preventDefault();
-        } catch (_) {}
-        try {
-          shell.openExternal(String(url));
-        } catch (err) {
-          console.warn('[main] failed to open external URL from new-window fallback:', url, err);
-        }
-      });
     } catch (err) {
       console.warn('[main] window-open handlers setup failed:', err);
     }
@@ -166,8 +223,8 @@ app.whenReady().then(async () => {
 
     // Block outgoing http(s) requests initiated by the renderer, but whitelist local/dev hosts
     try {
-      const whitelistHostnames = new Set(['localhost', '127.0.0.1', '::1']);
-      // If MAIN_WINDOW_WEBPACK_ENTRY is a http(s) URL (dev), whitelist its host as well
+      const whitelistHostnames = getInternalHostnames();
+      // Ensure we allow the dev/bundler host if MAIN_WINDOW_WEBPACK_ENTRY is remote
       try {
         if (typeof MAIN_WINDOW_WEBPACK_ENTRY === 'string' && MAIN_WINDOW_WEBPACK_ENTRY.startsWith('http')) {
           const mainHost = new URL(MAIN_WINDOW_WEBPACK_ENTRY).hostname;
@@ -178,7 +235,7 @@ app.whenReady().then(async () => {
       session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details: any, callback: (response: { cancel: boolean }) => void) => {
         try {
           const urlStr: string = details.url || '';
-          // Allow file protocol
+          // Allow file protocol (local file loading)
           if (urlStr.startsWith('file:')) {
             return callback({ cancel: false });
           }
