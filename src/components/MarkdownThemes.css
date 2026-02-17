@@ -154,7 +154,9 @@
     2px 2px 4px rgba(255,255,255,0.5),
    -2px 2px 4px rgba(255,255,255,1),
     2px -2px 4px rgba(255,255,255,0.5),
-   -2px -2px 4px rgba(255,255,255,0.5);
+   -2px -2px 4px rgba(255,255,255,0.5)
+    0 2px 0 rgba(255, 255, 255, 1),  /* light edge at bottom left */
+    0 -1px 0 rgba(0,   0,   0,   0.3); /* subtle dark edge at top right */
 }
 
 /* Fix top spacing - keep it at tight level across all spacing modes */

@@ -230,14 +230,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
             placeholder="Type to add tag..."
           />
         </div>
-        <button
-          className={`delete-note-btn ${deleteArmed ? 'delete-armed' : ''}`}
-          onClick={handleDeleteNote}
-          onMouseLeave={handleDeleteMouseLeave}
-          title={deleteArmed ? 'Click again to confirm deletion' : 'Delete note'}
-        >
-          ×
-        </button>
       </div>
 
       <div className="tags-display">

@@ -33,9 +33,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const lastSavedTitleRef = useRef('');
   const currentNoteIdRef = useRef<number | null>(null);
 
-  // Editor style options — reduced to Syne Mono and Red Hat Mono.
-  // Each style maps to a font-family stack. These style names are the "editor styles"
-  // you requested — they can also be used in CSS if you add corresponding classes.
+  // Editor style options — Syne and Red Hat.
   const editorStyleOptions: { key: string; label: string; family: string }[] = [
     { key: 'syne', label: 'Syne Mono', family: "'Syne Mono', 'Menlo', 'Monaco', monospace" },
     { key: 'redhat', label: 'Red Hat Mono', family: "'Red Hat Mono', 'Menlo', 'Monaco', monospace" },
@@ -46,12 +44,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     return opt ? opt.family : editorStyleOptions[0].family;
   };
 
-  // Helper: extract the primary font-family name from a CSS font-family string
-  // Example: "'Fira Code', 'Menlo', 'Monaco', monospace" -> Fira Code
   const getPrimaryFamily = (fontFamilyValue: string | null | undefined): string | null => {
     if (!fontFamilyValue) return null;
     const first = fontFamilyValue.split(',')[0].trim();
-    // Remove surrounding quotes if present
     return first.replace(/^['"]|['"]$/g, '') || null;
   };
 
@@ -68,7 +63,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Load note content when note changes
   useEffect(() => {
     if (note) {
-      // If same note id already loaded, only update title ref (avoid clobbering editor)
       if (currentNoteIdRef.current === note.id) {
         lastSavedTitleRef.current = note.title;
         return;
@@ -113,8 +107,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   }, [showPreview]);
 
   // Load and persist view/editor settings.
-  // For backward compatibility: read legacy keys 'markdown-font-size' and 'markdown-spacing'
-  // as fallbacks for view settings.
   useEffect(() => {
     const savedViewStyle = localStorage.getItem('markdown-view-style');
     const savedViewFontSize = localStorage.getItem('markdown-view-font-size') || localStorage.getItem('markdown-font-size');
@@ -305,7 +297,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setActiveFormats(active);
   }, [content]);
 
-  // Formatting helpers
+  // Formatting helpers (unchanged)
   const wrapSelection = (before: string, after: string = before) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -509,34 +501,85 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [isOnFirstLine, note, content, autoSave]);
 
-  // add this near the other useEffect hooks (after font preload effect)
+  // reflow after fonts arrive (helps initial wrapping)
   useEffect(() => {
     const reflowTextarea = () => {
       const ta = textareaRef.current;
       if (!ta) return;
-      // quick hide/show to force layout reflow without visually noticeable flicker
       ta.style.display = 'none';
-      // read a layout property to force reflow
+      // force reflow
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       ta.offsetHeight;
       ta.style.display = '';
     };
 
-    // If Font Loading API available, wait for fonts to be ready, then reflow.
     if ((document as any).fonts && (document as any).fonts.ready) {
       (document as any).fonts.ready.then(() => {
-        // run after next paint to be safe
         requestAnimationFrame(() => requestAnimationFrame(reflowTextarea));
       }).catch(() => {
-        // fallback: still attempt a reflow shortly after mount
         setTimeout(reflowTextarea, 100);
       });
     } else {
-      // fallback if Font Loading API not present
       const t = setTimeout(reflowTextarea, 100);
       return () => clearTimeout(t);
     }
   }, [editorStyle]);
+
+  // toolbar layout styles: two flex areas (left/right) and fixed toolbar height/line-height
+  const toolbarStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    height: '44px',
+    lineHeight: '44px',
+    padding: '0 8px',
+    flexWrap: 'nowrap',   // prevent wrapping to next line
+    overflow: 'hidden',   // clip overflow so content is cut off at the edge
+  };
+  const leftToolsStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flex: '0 0 auto',     // keep left controls visible
+    minWidth: 0,
+  };
+  const rightToolsStyle: React.CSSProperties = {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flex: '0 0 auto',     // do not shrink; allow toolbar container to clip it
+    overflow: 'hidden',   // clip overflowing right-side content
+    whiteSpace: 'nowrap',
+  };
+
+  // Helper: map size/spacing tokens to actual values for the editor textarea
+  const sizeToPx = (size: string): number => {
+    switch (size) {
+      case 'xs': return 12;
+      case 's': return 14;
+      case 'm': return 16;
+      case 'l': return 18;
+      case 'xl': return 20;
+      default: return 16;
+    }
+  };
+  const spacingToLineHeight = (spacingVal: string): number => {
+    switch (spacingVal) {
+      case 'tight': return 1.2;
+      case 'compact': return 1.4;
+      case 'cozy': return 1.6;
+      case 'wide': return 1.8;
+      default: return 1.6;
+    }
+  };
+
+  // derive inline styles for editor textarea based on editor settings (kept for potential fallbacks)
+  const editorInlineStyle: React.CSSProperties = {
+    fontFamily: getEditorFamily(editorStyle),
+    fontSize: `${sizeToPx(editorFontSize)}px`,
+    lineHeight: `${spacingToLineHeight(editorSpacing)}`,
+  };
 
   // cleanup
   useEffect(() => {
@@ -565,55 +608,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     } catch {
       return false;
     }
-  };
-
-  // toolbar layout styles: two flex areas (left/right) and fixed toolbar height/line-height
-  const toolbarStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    height: '44px',       // fixed height to avoid 1px difference when toggling modes
-    lineHeight: '44px',
-    padding: '0 8px',
-  };
-  const leftToolsStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  };
-  const rightToolsStyle: React.CSSProperties = {
-    marginLeft: 'auto',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  };
-
-  // Helper: map size/spacing tokens to actual values for the editor textarea
-  const sizeToPx = (size: string): number => {
-    switch (size) {
-      case 'xs': return 12;
-      case 's': return 14;
-      case 'm': return 16;
-      case 'l': return 18;
-      case 'xl': return 20;
-      default: return 16;
-    }
-  };
-  const spacingToLineHeight = (spacingVal: string): number => {
-    switch (spacingVal) {
-      case 'tight': return 1.2;
-      case 'compact': return 1.4;
-      case 'cozy': return 1.6;
-      case 'wide': return 1.8;
-      default: return 1.6;
-    }
-  };
-
-  // derive inline styles for editor textarea based on editor settings
-  const editorInlineStyle: React.CSSProperties = {
-    fontFamily: getEditorFamily(editorStyle),
-    fontSize: `${sizeToPx(editorFontSize)}px`,
-    lineHeight: `${spacingToLineHeight(editorSpacing)}`,
   };
 
   return (
@@ -656,10 +650,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           )}
         </div>
 
-        {/* right-aligned controls */}
+        {/* right-aligned controls — always rendered, but clipped by container when there's not enough space */}
         <div style={rightToolsStyle}>
           {showPreview ? (
-            // View mode controls (style affects preview rendering)
             <>
               <div className="style-selector">
                 <label className="selector-label">Style:</label>
@@ -696,7 +689,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               </div>
             </>
           ) : (
-            // Edit mode controls (style affects editor rendering)
             <>
               <div className="style-selector">
                 <label className="selector-label">Style:</label>
@@ -745,7 +737,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             onPaste={handlePaste}
             placeholder={`# Note Title
 
-          Start typing your note here...`}
+Start typing your note here...`}
+            style={editorInlineStyle}
           />
         ) : (
           <div className={`markdown-preview style-${viewStyle} size-${viewFontSize} spacing-${viewSpacing}`}>
@@ -764,12 +757,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
                     childText = (children as any).props.children;
                   }
 
-                  // If the visible link text is exactly the href (bare/autolink), render as plain text.
                   if (href && childText && childText.trim() === href.trim()) {
                     return <span>{childText}</span>;
                   }
 
-                  // Only render anchors for allowed absolute protocols.
                   if (isSafeHref(href)) {
                     return (
                       <a href={href} target="_blank" rel="noopener noreferrer">
@@ -778,7 +769,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
                     );
                   }
 
-                  // Unsafe or relative link → render as plain text.
                   return <span>{props.children}</span>;
                 }
               }}
