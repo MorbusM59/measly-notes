@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote,
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
@@ -48,6 +48,8 @@ const createWindow = (): void => {
         preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
         contextIsolation: true,
         nodeIntegration: false,
+        // enable Chromium spellchecker in the renderer
+        spellcheck: true,
       },
       show: false, // show when ready-to-show
     });
@@ -83,6 +85,30 @@ const createWindow = (): void => {
   }
 };
 
+// Helper: set default spellchecker languages (multiple)
+async function setDefaultSpellCheckerLanguages(langs: string[]) {
+  try {
+    // setSpellCheckerLanguages is available on session in recent Electron/Chromium builds
+    // This call may be a no-op on some platforms if dictionaries aren't available.
+    await session.defaultSession.setSpellCheckerLanguages(langs);
+
+    // Try to enable the spellchecker if available on this Electron version/platform.
+    // Some versions/platforms manage this differently, so ignore failures.
+    if ((session.defaultSession as any).setSpellCheckerEnabled) {
+      try {
+        (session.defaultSession as any).setSpellCheckerEnabled(true);
+      } catch (err) {
+        // Non-fatal: some platforms manage spellchecker state differently
+        console.warn('[main] could not setSpellCheckerEnabled:', err);
+      }
+    }
+
+    console.log('[main] spellchecker languages set to:', langs);
+  } catch (err) {
+    console.warn('[main] failed to set spellchecker languages:', err);
+  }
+}
+
 // Initialize app
 app.whenReady().then(async () => {
   console.log('[main] app.whenReady started');
@@ -91,6 +117,10 @@ app.whenReady().then(async () => {
     console.log('[main] initDatabase OK');
     await initFileSystem();
     console.log('[main] initFileSystem OK');
+
+    // Ensure English and German spellchecking are set by default on every machine.
+    // Note: on Linux you may need Hunspell dictionaries available to Chromium for this to work.
+    await setDefaultSpellCheckerLanguages(['en-US', 'de-DE']);
   } catch (err) {
     console.error('[main] initialization error', err && (err as any).stack ? (err as any).stack : err);
     // Rethrow so the process fails visibly
@@ -234,6 +264,16 @@ app.whenReady().then(async () => {
     ipcMain.handle('get-last-edited-note', async () => {
       const n = getLastEditedNote();
       return n ?? null;
+    });
+
+    // Allow renderer to change spellchecker languages at runtime (optional)
+    ipcMain.handle('set-spellchecker-languages', async (_event, langs: string[]) => {
+      try {
+        await setDefaultSpellCheckerLanguages(langs);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
     });
 
     console.log('[main] IPC handlers registered');
