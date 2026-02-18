@@ -19,6 +19,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0; /* allow flex children to shrink properly */
   background: #F5F3F2;
 }
 
@@ -170,13 +171,15 @@
   word-break: break-word;
 }
 
+/* Preview styling: let outer container handle vertical scrolling */
 .markdown-preview {
   padding: 20px;
   font-size: 16px;
   line-height: 1.6;
-  overflow-y: auto;
+  overflow: visible; /* rely on .editor-content for scrolling to avoid double scrollbars */
 }
 
+/* Empty-state */
 .empty-state {
   text-align: center;
   color: #999;
@@ -196,38 +199,45 @@
 .markdown-textarea.spacing-cozy    { line-height: 1.6; }
 .markdown-textarea.spacing-wide    { line-height: 1.8; }
 
+/* Make the editor content the single vertical scroll container.
+   Important: flex: 1 1 auto and min-height: 0 allow the container to
+   properly constrain children inside column flex layouts. */
 .editor-content {
-  flex: 1;
-  overflow: hidden;  /* textarea will scroll internally */
-  min-height: 0;     /* allows the flex child to shrink properly */
-  min-width: 0;      /* IMPORTANT: allow child to shrink and avoid flex overflow */
+  flex: 1 1 auto;
+  overflow-y: auto;       /* SINGLE scroll container for vertical axis */
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;          /* allows the flex child to shrink properly */
+  min-width: 0;           /* IMPORTANT: allow child to shrink and avoid flex overflow */
   background: #f9f9f9;
   box-shadow: inset 0 0 3px rgba(20,0,0,0.4),
               0 0 8px rgba(0,15,30,0.1);
   border-width: 1px;
   border-style: solid solid hidden solid;
   border-color: #FFFFFF22;
+  box-sizing: border-box;
+  padding: 0; /* keep padding inside textarea */
 }
 
-/* textarea should manage scrolling and wrapping itself */
+/* Textarea should auto-size (JS) and not create its own vertical scrollbar.
+   Height is auto so script can set it to match content. */
 .markdown-textarea {
   background: none;
   display: block;
   width: 100%;
-  height: 100%;
+  height: auto;            /* allow autosize script to set height */
   /* avoid forcing horizontal overflow from min-size */
   min-width: 0;
-  box-sizing: border-box; /* include padding in height calculation */
+  box-sizing: border-box;  /* include padding in height calculation */
   padding: 20px;
   border: none;
-  resize: none;
+  resize: none;            /* prevent manual resizing that would create nested scrollbars */
   font-size: 16px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   line-height: 1.6;
   outline: none;
 
-  /* scrolling handled inside textarea */
-  overflow: auto;
+  /* hide inner scrollbar — outer .editor-content handles vertical scroll */
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
 
   /* make wrapping robust */
@@ -239,26 +249,30 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   caret-color: auto;
-  /* keep some default padding; editor-style classes override as needed */
   background-clip: padding-box;
   color: #222222;
   text-shadow: 0 0 4px #FFFFFF, 0 0 2px #FFFFFF99;
   caret-color: #111111;
 }
 
+/* Optional: cap growth and fall back to internal scrolling */
+.markdown-textarea--with-max {
+  max-height: 60vh;
+  overflow-y: auto;  /* if you set a cap, allow textarea to scroll internally as fallback */
+}
+
+/* Editor font variants */
 .markdown-textarea.editor-style-redhat {
   font-family: 'Red Hat Mono', 'Menlo', 'Monaco', monospace;
 }
 
-/* selection + placeholder */
+/* selection + placeholder styles */
 .markdown-textarea.editor-style-redhat::selection { background: rgba(255,233,100,0.8); color: #111111; }
 .markdown-textarea.editor-style-redhat::placeholder { color: #22222288; }
 
 .markdown-textarea.editor-style-syne {
   font-family: 'Syne Mono', 'Menlo', 'Monaco', monospace;
 }
-
-/* selection + placeholder */
 .markdown-textarea.editor-style-syne::selection { background: rgba(255,233,100,0.8); color: #111111; }
 .markdown-textarea.editor-style-syne::placeholder { color: #22222288; }
 
@@ -271,3 +285,9 @@
   .markdown-textarea.editor-style-redhat { background-size: 100% 28px; }
   .markdown-textarea.editor-style-syne { background-size: 100% 24px, auto; }
 }
+
+/* Debug helpers — uncomment during layout debugging */
+/*
+.editor-content.debug { outline: 2px solid rgba(255,0,0,0.15); }
+.markdown-textarea.debug { outline: 2px solid rgba(0,0,255,0.15); }
+*/

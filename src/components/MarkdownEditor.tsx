@@ -168,6 +168,43 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   }, [editorStyle]);
 
+  // Autosize helper: set textarea height to its content height.
+  const autosizeTextarea = useCallback((ta?: HTMLTextAreaElement | null) => {
+    const el = ta ?? textareaRef.current;
+    if (!el) return;
+    // Reset so scrollHeight is measured correctly
+    el.style.height = 'auto';
+    // Add a small fudge to avoid cutting off last line on some browsers
+    const newHeight = el.scrollHeight + 2;
+    el.style.height = `${newHeight}px`;
+  }, []);
+
+  // Run autosize when content changes or when switching to edit mode.
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+
+    if (!showPreview) {
+      autosizeTextarea(ta);
+    } else {
+      // Clearing height when in preview so textarea doesn't force layout
+      ta.style.height = '';
+    }
+  }, [content, showPreview, autosizeTextarea]);
+
+  // Attach an input listener to autosize while the user types/pastes.
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const onInput = () => autosizeTextarea(ta);
+    ta.addEventListener('input', onInput);
+    // Ensure initial sizing
+    autosizeTextarea(ta);
+    return () => {
+      ta.removeEventListener('input', onInput);
+    };
+  }, [autosizeTextarea]);
+
   // cursor / first line detection
   const checkCursorPosition = useCallback(() => {
     const textarea = textareaRef.current;
@@ -511,6 +548,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       ta.offsetHeight;
       ta.style.display = '';
+      // ensure correct sizing after reflow
+      autosizeTextarea(ta);
     };
 
     if ((document as any).fonts && (document as any).fonts.ready) {
@@ -523,7 +562,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const t = setTimeout(reflowTextarea, 100);
       return () => clearTimeout(t);
     }
-  }, [editorStyle]);
+  }, [editorStyle, autosizeTextarea]);
 
   // toolbar layout styles: two flex areas (left/right) and fixed toolbar height/line-height
   const toolbarStyle: React.CSSProperties = {
