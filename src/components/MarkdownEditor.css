@@ -29,12 +29,19 @@
   justify-content: center;
 }
 
+/* Toolbar: enforce expected height and prevent collapse */
 .editor-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  flex-wrap: wrap;
+  /* match the toolbarStyle in the component (height/line-height/padding/no-wrap) */
+  padding: 0 8px;
+  height: 44px;        /* enforce the toolbar height */
+  min-height: 44px;    /* prevent collapse below intended height */
+  line-height: 44px;   /* vertical centering for inline text if any */
+  flex-wrap: nowrap;   /* keep controls on a single line; component sets overflow hidden */
+  box-sizing: border-box;
+  overflow: hidden;    /* clip overflow (component JS also sets overflow) */
 }
 
 .toolbar-toggle-btn {
