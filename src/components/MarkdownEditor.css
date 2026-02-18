@@ -219,8 +219,9 @@
   box-shadow: inset 0 0 3px rgba(20,0,0,0.4),
               0 0 8px rgba(0,15,30,0.1);
   border-width: 1px;
+  border-color: #FFFFFF33;
   border-style: solid solid hidden solid;
-  border-color: #FFFFFF22;
+  border-radius: 6px 6px 0 0;
   box-sizing: border-box;
   padding: 0; /* keep padding inside textarea */
 }

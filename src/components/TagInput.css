@@ -5,6 +5,7 @@
               0 0 8px rgba(0,15,30,0.1);
   border-width: 1px;
   border-style: hidden solid solid solid;
+  border-radius: 0 0 6px 6px;
   border-color: #ffffff88;
 }
 
@@ -23,10 +24,11 @@
 .tag-input {
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid #FFFFFF99;
   border-radius: 4px;
   font-size: 14px;
   outline: none;
+  box-shadow: inset 0 0 2px rgba(0,0,0,0.5), inset 0 0 6px rgba(0,0,0,0.2), 0 0 2px rgba(255,255,255,0.7);
 }
 
 .tag-input:focus {
