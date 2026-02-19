@@ -1,3 +1,12 @@
+:root {
+  --border-color-regular: #00000033;
+  --border-color-selected: #00000066;
+  --border-color-highlight: #FFFFFF44;
+  --border-radius-regular: 6px;
+  --background-dark: #eeeeee;
+  --background-light: #f9f6f4;
+}
+
 .app {
   display: flex;
   height: 100vh;

@@ -336,23 +336,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleDeleteNote = async (e: React.MouseEvent, noteId: number) => {
     e.stopPropagation();
-    
+
     if (deleteArmedId !== noteId) {
       // First click - arm the button
       setDeleteArmedId(noteId);
     } else {
-      // Second click - find next note before deleting
-      const nextNote = findNextNoteAfterDeletion(noteId);
-      
+      // Second click - prefer the last-edited note as the selection target
+      let nextNote: Note | null = null;
+
+      try {
+        // Ask the backend for the last edited note (may return null)
+        const lastEdited = await window.electronAPI.getLastEditedNote();
+        if (lastEdited && lastEdited.id !== noteId) {
+          nextNote = lastEdited;
+        } else {
+          // Fallback: find next/previous visible note in the current view
+          nextNote = findNextNoteAfterDeletion(noteId);
+        }
+      } catch (err) {
+        // If anything goes wrong, fallback to visible-next behavior
+        console.warn('getLastEditedNote failed, falling back to visible-next', err);
+        nextNote = findNextNoteAfterDeletion(noteId);
+      }
+
       // Actually delete
       await window.electronAPI.deleteNote(noteId);
       setDeleteArmedId(null);
-      
+
       // Notify parent to handle selection and refresh
       if (onNoteDelete) {
         onNoteDelete(noteId, nextNote);
       }
-      
+
       // Reload the current view
       if (searchMode === 'none') {
         if (viewMode === 'date') {

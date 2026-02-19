@@ -1,12 +1,3 @@
-:root {
-  --border-color-regular: #00000033;
-  --border-color-selected: #00000066;
-  --border-color-highlight: #FFFFFF44;
-  --border-radius-regular: 6px;
-  --background-dark: #eeeeee;
-  --background-light: #f9f9f9;
-}
-
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -89,7 +80,7 @@
   border-style: solid;
   border-color: #ffffff88;
   border-radius: var(--border-radius-regular);
-  background: #e9e2d8;
+  background: var(--background-light);
   box-shadow: inset 0 0 3px rgba(20,0,0,0.4),
               0 0 8px rgba(0,15,30,0.1);
 }

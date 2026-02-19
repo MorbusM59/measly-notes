@@ -1,6 +1,6 @@
 .tag-input-container {
   padding: 8px;
-  background: #f9f9f9;
+  background: var(--background-light);
   box-shadow: inset 0 0 3px rgba(20,0,0,0.4),
               0 0 8px rgba(0,15,30,0.1);
   border-width: 1px;

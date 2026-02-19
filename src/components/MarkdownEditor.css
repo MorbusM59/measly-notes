@@ -215,7 +215,7 @@
   -webkit-overflow-scrolling: touch;
   min-height: 0;          /* allows the flex child to shrink properly */
   min-width: 0;           /* IMPORTANT: allow child to shrink and avoid flex overflow */
-  background: #f9f9f9;
+  background: var(--background-light);
   box-shadow: inset 0 0 3px rgba(20,0,0,0.4),
               0 0 8px rgba(0,15,30,0.1);
   border-width: 1px;
@@ -224,6 +224,16 @@
   border-radius: 6px 6px 0 0;
   box-sizing: border-box;
   padding: 0; /* keep padding inside textarea */
+  text-shadow: 0 -1px 0px #55000022, 0 1px 0px #ffffff;
+}
+
+.editor-content h1,
+.editor-content h2,
+.editor-content h3,
+.editor-content h4,
+.editor-content h5,
+.editor-content h6 {
+  text-shadow: 0 0 8px #FFFFFF, 0 0 4px #FFFFFF, 0 0 2px #FFFFFF99, 0 1px 0 #FFFFFF;
 }
 
 /* Textarea should auto-size (JS) and not create its own vertical scrollbar.
@@ -259,8 +269,9 @@
   caret-color: auto;
   background-clip: padding-box;
   color: #222222;
-  text-shadow: 0 0 4px #FFFFFF, 0 0 2px #FFFFFF99;
   caret-color: #111111;
+
+  text-shadow: 0 -1px 0px #55000022, 0 1px 0px #ffffff;
 }
 
 /* Optional: cap growth and fall back to internal scrolling */
