@@ -6,18 +6,20 @@ interface SuggestedPanelProps {
   note: Note | null;
   width: number;
   onTagsChanged?: () => void;
+  // whenever this number changes, reload suggestions to stay in sync
+  refreshTrigger?: number;
 }
 
 const normalizeTagName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
 
-export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onTagsChanged }) => {
+export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onTagsChanged, refreshTrigger }) => {
   const [suggestedTags, setSuggestedTags] = useState<Tag[]>([]);
 
   useEffect(() => {
     if (note) loadSuggestedTags();
     else setSuggestedTags([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note]);
+  }, [note, refreshTrigger]);
 
   const loadSuggestedTags = async () => {
     if (!note) return;
@@ -41,6 +43,7 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       const currentTags = await window.electronAPI.getNoteTags(note.id);
       const position = currentTags.length;
       await window.electronAPI.addTagToNote(note.id, normalized, position);
+      // reload both local suggested list and notify parent
       await loadSuggestedTags();
       if (onTagsChanged) onTagsChanged();
     } catch (err) {
@@ -55,6 +58,10 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       aria-label="Suggested tags and options"
     >
       <div className="suggested-section">
+        <div className="suggested-header">
+          <h4>Suggested</h4>
+        </div>
+
         <div className="suggested-tags" aria-hidden={suggestedTags.length === 0}>
           {suggestedTags.map(tag => (
             <div
@@ -67,7 +74,7 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
             </div>
           ))}
           {suggestedTags.length === 0 && (
-            <div className="suggested-empty"></div>
+            <div className="suggested-empty">No suggestions</div>
           )}
         </div>
       </div>

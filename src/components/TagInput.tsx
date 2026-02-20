@@ -8,11 +8,10 @@ interface TagInputProps {
 }
 
 /*
-  Simplified TagInput:
-  - Input bar on top
-  - Active tags (and any placeholders) displayed below
-  - No "Add" button (use Enter)
-  - No suggestions/resize logic here (handled at app level)
+  TagInput: input on top, active tags below.
+  - Clicking an active tag "arms" removal for that tag.
+  - The armed tag is only removed once the mouse leaves that tag.
+  - Clicking the same active tag again while still hovering cancels the armed removal.
 */
 
 export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
@@ -20,6 +19,9 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const [noteTags, setNoteTags] = useState<NoteTag[]>([]);
   const [placeholders, setPlaceholders] = useState<Record<number, Tag>>({});
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  // which index is currently armed for deletion (clicked, awaiting mouseleave)
+  const [deleteArmedIndex, setDeleteArmedIndex] = useState<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -30,9 +32,11 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     if (note) {
       loadNoteTags();
       setPlaceholders({});
+      setDeleteArmedIndex(null);
     } else {
       setNoteTags([]);
       setPlaceholders({});
+      setDeleteArmedIndex(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note]);
@@ -64,23 +68,33 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     }
   };
 
-  const handleActiveTagClick = async (index: number, tagId: number, tag: Tag) => {
+  // Arm / disarm deletion on click (no immediate removal)
+  const handleActiveTagClick = (index: number) => {
+    setDeleteArmedIndex(prev => (prev === index ? null : index));
+  };
+
+  // On mouse leave, if this tag is armed, remove it and show placeholder
+  const handleActiveTagMouseLeave = async (index: number, tag: Tag, tagId: number) => {
+    if (deleteArmedIndex !== index) {
+      return;
+    }
+
     if (!note) return;
 
-    const newNoteTags = [...noteTags];
-    if (index >= 0 && index < newNoteTags.length && newNoteTags[index].tagId === tagId) {
-      newNoteTags.splice(index, 1);
-      setNoteTags(newNoteTags);
-    } else {
-      setNoteTags(prev => prev.filter(nt => nt.tagId !== tagId));
+    try {
+      await window.electronAPI.removeTagFromNote(note.id, tagId);
+    } catch (err) {
+      console.warn('Failed to remove tag', err);
+      setDeleteArmedIndex(null);
+      return;
     }
 
     setPlaceholders(prev => ({ ...prev, [index]: tag }));
-    await window.electronAPI.removeTagFromNote(note.id, tagId);
+    setDeleteArmedIndex(null);
 
-    if (onTagsChanged) {
-      onTagsChanged();
-    }
+    await loadNoteTags();
+
+    if (onTagsChanged) onTagsChanged();
   };
 
   const handlePlaceholderClick = async (index: number, tag: Tag) => {
@@ -182,20 +196,20 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
 
             const noteTag = noteTags[slotIdx];
             if (noteTag) {
+              const armed = deleteArmedIndex === slotIdx;
               return (
                 <div
                   key={noteTag.tagId}
-                  className="tag-pill active"
+                  className={`tag-pill active${armed ? ' armed' : ''}`}
                   draggable
                   onDragStart={() => handleDragStart(slotIdx)}
                   onDragOver={(e) => handleDragOver(e)}
                   onDrop={(e) => handleDrop(e, slotIdx)}
-                  onClick={() => {
-                    if (noteTag.tag) {
-                      handleActiveTagClick(slotIdx, noteTag.tagId, noteTag.tag);
-                    }
-                  }}
-                  title="Click to remove tag"
+                  onClick={() => handleActiveTagClick(slotIdx)}
+                  onMouseLeave={() =>
+                    handleActiveTagMouseLeave(slotIdx, noteTag.tag as Tag, noteTag.tagId)
+                  }
+                  title={armed ? 'Release mouse to remove tag' : 'Click to arm removal'}
                 >
                   {noteTag.tag?.name}
                 </div>

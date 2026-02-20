@@ -316,6 +316,7 @@ export const App: React.FC = () => {
           note={selectedNote}
           width={suggestionsWidth}
           onTagsChanged={handleSidebarRefresh}
+          refreshTrigger={sidebarRefreshTrigger}
         />
       </div>
 
