@@ -5,6 +5,20 @@
   padding: 8px;
 }
 
+/* Inner layout: left = input + active tags; right = suggested tags with draggable divider */
+.tag-input-inner {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* Left side grows to fill remaining space */
+.tag-left {
+  flex: 1;
+  min-width: 0; /* so children can shrink */
+}
+
+/* Input bar at top of left */
 .tag-input-bar {
   display: flex;
   align-items: center;
@@ -19,14 +33,54 @@
 
 .tag-input {
   @extend .input-base;
+  width: 100%;
 }
 
-/* Removed autocomplete-hint styles (the grey overlay text) to eliminate the non-functional autocomplete hint */
+/* Divider between left and right suggestions */
+.suggestions-divider {
+  width: 8px;
+  background: linear-gradient(135deg, #f5f3f2, #e9e5e2);
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.35);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: box-shadow 0.2s;
+  position: relative;
+  border-style: solid;
+  border-width: 0 1px;
+  border-color: #FFFFFF77; /* sides white-ish */
+}
+.suggestions-divider:hover {
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
+}
 
+/* Suggested section on the right */
+.suggested-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 120px;
+  max-width: 600px;
+  box-sizing: border-box;
+}
+
+/* Suggested tags arranged in a compact two-row area */
+.suggested-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+  /* limit height to roughly two rows of pills; pills are ~28px high */
+  max-height: 56px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Existing tag pills layout */
 .tags-display {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-height: 32px;
 }
 
 .tag-pill {
@@ -47,28 +101,37 @@
 }
 
 .tag-pill.active:hover {
-  background: #fdecea;
-  color: #b71c1c;
-  border-color: #f8c1c1;
   transform: translateY(-1px);
+  box-shadow: 0 1px 4px rgba(25, 118, 210, 0.12);
 }
 
 .tag-pill.suggested {
-  background: #f5f5f5;
-  color: #4a4a4a;
+  background: #f3f3f3;
+  color: #333;
   border: 1px solid #ddd;
-}
-
-.tag-pill.suggested:hover {
-  background: #e0e0e0;
-  border-color: #bbb;
+  cursor: pointer;
 }
 
 .tag-pill.suggested.placeholder {
-  opacity: 0.98;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+  opacity: 0.95;
+  border-style: dashed;
 }
 
-.tag-remove {
-  display: none;
+/* small responsiveness tweak */
+@media (max-width: 720px) {
+  .tag-input-inner {
+    flex-direction: column;
+  }
+  .suggestions-divider {
+    width: 100%;
+    height: 8px;
+    cursor: row-resize;
+  }
+  .suggested-section {
+    width: 100% !important;
+    max-width: 100%;
+  }
+  .suggested-tags {
+    max-height: 80px;
+  }
 }
