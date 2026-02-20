@@ -30,18 +30,26 @@ export const App: React.FC = () => {
   });
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
 
-  // Suggestions panel sizing / drag (moved to app level)
+  // Top-row suggestions / utility sizing and drag
   const [suggestionsWidth, setSuggestionsWidth] = useState<number>(() => {
     const saved = localStorage.getItem('tag-suggestions-width');
     return saved ? parseInt(saved, 10) : 240;
   });
-  const [isDraggingSuggestionsDivider, setIsDraggingSuggestionsDivider] = useState(false);
-  const mainContentRef = useRef<HTMLDivElement | null>(null);
+  const [utilityWidth, setUtilityWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('tag-utility-width');
+    return saved ? parseInt(saved, 10) : 180;
+  });
+
+  const [isDraggingDividerLeft, setIsDraggingDividerLeft] = useState(false);
+  const [isDraggingDividerRight, setIsDraggingDividerRight] = useState(false);
 
   // Global editor preview/edit mode (true = preview/view, false = edit)
   const [showPreview, setShowPreview] = useState<boolean>(() => {
     return localStorage.getItem('markdown-show-preview') === 'true';
   });
+
+  // App grid ref (used for divider calculations)
+  const appRef = useRef<HTMLDivElement | null>(null);
 
   // On start, open the last edited note if available
   useEffect(() => {
@@ -59,7 +67,6 @@ export const App: React.FC = () => {
 
   // Helper to toggle preview mode and force-save before entering preview
   const togglePreview = async (next: boolean) => {
-    // If entering preview mode, request a force-save first (so preview renders current content).
     if (next) {
       try {
         await (window as any).electronAPI.requestForceSave();
@@ -72,9 +79,7 @@ export const App: React.FC = () => {
     localStorage.setItem('markdown-show-preview', String(next));
   };
 
-  // Global keyboard shortcuts:
-  // - Ctrl+Enter to create new note
-  // - Shift+Enter to toggle edit/view (global)
+  // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 'Enter') {
@@ -110,8 +115,6 @@ export const App: React.FC = () => {
     setRefreshKey(k => k + 1);
   };
 
-  // When a note is selected from the sidebar, request a force-save first (flush pending edits),
-  // then update selectedNote. This prevents losing the current in-editor state when switching notes.
   const handleSelectNote = async (note: Note) => {
     try {
       await (window as any).electronAPI.requestForceSave();
@@ -124,7 +127,6 @@ export const App: React.FC = () => {
   const handleNoteUpdate = (updatedNote: Note) => {
     setSelectedNote(updatedNote);
     setRefreshKey(k => k + 1);
-    // also refresh sidebar so dates/tags reflect immediately
     setSidebarRefreshTrigger(t => t + 1);
   };
 
@@ -133,7 +135,6 @@ export const App: React.FC = () => {
   };
 
   const handleMonthToggle = (month: number, event: React.MouseEvent) => {
-    // Special case: right-click clear signal
     if (month === CLEAR_MONTHS_SIGNAL && event.type === 'contextmenu') {
       setSelectedMonths(new Set());
       return;
@@ -143,7 +144,6 @@ export const App: React.FC = () => {
   };
 
   const handleYearToggle = (year: YearValue, event: React.MouseEvent) => {
-    // Special case: right-click clear signal
     if (year === CLEAR_YEARS_SIGNAL && event.type === 'contextmenu') {
       setSelectedYears(new Set());
       return;
@@ -155,7 +155,6 @@ export const App: React.FC = () => {
   };
 
   const handleNoteDelete = async (deletedNoteId: number, nextNoteToSelect?: Note | null) => {
-    // If the deleted note was selected, select the next note or clear selection
     if (selectedNote?.id === deletedNoteId) {
       if (nextNoteToSelect) {
         setSelectedNote(nextNoteToSelect);
@@ -164,7 +163,6 @@ export const App: React.FC = () => {
       }
     }
 
-    // Refresh the sidebar
     setRefreshKey(k => k + 1);
     setSidebarRefreshTrigger(t => t + 1);
   };
@@ -181,7 +179,7 @@ export const App: React.FC = () => {
 
     const handleMouseMove = (e: MouseEvent) => {
       const newWidth = e.clientX;
-      if (newWidth >= 250 && newWidth <= 600) {
+      if (newWidth >= 200 && newWidth <= 700) {
         setSidebarWidth(newWidth);
       }
     };
@@ -200,31 +198,39 @@ export const App: React.FC = () => {
     };
   }, [isDraggingSidebar, sidebarWidth]);
 
-  // Suggestions divider mouse down handler
-  const handleSuggestionsDividerMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDraggingSuggestionsDivider(true);
-  };
-
-  // Drag handling effect for suggestions divider
+  // Top-row dividers drag handling
   useEffect(() => {
-    if (!isDraggingSuggestionsDivider) return;
+    if (!isDraggingDividerLeft && !isDraggingDividerRight) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!mainContentRef.current) return;
-      const rect = mainContentRef.current.getBoundingClientRect();
-      // suggestions pane is on the right; width = rect.right - clientX
-      let newWidth = Math.round(rect.right - e.clientX);
-      const min = 120;
-      const max = Math.min(600, Math.round(rect.width - 120));
-      if (newWidth < min) newWidth = min;
-      if (newWidth > max) newWidth = max;
-      setSuggestionsWidth(newWidth);
+      if (!appRef.current) return;
+      const rect = appRef.current.getBoundingClientRect();
+
+      if (isDraggingDividerLeft) {
+        const divider2Width = 8;
+        let newSuggested = Math.round(rect.right - (utilityWidth + divider2Width) - e.clientX);
+        const min = 120;
+        const max = Math.min(800, Math.round(rect.width - 240));
+        if (newSuggested < min) newSuggested = min;
+        if (newSuggested > max) newSuggested = max;
+        setSuggestionsWidth(newSuggested);
+      }
+
+      if (isDraggingDividerRight) {
+        let newUtility = Math.round(rect.right - e.clientX);
+        const min = 100;
+        const max = Math.min(600, Math.round(rect.width - 240));
+        if (newUtility < min) newUtility = min;
+        if (newUtility > max) newUtility = max;
+        setUtilityWidth(newUtility);
+      }
     };
 
     const handleMouseUp = () => {
-      setIsDraggingSuggestionsDivider(false);
+      setIsDraggingDividerLeft(false);
+      setIsDraggingDividerRight(false);
       localStorage.setItem('tag-suggestions-width', suggestionsWidth.toString());
+      localStorage.setItem('tag-utility-width', utilityWidth.toString());
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -234,52 +240,110 @@ export const App: React.FC = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDraggingSuggestionsDivider, suggestionsWidth]);
+  }, [isDraggingDividerLeft, isDraggingDividerRight, suggestionsWidth, utilityWidth]);
+
+  // Grid: include divider columns explicitly (they occupy grid space)
+  const gridTemplateColumns = `${sidebarWidth}px 10px 1fr 4px ${suggestionsWidth}px 4px ${utilityWidth}px`;
+  const gridTemplateRows = 'auto 1fr';
+  const gridTemplateAreas = `
+    "sidebar d-sidebar taginput d-left suggested d-right utility"
+    "sidebar d-sidebar viewer  viewer    viewer    viewer    viewer"
+  `;
 
   return (
-    <div className="app">
-      <Sidebar
-        key={refreshKey}
-        selectedNote={selectedNote}
-        onSelectNote={handleSelectNote}
-        refreshTrigger={sidebarRefreshTrigger}
-        selectedMonths={selectedMonths}
-        selectedYears={selectedYears}
-        onMonthToggle={handleMonthToggle}
-        onYearToggle={handleYearToggle}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        width={sidebarWidth}
-        onNoteDelete={handleNoteDelete}
-      />
+    <div
+      className="app app-grid"
+      ref={appRef}
+      style={{
+        gridTemplateColumns,
+        gridTemplateRows,
+        gridTemplateAreas,
+        position: 'relative',
+      }}
+    >
+      {/* Sidebar area */}
+      <div className="sidebar" style={{ gridArea: 'sidebar' }}>
+        <Sidebar
+          key={refreshKey}
+          selectedNote={selectedNote}
+          onSelectNote={handleSelectNote}
+          refreshTrigger={sidebarRefreshTrigger}
+          selectedMonths={selectedMonths}
+          selectedYears={selectedYears}
+          onMonthToggle={handleMonthToggle}
+          onYearToggle={handleYearToggle}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          width={sidebarWidth}
+          onNoteDelete={handleNoteDelete}
+        />
+      </div>
+
+      {/* Sidebar divider now occupies its own grid column (d-sidebar) */}
       <div
-        className="sidebar-divider"
-        onMouseDown={handleSidebarMouseDown}
+        className="grid-divider divider-sidebar"
+        style={{ gridArea: 'd-sidebar' }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          setIsDraggingSidebar(true);
+        }}
         role="separator"
         aria-orientation="vertical"
+        aria-label="Resize sidebar"
       />
-      <div className="main-content" ref={mainContentRef}>
-        <div className="main-column">
-          <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
-          <MarkdownEditor
-            note={selectedNote}
-            onNoteUpdate={handleNoteUpdate}
-            showPreview={showPreview}
-            onTogglePreview={(next: boolean) => togglePreview(next)}
-          />
-        </div>
 
-        <div
-          className="suggestions-divider"
-          onMouseDown={handleSuggestionsDividerMouseDown}
-          role="separator"
-          aria-orientation="vertical"
-        />
+      {/* Tag input top-left area */}
+      <div className="tag-input-grid" style={{ gridArea: 'taginput' }}>
+        <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
+      </div>
 
+      {/* Divider between Tag input and Suggested (full grid area) */}
+      <div
+        className="grid-divider divider-left"
+        style={{ gridArea: 'd-left' }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          setIsDraggingDividerLeft(true);
+        }}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize suggested tags"
+      />
+
+      {/* Suggested area */}
+      <div className="suggested-grid" style={{ gridArea: 'suggested' }}>
         <SuggestedPanel
           note={selectedNote}
           width={suggestionsWidth}
           onTagsChanged={handleSidebarRefresh}
+        />
+      </div>
+
+      {/* Divider between Suggested and Utility */}
+      <div
+        className="grid-divider divider-right"
+        style={{ gridArea: 'd-right' }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          setIsDraggingDividerRight(true);
+        }}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize utility area"
+      />
+
+      {/* Utility area (empty for now) */}
+      <div className="utility-grid" style={{ gridArea: 'utility' }}>
+        <div className="utility-area" aria-hidden="true" />
+      </div>
+
+      {/* Viewer/editor area */}
+      <div className="viewer" style={{ gridArea: 'viewer' }}>
+        <MarkdownEditor
+          note={selectedNote}
+          onNoteUpdate={handleNoteUpdate}
+          showPreview={showPreview}
+          onTogglePreview={(next: boolean) => togglePreview(next)}
         />
       </div>
     </div>

@@ -147,73 +147,67 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   );
 
   return (
-    <div className="tag-input-container">
-      <div className="tag-input-inner">
-        <div className="tag-left">
-          <div className="tag-input-bar">
-            <div className="tag-input-wrapper">
-              <input
-                ref={inputRef}
-                type="text"
-                className="tag-input"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Type to add tag..."
-              />
-            </div>
-          </div>
-
-          <div className="tags-display">
-            {Array.from({ length: slotsCount }).map((_, slotIdx) => {
-              if (placeholders[slotIdx]) {
-                const tag = placeholders[slotIdx];
-                return (
-                  <div
-                    key={`ph-${slotIdx}-${tag.id}`}
-                    className="tag-pill suggested placeholder"
-                    onClick={() => handlePlaceholderClick(slotIdx, tag)}
-                    onMouseLeave={() => handlePlaceholderMouseLeave(slotIdx)}
-                    onMouseEnter={() => {}}
-                  >
-                    {tag.name}
-                  </div>
-                );
-              }
-
-              const noteTag = noteTags[slotIdx];
-              if (noteTag) {
-                return (
-                  <div
-                    key={noteTag.tagId}
-                    className="tag-pill active"
-                    draggable
-                    onDragStart={() => handleDragStart(slotIdx)}
-                    onDragOver={(e) => handleDragOver(e)}
-                    onDrop={(e) => handleDrop(e, slotIdx)}
-                    onClick={() => {
-                      if (noteTag.tag) {
-                        (async () => {
-                          await window.electronAPI.removeTagFromNote(note.id, noteTag.tagId);
-                          setPlaceholders(prev => ({ ...prev, [slotIdx]: noteTag.tag as Tag }));
-                          await loadNoteTags();
-                          if (onTagsChanged) onTagsChanged();
-                        })();
-                      }
-                    }}
-                    title="Click to remove tag"
-                  >
-                    {noteTag.tag?.name}
-                  </div>
-                );
-              }
-
-              return null;
-            })}
-          </div>
+    <div className="tag-input-inner">
+      <div className="tag-input-bar">
+        <div className="tag-input-wrapper">
+          <input
+            ref={inputRef}
+            type="text"
+            className="tag-input"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Type to add tag..."
+          />
         </div>
+      </div>
 
-        {/* Suggestions column and divider moved to App level */}
+      <div className="tags-display">
+        {Array.from({ length: slotsCount }).map((_, slotIdx) => {
+          if (placeholders[slotIdx]) {
+            const tag = placeholders[slotIdx];
+            return (
+              <div
+                key={`ph-${slotIdx}-${tag.id}`}
+                className="tag-pill suggested placeholder"
+                onClick={() => handlePlaceholderClick(slotIdx, tag)}
+                onMouseLeave={() => handlePlaceholderMouseLeave(slotIdx)}
+                onMouseEnter={() => {}}
+              >
+                {tag.name}
+              </div>
+            );
+          }
+
+          const noteTag = noteTags[slotIdx];
+          if (noteTag) {
+            return (
+              <div
+                key={noteTag.tagId}
+                className="tag-pill active"
+                draggable
+                onDragStart={() => handleDragStart(slotIdx)}
+                onDragOver={(e) => handleDragOver(e)}
+                onDrop={(e) => handleDrop(e, slotIdx)}
+                onClick={() => {
+                  if (noteTag.tag) {
+                    (async () => {
+                      await window.electronAPI.removeTagFromNote(note.id, noteTag.tagId);
+                      setPlaceholders(prev => ({ ...prev, [slotIdx]: noteTag.tag as Tag }));
+                      await loadNoteTags();
+                      if (onTagsChanged) onTagsChanged();
+                    })();
+                  }
+                }}
+                title="Click to remove tag"
+              >
+                {noteTag.tag?.name}
+              </div>
+            );
+          }
+
+          return null;
+        })}
       </div>
     </div>
   );

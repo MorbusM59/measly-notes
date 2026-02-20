@@ -60,7 +60,7 @@
   padding: 8px;
   background: var(--color-background-light);
   box-shadow: inset 0 0 3px var(--color-panel-shadow),
-              0 0 8px rgba(0,15,30,0.1);
+              0 0 3px rgba(255,255,255,0.2);
   border-radius: 0 0 var(--border-radius-regular) var(--border-radius-regular);
   border-width: 1px;
   border-style: hidden solid solid solid;
@@ -94,7 +94,6 @@
   background: var(--color-toggle-default);
   border: 1px solid var(--color-border-regular);
   border-radius: var(--border-radius-regular);
-  font-size: 14px;
   transition: background 0.2s, box-shadow 0.2s;
 }
 .toggle-btn:hover, .filter-btn:hover {

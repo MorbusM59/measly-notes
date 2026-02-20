@@ -55,10 +55,6 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       aria-label="Suggested tags and options"
     >
       <div className="suggested-section">
-        <div className="suggested-header">
-          <h4>Suggested tags</h4>
-        </div>
-
         <div className="suggested-tags" aria-hidden={suggestedTags.length === 0}>
           {suggestedTags.map(tag => (
             <div
@@ -71,53 +67,8 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
             </div>
           ))}
           {suggestedTags.length === 0 && (
-            <div className="suggested-empty">No suggestions</div>
+            <div className="suggested-empty"></div>
           )}
-        </div>
-
-        <div className="options-panel">
-          <div className="options-header">
-            <h4>Options</h4>
-          </div>
-          <div className="options-body">
-            {/* Placeholder buttons; wire up real functionality later */}
-            <button
-              type="button"
-              className="options-btn"
-              onClick={() => {
-                try {
-                  // eslint-disable-next-line no-alert
-                  alert('Export placeholder');
-                } catch {}
-              }}
-            >
-              Export
-            </button>
-            <button
-              type="button"
-              className="options-btn"
-              onClick={() => {
-                try {
-                  // eslint-disable-next-line no-alert
-                  alert('Print placeholder');
-                } catch {}
-              }}
-            >
-              Print
-            </button>
-            <button
-              type="button"
-              className="options-btn"
-              onClick={() => {
-                try {
-                  // eslint-disable-next-line no-alert
-                  alert('More options placeholder');
-                } catch {}
-              }}
-            >
-              More...
-            </button>
-          </div>
         </div>
       </div>
     </aside>

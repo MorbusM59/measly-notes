@@ -2,14 +2,9 @@
 
 .suggested-panel {
   box-sizing: border-box;
-  padding: 8px;
-  background: var(--color-panel-top-gradient);
-  border-left: 1px solid var(--color-panel-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 120px;
-  max-width: 600px;
   overflow: hidden;
 }
 

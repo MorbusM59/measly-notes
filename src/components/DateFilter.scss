@@ -25,26 +25,10 @@
   border: 1px solid #ddd;
   background: white;
   border-radius: 3px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 10px;
+  font-weight: 300;
   transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.filter-btn:hover {
-  background: #e8e8e8;
-  border-color: #bbb;
-}
-
-.filter-btn.active {
-  background: #007bff;
-  color: white;
-  border-color: #007bff;
-}
-
-.filter-btn.active:hover {
-  background: #0069d9;
-  border-color: #0062cc;
 }
