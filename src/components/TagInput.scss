@@ -3,6 +3,7 @@
 .tag-input-container {
   @extend .input-bar;
   padding: 8px;
+  min-height: 96px;
 }
 
 /* Inner layout: left = input + active tags; right = suggested tags with draggable divider */
@@ -115,7 +116,7 @@
   background: #f3f3f3;
   color: #333;
   border: 1px solid #ddd;
-  padding: 0 6px 4px 6px;
+  padding: 0 5px 3px 6px;
 }
 
 .tag-pill.suggested:hover {
