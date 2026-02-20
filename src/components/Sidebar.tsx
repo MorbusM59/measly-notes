@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
 import { DateFilter } from './DateFilter';
 import { YearValue } from '../shared/filterConstants';
-import './Sidebar.css';
+import './Sidebar.scss';
 
 interface SidebarProps {
   onSelectNote: (note: Note) => void;

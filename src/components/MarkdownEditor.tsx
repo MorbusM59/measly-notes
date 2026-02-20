@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Note } from '../shared/types';
-import './MarkdownEditor.css';
-import './MarkdownThemes.css';
+import './MarkdownEditor.scss';
+import './MarkdownThemes.scss';
 
 interface MarkdownEditorProps {
   note: Note | null;

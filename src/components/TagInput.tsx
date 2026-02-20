@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Note, Tag, NoteTag } from '../shared/types';
-import './TagInput.css';
+import './TagInput.scss';
 
 interface TagInputProps {
   note: Note | null;

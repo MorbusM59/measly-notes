@@ -1,3 +1,5 @@
+@use './Shared.scss' as *;
+
 /* Local monospace/editor fonts (WOFF2) */
 @font-face {
   font-family: 'Red Hat Mono';
@@ -19,7 +21,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-height: 0; /* allow flex children to shrink properly */
+  min-height: 0;
   background: #F5F3F2;
 }
 
@@ -29,19 +31,18 @@
   justify-content: center;
 }
 
-/* Toolbar: enforce expected height and prevent collapse */
+/* Toolbar */
 .editor-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* match the toolbarStyle in the component (height/line-height/padding/no-wrap) */
   padding: 0 8px;
-  height: 44px;        /* enforce the toolbar height */
-  min-height: 44px;    /* prevent collapse below intended height */
-  line-height: 44px;   /* vertical centering for inline text if any */
-  flex-wrap: nowrap;   /* keep controls on a single line; component sets overflow hidden */
+  height: 44px;
+  min-height: 44px;
+  line-height: 44px;
+  flex-wrap: nowrap;
   box-sizing: border-box;
-  overflow: hidden;    /* clip overflow (component JS also sets overflow) */
+  overflow: hidden;
 }
 
 .toolbar-toggle-btn {
@@ -50,16 +51,13 @@
   border: 1px solid #ddd;
   background: white;
   border-radius: 4px;
-  cursor: pointer;
   font-size: 14px;
   font-weight: 500;
   transition: all 0.2s;
 }
-
 .toolbar-toggle-btn:hover {
   background: #f0f0f0;
 }
-
 .toolbar-toggle-btn.active {
   background: #007bff;
   color: white;
@@ -80,7 +78,6 @@
   border: 1px solid #ddd;
   background: white;
   border-radius: 3px;
-  cursor: pointer;
   font-size: 14px;
   font-weight: 600;
   transition: all 0.2s;
@@ -88,16 +85,13 @@
   align-items: center;
   justify-content: center;
 }
-
 .toolbar-btn-icon:hover {
   background: #e8e8e8;
   border-color: #bbb;
 }
-
 .toolbar-btn-icon:active {
   background: #d8d8d8;
 }
-
 .toolbar-btn-icon.active {
   background: #007bff;
   color: white;
@@ -117,7 +111,6 @@
   align-items: center;
   gap: 6px;
 }
-
 .selector-label {
   font-size: 12px;
   font-weight: 500;
@@ -129,15 +122,12 @@
   border: 1px solid #ddd;
   background: white;
   border-radius: 4px;
-  cursor: pointer;
   font-size: 14px;
   transition: all 0.2s;
 }
-
 .style-selector select:hover {
   border-color: #bbb;
 }
-
 .style-selector select:focus {
   outline: none;
   border-color: #007bff;
@@ -148,15 +138,12 @@
   border: 1px solid #ddd;
   background: white;
   border-radius: 4px;
-  cursor: pointer;
   font-size: 14px;
   transition: all 0.2s;
 }
-
 .toolbar-btn:hover {
   background: #f0f0f0;
 }
-
 .toolbar-btn.active {
   background: #007bff;
   color: white;
@@ -170,7 +157,7 @@
   font-style: italic;
 }
 
-/* some editor-style classes may override padding — keep the wrapping rules global */
+/* editor-style classes may override padding */
 .markdown-textarea.editor-style-syne,
 .markdown-textarea.editor-style-redhat {
   white-space: pre-wrap;
@@ -183,7 +170,7 @@
   padding: 20px;
   font-size: 16px;
   line-height: 1.6;
-  overflow: visible; /* rely on .editor-content for scrolling to avoid double scrollbars */
+  overflow: visible;
 }
 
 /* Empty-state */
@@ -193,29 +180,27 @@
   font-size: 16px;
 }
 
-/* --- Size classes for editor textarea --- */
+/* --- Size classes for textarea --- */
 .markdown-textarea.size-xs { font-size: 12px; }
 .markdown-textarea.size-s  { font-size: 14px; }
 .markdown-textarea.size-m  { font-size: 16px; }
 .markdown-textarea.size-l  { font-size: 18px; }
 .markdown-textarea.size-xl { font-size: 20px; }
 
-/* --- Spacing (line-height) classes for editor textarea --- */
+/* --- Spacing (line-height) classes for textarea --- */
 .markdown-textarea.spacing-tight   { line-height: 1.2; }
 .markdown-textarea.spacing-compact { line-height: 1.4; }
 .markdown-textarea.spacing-cozy    { line-height: 1.6; }
 .markdown-textarea.spacing-wide    { line-height: 1.8; }
 
-/* Make the editor content the single vertical scroll container.
-   Important: flex: 1 1 auto and min-height: 0 allow the container to
-   properly constrain children inside column flex layouts. */
+/* Make editor content the single vertical scroll container */
 .editor-content {
   flex: 1 1 auto;
-  overflow-y: auto;       /* SINGLE scroll container for vertical axis */
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  min-height: 0;          /* allows the flex child to shrink properly */
-  min-width: 0;           /* IMPORTANT: allow child to shrink and avoid flex overflow */
-  background: var(--background-light);
+  min-height: 0;
+  min-width: 0;
+  background: var(--color-background-light);
   box-shadow: inset 0 0 3px rgba(20,0,0,0.4),
               0 0 8px rgba(0,15,30,0.1);
   border-width: 1px;
@@ -223,7 +208,7 @@
   border-style: solid solid hidden solid;
   border-radius: 6px 6px 0 0;
   box-sizing: border-box;
-  padding: 0; /* keep padding inside textarea */
+  padding: 0;
   text-shadow: 0 -1px 0px #55000022, 0 1px 0px #ffffff;
 }
 
@@ -236,48 +221,40 @@
   text-shadow: 0 0 8px #FFFFFF, 0 0 4px #FFFFFF, 0 0 2px #FFFFFF99, 0 1px 0 #FFFFFF;
 }
 
-/* Textarea should auto-size (JS) and not create its own vertical scrollbar.
-   Height is auto so script can set it to match content. */
+/* Textarea should auto-size (JS) and not create its own vertical scrollbar */
 .markdown-textarea {
   background: none;
   display: block;
   width: 100%;
-  height: auto;            /* allow autosize script to set height */
-  /* avoid forcing horizontal overflow from min-size */
+  height: auto;
   min-width: 0;
-  box-sizing: border-box;  /* include padding in height calculation */
+  box-sizing: border-box;
   padding: 20px;
   border: none;
-  resize: none;            /* prevent manual resizing that would create nested scrollbars */
+  resize: none;
   font-size: 16px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   line-height: 1.6;
   outline: none;
-
-  /* hide inner scrollbar — outer .editor-content handles vertical scroll */
   overflow: hidden;
   -webkit-overflow-scrolling: touch;
-
-  /* make wrapping robust */
-  white-space: pre-wrap;       /* preserve user linebreaks, but wrap long lines */
-  word-wrap: break-word;       /* legacy */
-  overflow-wrap: anywhere;     /* break long words/URLs when needed */
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
   word-break: break-word;
-
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   caret-color: auto;
   background-clip: padding-box;
   color: #222222;
   caret-color: #111111;
-
   text-shadow: 0 -1px 0px #55000022, 0 1px 0px #ffffff;
 }
 
 /* Optional: cap growth and fall back to internal scrolling */
 .markdown-textarea--with-max {
   max-height: 60vh;
-  overflow-y: auto;  /* if you set a cap, allow textarea to scroll internally as fallback */
+  overflow-y: auto;
 }
 
 /* Editor font variants */
@@ -295,18 +272,10 @@
 .markdown-textarea.editor-style-syne::selection { background: rgba(255,233,100,0.8); color: #111111; }
 .markdown-textarea.editor-style-syne::placeholder { color: #22222288; }
 
-/* If you want to ensure code-like ligature behaviour is consistent */
 .markdown-textarea { font-variant-ligatures: none; }
 
-/* mobile tweak */
 @media (max-width: 600px) {
   .markdown-textarea { padding: 12px; }
   .markdown-textarea.editor-style-redhat { background-size: 100% 28px; }
   .markdown-textarea.editor-style-syne { background-size: 100% 24px, auto; }
 }
-
-/* Debug helpers — uncomment during layout debugging */
-/*
-.editor-content.debug { outline: 2px solid rgba(255,0,0,0.15); }
-.markdown-textarea.debug { outline: 2px solid rgba(0,0,255,0.15); }
-*/

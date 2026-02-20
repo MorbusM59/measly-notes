@@ -1,17 +1,11 @@
-:root {
-  --border-color-regular: #00000033;
-  --border-color-selected: #00000066;
-  --border-color-highlight: #FFFFFF44;
-  --border-radius-regular: 6px;
-  --background-dark: #eeeeee;
-  --background-light: #f9f6f4;
-}
+@use './Shared.scss' as *;
 
 .app {
   display: flex;
   height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
   background: linear-gradient(135deg, #f5f3f2, #e9e5e2);
+  cursor: default;
 }
 
 .sidebar-divider {
@@ -41,5 +35,5 @@
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  margin: 0 0 0 4px
+  margin: 0 0 0 4px;
 }

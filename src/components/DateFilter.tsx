@@ -1,5 +1,5 @@
 import React from 'react';
-import './DateFilter.css';
+import './DateFilter.scss';
 import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL, YearValue } from '../shared/filterConstants';
 
 interface DateFilterProps {

@@ -93,15 +93,22 @@ const createWindow = (): void => {
 
     const internalHosts = getInternalHostnames();
 
-    mainWindow.webContents.on('will-navigate', (event, url) => {
-      event.preventDefault();
-      if (shouldOpenExternally(url, internalHosts)) {
-        try { shell.openExternal(url); console.log('[main] opened external URL from will-navigate:', url); }
-        catch (err) { console.warn('[main] failed to open external URL from will-navigate:', url, err); }
-      } else {
-        console.log('[main] blocked internal navigation attempt to:', url);
-      }
-    });
+    if (app.isPackaged) {
+      mainWindow.webContents.on('will-navigate', (event, url) => {
+        event.preventDefault();
+        if (shouldOpenExternally(url, internalHosts)) {
+          try { shell.openExternal(url); console.log('[main] opened external URL from will-navigate:', url); }
+          catch (err) { console.warn('[main] failed to open external URL from will-navigate:', url, err); }
+        } else {
+          console.log('[main] blocked internal navigation attempt to:', url);
+        }
+      });
+    } else {
+      // In dev, allow all internal navigation for smooth hot reloading
+      mainWindow.webContents.on('will-navigate', (_event, url) => {
+        // No action, allow navigation for fast refresh
+      });
+    }
 
     try {
       const wcAny = mainWindow.webContents as any;
@@ -183,8 +190,8 @@ app.whenReady().then(async () => {
     await initFileSystem();
     await setDefaultSpellCheckerLanguages(['en-US', 'de-DE']);
 
-    // webRequest whitelist/block (same as before)
-    try {
+    // webRequest whitelist/block: Only enable in production
+    if (app.isPackaged) {
       const whitelistHostnames = getInternalHostnames();
       try {
         if (typeof MAIN_WINDOW_WEBPACK_ENTRY === 'string' && MAIN_WINDOW_WEBPACK_ENTRY.startsWith('http')) {
@@ -193,19 +200,24 @@ app.whenReady().then(async () => {
         }
       } catch (_) {}
 
-      session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details: any, callback: (response: { cancel: boolean }) => void) => {
-        try {
-          const urlStr: string = details.url || '';
-          if (urlStr.startsWith('file:')) return callback({ cancel: false });
-          let hostname = '';
-          try { hostname = new URL(urlStr).hostname; } catch { return callback({ cancel: true }); }
-          if (whitelistHostnames.has(hostname)) return callback({ cancel: false });
-          return callback({ cancel: true });
-        } catch (err) { return callback({ cancel: true }); }
-      });
-      console.log('[main] renderer http/https requests will be blocked (whitelist applied).');
-    } catch (err) {
-      console.warn('[main] could not install webRequest block handler:', err);
+      // Block http(s) and ws(s) in production only
+      session.defaultSession.webRequest.onBeforeRequest(
+        { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
+        (details: any, callback: (response: { cancel: boolean }) => void) => {
+          try {
+            const urlStr: string = details.url || '';
+            if (urlStr.startsWith('file:')) return callback({ cancel: false });
+            let hostname = '';
+            try { hostname = new URL(urlStr).hostname; } catch { return callback({ cancel: true }); }
+            if (whitelistHostnames.has(hostname)) return callback({ cancel: false });
+            return callback({ cancel: true });
+          } catch (err) { return callback({ cancel: true }); }
+        }
+      );
+      console.log('[main] renderer http/https/ws requests will be blocked (whitelist applied).');
+    } else {
+      // Allow all requests in development for live reload/hot CSS 
+      console.log('[main] DEV MODE: All renderer http/https/ws requests allowed for live reload/hot CSS!');
     }
   } catch (err) {
     console.error('[main] initialization error', err && (err as any).stack ? (err as any).stack : err);

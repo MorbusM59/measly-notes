@@ -4,7 +4,8 @@ import { Sidebar } from './Sidebar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { TagInput } from './TagInput';
 import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL, YearValue, handleMultiSelect } from '../shared/filterConstants';
-import './App.css';
+import './Shared.scss';
+import './App.scss';
 
 export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
