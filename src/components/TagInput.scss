@@ -1,46 +1,31 @@
 @use './Shared.scss' as *;
 
-/* Tunable variables — adjust these if pill padding / input sizes change */
-:root {
-  --tag-input--input-bar-height: 48px;
-  --tag-input--pill-row-height: 32px;
-  --tag-input--pill-row-gap: 6px;
-  --tag-input--suggestion-rows: 3;
-  --tag-input--vertical-padding: 16px;
-}
-
-/* compute container height: input bar + (rows * pill-height) + (gaps between rows) + padding */
 .tag-input-container {
   @extend .input-bar;
-  min-height: 100px;
-  padding: 0;
-  box-sizing: border-box;
-  overflow: hidden; /* keep layout fixed */
-
-  /* container is now the flex row that holds left / divider / right */
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
+  padding: 8px;
 }
 
-/* Left side grows to fill remaining space and uses column layout */
+/* Inner layout: left = input + active tags.
+   Suggestions column has been moved to app level, so this only needs to layout the left content. */
+.tag-input-inner {
+  display: flex;
+  gap: 8px;
+  align-items: stretch; /* ensure column height matches where used */
+  width: 100%;
+}
+
+/* Left side grows to fill remaining space */
 .tag-left {
-  margin: 8px;
   flex: 1;
   min-width: 0; /* so children can shrink */
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
-/* Input bar at top of left - fixed position within the left column */
+/* Input bar at top of left */
 .tag-input-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0;
-  flex: 0 0 auto; /* do not grow/shrink */
-  box-sizing: border-box;
+  margin-bottom: 8px;
 }
 
 .tag-input-wrapper {
@@ -53,64 +38,14 @@
   width: 100%;
 }
 
-/* Active tags area: fill remaining vertical space, wrap, and pin rows to bottom */
+/* Existing tag pills layout */
 .tags-display {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  flex: 1 1 auto; /* take remaining vertical space */
-  min-height: 0; /* important for flex children to allow overflow */
-  align-content: flex-end; /* push wrapped rows to the bottom of the area */
-  overflow-y: auto; /* if there are many active tags, allow scrolling inside the allocated space */
-  padding-top: 4px;
-  padding-bottom: 4px;
+  min-height: 32px;
 }
 
-/* Divider between left and right suggestions — visually matches .sidebar-divider */
-.tag-input-divider {
-  width: 8px;
-  background: 00000000;
-  box-shadow: inset 0 0 3px rgba(0,0,0,0.4);
-  cursor: col-resize;
-  flex-shrink: 0;
-  transition: box-shadow 0.2s;
-  position: relative;
-  border-style: solid;
-  border-width: 0 1px;
-  border-color: #FFFFFF77; /* sides white-ish */
-}
-.tag-input-divider:hover {
-  box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
-}
-.tag-input-divider:active {
-  box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
-}
-
-/* Suggested section on the right — takes the full height of the container */
-.suggested-section {
-  display: flex;
-  padding: 8px;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 120px;
-  max-width: 600px;
-  box-sizing: border-box;
-  align-self: stretch; /* match left column height */
-  justify-content: flex-start; /* align suggested tags to top */
-}
-
-/* Suggested tags arranged into rows: reserve space for --suggestion-rows rows and scroll if more */
-.suggested-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-content: flex-start; /* top align wrapped rows */
-  overflow-y: auto;
-  padding-right: 4px;
-  box-sizing: border-box;
-}
-
-/* Existing tag pills layout */
 .tag-pill {
   display: inline-flex;
   align-items: center;
@@ -123,9 +58,9 @@
 }
 
 .tag-pill.active {
-  background: #e3f2fd;
-  color: #1976d2;
-  border: 1px solid #90caf9;
+  background: var(--color-tag-active-bg);
+  color: var(--color-tag-active-text);
+  border: 1px solid var(--color-tag-active-border);
 }
 
 .tag-pill.active:hover {
@@ -134,10 +69,10 @@
 }
 
 .tag-pill.suggested {
-  padding: 1px 6px 3px 6px;
-  background: #f3f3f3;
-  color: #333;
-  border: 1px solid #ddd;
+  background: var(--color-tag-suggested-bg);
+  color: var(--color-tag-suggested-text);
+  border: 1px solid var(--color-tag-suggested-border);
+  padding: 0 6px 4px 6px;
 }
 
 .tag-pill.suggested:hover {
@@ -152,25 +87,7 @@
 
 /* small responsiveness tweak */
 @media (max-width: 720px) {
-  :root {
-    --tag-input--suggestion-rows: 2;
-  }
-  .tag-input-container {
+  .tag-input-inner {
     flex-direction: column;
-  }
-  .tag-input-divider {
-    width: 100%;
-    height: 8px;
-    cursor: row-resize;
-  }
-  .suggested-section {
-    width: 100% !important;
-    max-width: 100%;
-  }
-  .suggested-tags {
-    max-height: calc(
-      (var(--tag-input--pill-row-height) * var(--tag-input--suggestion-rows))
-      + (var(--tag-input--pill-row-gap) * (var(--tag-input--suggestion-rows) - 1))
-    );
   }
 }

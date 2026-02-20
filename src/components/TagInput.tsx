@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Note, Tag, NoteTag } from '../shared/types';
+import React, { useEffect, useRef, useState } from 'react';
+import { Note, NoteTag, Tag } from '../shared/types';
 import './TagInput.scss';
 
 interface TagInputProps {
@@ -10,21 +10,15 @@ interface TagInputProps {
 export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const [inputValue, setInputValue] = useState('');
   const [noteTags, setNoteTags] = useState<NoteTag[]>([]);
-  const [suggestedTags, setSuggestedTags] = useState<Tag[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [deleteArmed, setDeleteArmed] = useState(false);
+
+  // placeholders: map from slot index -> Tag that was removed from that slot,
+  // rendered in-place as a suggested pill until the mouse leaves that pill.
   const [placeholders, setPlaceholders] = useState<Record<number, Tag>>({});
 
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Divider / suggestions resizing
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [suggestionsWidth, setSuggestionsWidth] = useState<number>(() => {
-    const saved = localStorage.getItem('tag-suggestions-width');
-    return saved ? parseInt(saved, 10) : 240;
-  });
-  const [isDraggingDivider, setIsDraggingDivider] = useState(false);
 
   // normalize on the frontend too (defensive)
   const normalizeTagName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
@@ -33,12 +27,10 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   useEffect(() => {
     if (note) {
       loadNoteTags();
-      loadSuggestedTags();
       loadAllTags();
       setPlaceholders({});
     } else {
       setNoteTags([]);
-      setSuggestedTags([]);
       setPlaceholders({});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -48,15 +40,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     if (!note) return;
     const tags = await window.electronAPI.getNoteTags(note.id);
     setNoteTags(tags);
-  };
-
-  const loadSuggestedTags = async () => {
-    if (!note) return;
-    const topTags = await window.electronAPI.getTopTags(30);
-    const currentTagIds = new Set((await window.electronAPI.getNoteTags(note.id)).map(t => t.tagId));
-    const filtered = topTags.filter(tag => !currentTagIds.has(tag.id));
-    filtered.sort((a, b) => a.name.localeCompare(b.name));
-    setSuggestedTags(filtered.slice(0, 15));
   };
 
   const loadAllTags = async () => {
@@ -74,7 +57,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     await window.electronAPI.addTagToNote(note.id, normalized, position);
     setInputValue('');
     await loadNoteTags();
-    await loadSuggestedTags();
     inputRef.current?.focus();
 
     if (onTagsChanged) onTagsChanged();
@@ -82,26 +64,8 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleAddTag();
-    }
-  };
-
-  const handleActiveTagClick = async (index: number, tagId: number, tag: Tag) => {
-    if (!note) return;
-
-    const newNoteTags = [...noteTags];
-    if (index >= 0 && index < newNoteTags.length && newNoteTags[index].tagId === tagId) {
-      newNoteTags.splice(index, 1);
-      setNoteTags(newNoteTags);
-    } else {
-      setNoteTags(prev => prev.filter(nt => nt.tagId !== tagId));
-    }
-
-    setPlaceholders(prev => ({ ...prev, [index]: tag }));
-    await window.electronAPI.removeTagFromNote(note.id, tagId);
-
-    if (onTagsChanged) {
-      onTagsChanged();
     }
   };
 
@@ -118,11 +82,8 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     });
 
     await loadNoteTags();
-    await loadSuggestedTags();
 
-    if (onTagsChanged) {
-      onTagsChanged();
-    }
+    if (onTagsChanged) onTagsChanged();
   };
 
   const handlePlaceholderMouseLeave = async (index: number) => {
@@ -132,7 +93,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
       return copy;
     });
 
-    await loadSuggestedTags();
     await loadNoteTags();
   };
 
@@ -158,9 +118,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     setDraggedIndex(null);
     await loadNoteTags();
 
-    if (onTagsChanged) {
-      onTagsChanged();
-    }
+    if (onTagsChanged) onTagsChanged();
   };
 
   const handleDeleteNote = async () => {
@@ -172,50 +130,15 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
       await window.electronAPI.deleteNote(note.id);
       setDeleteArmed(false);
 
-      if (onTagsChanged) {
-        onTagsChanged();
-      }
+      if (onTagsChanged) onTagsChanged();
     }
   };
 
-  const handleDeleteMouseLeave = () => {
-    setDeleteArmed(false);
-  };
+  if (!note) {
+    return null;
+  }
 
-  const handleDividerMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDraggingDivider(true);
-  };
-
-  useEffect(() => {
-    if (!isDraggingDivider) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      let newWidth = Math.round(rect.right - e.clientX);
-      const min = 120;
-      const max = Math.min(600, Math.round(rect.width - 120));
-      if (newWidth < min) newWidth = min;
-      if (newWidth > max) newWidth = max;
-      setSuggestionsWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsDraggingDivider(false);
-      localStorage.setItem('tag-suggestions-width', suggestionsWidth.toString());
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDraggingDivider, suggestionsWidth]);
-
+  // Build placeholder-aware slots for rendering active tags and placeholders:
   const placeholderIndices = Object.keys(placeholders).map(k => parseInt(k, 10));
   const slotsCount = Math.max(
     noteTags.length + placeholderIndices.length,
@@ -223,93 +146,74 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     noteTags.length
   );
 
-  if (!note) {
-    return null;
-  }
-
   return (
-    <div className="tag-input-container" ref={containerRef}>
-      <div className="tag-left">
-        <div className="tag-input-bar">
-          <div className="tag-input-wrapper">
-            <input
-              ref={inputRef}
-              type="text"
-              className="tag-input"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Type to add tag..."
-            />
+    <div className="tag-input-container">
+      <div className="tag-input-inner">
+        <div className="tag-left">
+          <div className="tag-input-bar">
+            <div className="tag-input-wrapper">
+              <input
+                ref={inputRef}
+                type="text"
+                className="tag-input"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Type to add tag..."
+              />
+            </div>
+          </div>
+
+          <div className="tags-display">
+            {Array.from({ length: slotsCount }).map((_, slotIdx) => {
+              if (placeholders[slotIdx]) {
+                const tag = placeholders[slotIdx];
+                return (
+                  <div
+                    key={`ph-${slotIdx}-${tag.id}`}
+                    className="tag-pill suggested placeholder"
+                    onClick={() => handlePlaceholderClick(slotIdx, tag)}
+                    onMouseLeave={() => handlePlaceholderMouseLeave(slotIdx)}
+                    onMouseEnter={() => {}}
+                  >
+                    {tag.name}
+                  </div>
+                );
+              }
+
+              const noteTag = noteTags[slotIdx];
+              if (noteTag) {
+                return (
+                  <div
+                    key={noteTag.tagId}
+                    className="tag-pill active"
+                    draggable
+                    onDragStart={() => handleDragStart(slotIdx)}
+                    onDragOver={(e) => handleDragOver(e)}
+                    onDrop={(e) => handleDrop(e, slotIdx)}
+                    onClick={() => {
+                      if (noteTag.tag) {
+                        (async () => {
+                          await window.electronAPI.removeTagFromNote(note.id, noteTag.tagId);
+                          setPlaceholders(prev => ({ ...prev, [slotIdx]: noteTag.tag as Tag }));
+                          await loadNoteTags();
+                          if (onTagsChanged) onTagsChanged();
+                        })();
+                      }
+                    }}
+                    title="Click to remove tag"
+                  >
+                    {noteTag.tag?.name}
+                  </div>
+                );
+              }
+
+              return null;
+            })}
           </div>
         </div>
 
-        <div className="tags-display">
-          {Array.from({ length: slotsCount }).map((_, slotIdx) => {
-            if (placeholders[slotIdx]) {
-              const tag = placeholders[slotIdx];
-              return (
-                <div
-                  key={`ph-${slotIdx}-${tag.id}`}
-                  className="tag-pill suggested placeholder"
-                  onClick={() => handlePlaceholderClick(slotIdx, tag)}
-                  onMouseLeave={() => handlePlaceholderMouseLeave(slotIdx)}
-                >
-                  {tag.name}
-                </div>
-              );
-            }
-
-            const noteTag = noteTags[slotIdx];
-            if (noteTag) {
-              return (
-                <div
-                  key={noteTag.tagId}
-                  className="tag-pill active"
-                  draggable
-                  onDragStart={() => handleDragStart(slotIdx)}
-                  onDragOver={(e) => handleDragOver(e)}
-                  onDrop={(e) => handleDrop(e, slotIdx)}
-                  onClick={() => {
-                    if (noteTag.tag) {
-                      handleActiveTagClick(slotIdx, noteTag.tagId, noteTag.tag);
-                    }
-                  }}
-                  title="Click to remove tag"
-                >
-                  {noteTag.tag?.name}
-                </div>
-              );
-            }
-
-            return null;
-          })}
-        </div>
-      </div>
-
-      <div
-        className="tag-input-divider"
-        onMouseDown={handleDividerMouseDown}
-        role="separator"
-        aria-orientation="vertical"
-        aria-valuenow={suggestionsWidth}
-      />
-
-      <div
-        className="suggested-section"
-        style={{ width: suggestionsWidth }}
-      >
-        <div className="suggested-tags" aria-hidden={suggestedTags.length === 0}>
-          {suggestedTags.map(tag => (
-            <div
-              key={tag.id}
-              className="tag-pill suggested"
-              onClick={() => handlePlaceholderClick(noteTags.length, tag)}
-            >
-              {tag.name}
-            </div>
-          ))}
-        </div>
+        {/* Suggestions column and divider moved to App level */}
       </div>
     </div>
   );

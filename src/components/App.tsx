@@ -1,11 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Note } from '../shared/types';
 import { Sidebar } from './Sidebar';
 import { MarkdownEditor } from './MarkdownEditor';
 import { TagInput } from './TagInput';
-import { FILTER_MONTHS, FILTER_YEARS, CLEAR_MONTHS_SIGNAL, CLEAR_YEARS_SIGNAL, YearValue, handleMultiSelect } from '../shared/filterConstants';
+import {
+  FILTER_MONTHS,
+  FILTER_YEARS,
+  CLEAR_MONTHS_SIGNAL,
+  CLEAR_YEARS_SIGNAL,
+  YearValue,
+  handleMultiSelect,
+} from '../shared/filterConstants';
 import './Shared.scss';
 import './App.scss';
+import { SuggestedPanel } from './SuggestedPanel';
 
 export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -14,24 +22,26 @@ export const App: React.FC = () => {
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [selectedYears, setSelectedYears] = useState<Set<number | 'older'>>(new Set());
   const [viewMode, setViewMode] = useState<'date' | 'category'>('date');
-  const [sidebarWidth, setSidebarWidth] = useState<number>(400);
-  const [isDragging, setIsDragging] = useState(false);
+
+  // Sidebar sizing / drag
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('sidebar-width');
+    return saved ? parseInt(saved, 10) : 320;
+  });
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+
+  // Suggestions panel sizing / drag (moved to app level)
+  const [suggestionsWidth, setSuggestionsWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('tag-suggestions-width');
+    return saved ? parseInt(saved, 10) : 240;
+  });
+  const [isDraggingSuggestionsDivider, setIsDraggingSuggestionsDivider] = useState(false);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
 
   // Global editor preview/edit mode (true = preview/view, false = edit)
   const [showPreview, setShowPreview] = useState<boolean>(() => {
     return localStorage.getItem('markdown-show-preview') === 'true';
   });
-
-  // Load sidebar width from localStorage
-  useEffect(() => {
-    const savedWidth = localStorage.getItem('sidebar-width');
-    if (savedWidth) {
-      const width = parseInt(savedWidth, 10);
-      if (width >= 250 && width <= 600) {
-        setSidebarWidth(width);
-      }
-    }
-  }, []);
 
   // On start, open the last edited note if available
   useEffect(() => {
@@ -52,7 +62,6 @@ export const App: React.FC = () => {
     // If entering preview mode, request a force-save first (so preview renders current content).
     if (next) {
       try {
-        // Use the validated preload API
         await (window as any).electronAPI.requestForceSave();
       } catch (err) {
         console.warn('requestForceSave failed', err);
@@ -75,7 +84,6 @@ export const App: React.FC = () => {
       }
       if (e.shiftKey && e.key === 'Enter') {
         e.preventDefault();
-        // Use the togglePreview helper so we force-save when entering preview
         togglePreview(!showPreview);
       }
     };
@@ -85,21 +93,16 @@ export const App: React.FC = () => {
   }, [showPreview]);
 
   const handleCreateNote = async () => {
-    // Request a force-save of the current note before creating a new one
     try {
       await (window as any).electronAPI.requestForceSave();
     } catch (err) {
       console.warn('requestForceSave failed', err);
     }
 
-    // Ensure edit mode for newly-created note
     setShowPreview(false);
     localStorage.setItem('markdown-show-preview', 'false');
 
-    // Create note with default title and pre-filled content
     const note = await window.electronAPI.createNote('Untitled');
-
-    // Set initial markdown content with cursor position placeholder
     const initialContent = '# ';
     await window.electronAPI.saveNote(note.id, initialContent);
 
@@ -167,14 +170,14 @@ export const App: React.FC = () => {
   };
 
   // Sidebar divider mouse down handler
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleSidebarMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
-    setIsDragging(true);
+    setIsDraggingSidebar(true);
   };
 
-  // Drag handling effect
+  // Drag handling effect for sidebar
   useEffect(() => {
-    if (!isDragging) return;
+    if (!isDraggingSidebar) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       const newWidth = e.clientX;
@@ -184,8 +187,7 @@ export const App: React.FC = () => {
     };
 
     const handleMouseUp = () => {
-      setIsDragging(false);
-      // Save to localStorage
+      setIsDraggingSidebar(false);
       localStorage.setItem('sidebar-width', sidebarWidth.toString());
     };
 
@@ -196,7 +198,43 @@ export const App: React.FC = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, sidebarWidth]);
+  }, [isDraggingSidebar, sidebarWidth]);
+
+  // Suggestions divider mouse down handler
+  const handleSuggestionsDividerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingSuggestionsDivider(true);
+  };
+
+  // Drag handling effect for suggestions divider
+  useEffect(() => {
+    if (!isDraggingSuggestionsDivider) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!mainContentRef.current) return;
+      const rect = mainContentRef.current.getBoundingClientRect();
+      // suggestions pane is on the right; width = rect.right - clientX
+      let newWidth = Math.round(rect.right - e.clientX);
+      const min = 120;
+      const max = Math.min(600, Math.round(rect.width - 120));
+      if (newWidth < min) newWidth = min;
+      if (newWidth > max) newWidth = max;
+      setSuggestionsWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingSuggestionsDivider(false);
+      localStorage.setItem('tag-suggestions-width', suggestionsWidth.toString());
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingSuggestionsDivider, suggestionsWidth]);
 
   return (
     <div className="app">
@@ -216,15 +254,32 @@ export const App: React.FC = () => {
       />
       <div
         className="sidebar-divider"
-        onMouseDown={handleMouseDown}
+        onMouseDown={handleSidebarMouseDown}
+        role="separator"
+        aria-orientation="vertical"
       />
-      <div className="main-content">
-        <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
-        <MarkdownEditor
+      <div className="main-content" ref={mainContentRef}>
+        <div className="main-column">
+          <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
+          <MarkdownEditor
+            note={selectedNote}
+            onNoteUpdate={handleNoteUpdate}
+            showPreview={showPreview}
+            onTogglePreview={(next: boolean) => togglePreview(next)}
+          />
+        </div>
+
+        <div
+          className="suggestions-divider"
+          onMouseDown={handleSuggestionsDividerMouseDown}
+          role="separator"
+          aria-orientation="vertical"
+        />
+
+        <SuggestedPanel
           note={selectedNote}
-          onNoteUpdate={handleNoteUpdate}
-          showPreview={showPreview}
-          onTogglePreview={(next: boolean) => togglePreview(next)}
+          width={suggestionsWidth}
+          onTagsChanged={handleSidebarRefresh}
         />
       </div>
     </div>

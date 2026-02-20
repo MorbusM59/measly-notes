@@ -8,6 +8,7 @@
   cursor: default;
 }
 
+/* Sidebar divider (unchanged visual style) */
 .sidebar-divider {
   width: 8px;
   background: linear-gradient(135deg, #f5f3f2, #e9e5e2);
@@ -20,20 +21,65 @@
   border-width: 0 1px;
   border-color: #FFFFFF77; /* top/bottom transparent, sides white */
 }
-
 .sidebar-divider:hover {
   box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
 }
-
 .sidebar-divider:active {
   box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
 }
 
+/* Main content now becomes a horizontal split:
+   - main-column: left area containing TagInput and MarkdownEditor (stacked vertically)
+   - suggestions panel: fixed width column on the right
+*/
 .main-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
   min-width: 0;
   margin: 0 0 0 4px;
+}
+
+/* The left column holds the TagInput and the Markdown editor stacked vertically */
+.main-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Suggestions divider (visual match to sidebar-divider) */
+.suggestions-divider {
+  width: 8px;
+  background: linear-gradient(135deg, #f5f3f2, #e9e5e2);
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.4);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: box-shadow 0.2s;
+  position: relative;
+  border-style: solid;
+  border-width: 0 1px;
+  border-color: #FFFFFF77;
+}
+.suggestions-divider:hover {
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
+}
+.suggestions-divider:active {
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
+}
+
+/* Keep markdown editor and other internals unchanged (they handle their own scrolling) */
+
+/* Small responsive tweak: on narrow screens stack the suggestions panel under the main column */
+@media (max-width: 880px) {
+  .main-content {
+    flex-direction: column;
+  }
+  .suggestions-divider {
+    width: 100%;
+    height: 8px;
+    cursor: row-resize;
+  }
 }

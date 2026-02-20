@@ -1,0 +1,117 @@
+@use './Shared.scss' as *;
+
+.suggested-panel {
+  box-sizing: border-box;
+  padding: 8px;
+  background: var(--color-panel-top-gradient);
+  border-left: 1px solid var(--color-panel-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 120px;
+  max-width: 600px;
+  overflow: hidden;
+}
+
+/* Reuse pill styling expectations from tag components */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  user-select: none;
+  transition: all 0.18s ease;
+}
+
+.tag-pill.suggested {
+  background: var(--color-tag-suggested-bg);
+  color: var(--color-tag-suggested-text);
+  border: 1px solid var(--color-tag-suggested-border);
+  padding: 0 6px 4px 6px;
+  cursor: pointer;
+}
+.tag-pill.suggested:hover {
+  background: #e0e0e0;
+  border-color: #bbb;
+}
+
+.suggested-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: stretch;
+  justify-content: flex-start;
+}
+
+.suggested-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.suggested-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.suggested-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+  max-height: 96px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.suggested-empty {
+  color: #666;
+  font-size: 13px;
+  padding: 6px 0;
+}
+
+/* Options placeholder panel */
+.options-panel {
+  @extend .panel;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.options-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.options-btn {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+}
+.options-btn:hover {
+  background: #f0f0f0;
+}
+
+/* Responsive: collapse into vertical layout when container is narrow */
+@media (max-width: 880px) {
+  .suggested-panel {
+    width: 100% !important;
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid var(--color-panel-border);
+  }
+}
