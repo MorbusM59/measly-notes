@@ -65,7 +65,6 @@
   border-width: 1px;
   border-style: hidden solid solid solid;
   border-color: var(--color-panel-border);
-  margin-bottom: 2px;
 }
 
 /* General Input Fields */
@@ -135,15 +134,6 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--color-tag-remove-text);
   border-color: var(--color-tag-remove-border);
   transform: translateY(-1px);
-}
-.tag-pill.suggested {
-  background: var(--color-tag-suggested-bg);
-  color: var(--color-tag-suggested-text);
-  border: 1px solid var(--color-tag-suggested-border);
-}
-.tag-pill.suggested:hover {
-  background: #e0e0e0;
-  border-color: #bbb;
 }
 
 /* Utilities */

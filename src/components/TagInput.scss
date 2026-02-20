@@ -1,60 +1,61 @@
 @use './Shared.scss' as *;
 
+/* Container used by App's taginput grid area */
 .tag-input-container {
-  @extend .input-bar;
-  padding: 8px;
-}
-
-/* Inner layout: left = input + active tags.
-   Suggestions column has been moved to app level, so this only needs to layout the left content. */
-.tag-input-inner {
-  display: flex;
-  gap: 8px;
-  align-items: stretch; /* ensure column height matches where used */
   width: 100%;
+  box-sizing: border-box;
 }
 
-/* Left side grows to fill remaining space */
-.tag-left {
-  flex: 1;
-  min-width: 0; /* so children can shrink */
+/* Left section: input on top, tags below */
+.tag-input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0; /* important within grid */
 }
 
-/* Input bar at top of left */
+/* Input bar at top */
 .tag-input-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
 }
 
+/* Input wrapper */
 .tag-input-wrapper {
-  position: relative;
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .tag-input {
   @extend .input-base;
   width: 100%;
+  box-sizing: border-box;
 }
 
-/* Existing tag pills layout */
+/* Tags display area (below input) */
 .tags-display {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
   min-height: 32px;
+  padding-top: 4px;
 }
 
+/* Tag pill styles (kept consistent with Shared) */
 .tag-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: 4px 10px;
   border-radius: 12px;
   font-size: 13px;
   user-select: none;
   transition: all 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tag-pill.active {
@@ -72,11 +73,11 @@
   background: var(--color-tag-suggested-bg);
   color: var(--color-tag-suggested-text);
   border: 1px solid var(--color-tag-suggested-border);
-  padding: 0 6px 4px 6px;
+  padding: 4px 8px;
 }
 
 .tag-pill.suggested:hover {
-  background: #e0e0e0;
+  background: #e8e8e8;
   border-color: #bbb;
 }
 
@@ -85,9 +86,13 @@
   border-style: dashed;
 }
 
-/* small responsiveness tweak */
+/* Responsive: keep input and tags usable on small screens */
 @media (max-width: 720px) {
-  .tag-input-inner {
-    flex-direction: column;
+  .tag-input-section {
+    gap: 6px;
+  }
+
+  .tags-display {
+    gap: 6px;
   }
 }
