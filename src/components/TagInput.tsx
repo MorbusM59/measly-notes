@@ -19,9 +19,9 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   const [placeholders, setPlaceholders] = useState<Record<number, Tag>>({});
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Divider / suggestions resizing
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [suggestionsWidth, setSuggestionsWidth] = useState<number>(() => {
     const saved = localStorage.getItem('tag-suggestions-width');
     return saved ? parseInt(saved, 10) : 240;
@@ -43,6 +43,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
       setSuggestedTags([]);
       setPlaceholders({});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note]);
 
   const loadNoteTags = async () => {
@@ -99,7 +100,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
   // - optimistically remove it from the displayed active tags
   // - add a placeholder in the same slot so it appears as a suggested-pill there
   // - call backend to remove the tag
-  // - the placeholder remains until mouse leaves it; on mouseleave we clear placeholder and refresh suggestions
+  // - the placeholder remains until mouse leaves that pill. on mouseleave we clear placeholder and refresh suggestions
   const handleActiveTagClick = async (index: number, tagId: number, tag: Tag) => {
     if (!note) return;
 
@@ -126,7 +127,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     }
   };
 
-  // Clicking a placeholder should re-add the tag at the original position
   const handlePlaceholderClick = async (index: number, tag: Tag) => {
     if (!note) return;
     const normalized = normalizeTagName(tag.name);

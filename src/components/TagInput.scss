@@ -9,7 +9,7 @@
 .tag-input-inner {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
+  align-items: stretch; /* ensure both columns have same height */
 }
 
 /* Left side grows to fill remaining space */
@@ -36,11 +36,12 @@
   width: 100%;
 }
 
-/* Divider between left and right suggestions */
+/* Divider between left and right suggestions
+   Make it visually identical to the sidebar divider so it matches the same drag affordance */
 .suggestions-divider {
   width: 8px;
   background: linear-gradient(135deg, #f5f3f2, #e9e5e2);
-  box-shadow: inset 0 0 3px rgba(0,0,0,0.35);
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.4);
   cursor: col-resize;
   flex-shrink: 0;
   transition: box-shadow 0.2s;
@@ -52,6 +53,9 @@
 .suggestions-divider:hover {
   box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
 }
+.suggestions-divider:active {
+  box-shadow: inset 0 0 3px rgba(0,0,0,0.2);
+}
 
 /* Suggested section on the right */
 .suggested-section {
@@ -61,16 +65,18 @@
   min-width: 120px;
   max-width: 600px;
   box-sizing: border-box;
+  align-self: stretch; /* match left column height */
+  justify-content: flex-start; /* align content to top */
 }
 
-/* Suggested tags arranged in a compact two-row area */
+/* Suggested tags arranged in rows; allow up to ~3 rows, then scroll */
 .suggested-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  align-content: flex-start;
-  /* limit height to roughly two rows of pills; pills are ~28px high */
-  max-height: 56px;
+  align-content: flex-start; /* align wrapped rows to the top */
+  /* allow up to ~3 rows of tags, then scroll vertically */
+  max-height: 96px; /* ~3 * 28-32px pills + gaps; adjust if your pill sizing differs */
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -109,7 +115,12 @@
   background: #f3f3f3;
   color: #333;
   border: 1px solid #ddd;
-  cursor: pointer;
+  padding: 0 6px 4px 6px;
+}
+
+.tag-pill.suggested:hover {
+  background: #e0e0e0;
+  border-color: #bbb;
 }
 
 .tag-pill.suggested.placeholder {
