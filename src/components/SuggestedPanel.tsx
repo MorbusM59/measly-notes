@@ -6,7 +6,6 @@ interface SuggestedPanelProps {
   note: Note | null;
   width: number;
   onTagsChanged?: () => void;
-  // whenever this number changes, reload suggestions to stay in sync
   refreshTrigger?: number;
 }
 
@@ -43,7 +42,7 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       const currentTags = await window.electronAPI.getNoteTags(note.id);
       const position = currentTags.length;
       await window.electronAPI.addTagToNote(note.id, normalized, position);
-      // reload both local suggested list and notify parent
+      // reload suggestions and notify parent to refresh siblings
       await loadSuggestedTags();
       if (onTagsChanged) onTagsChanged();
     } catch (err) {
@@ -58,10 +57,6 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       aria-label="Suggested tags and options"
     >
       <div className="suggested-section">
-        <div className="suggested-header">
-          <h4>Suggested</h4>
-        </div>
-
         <div className="suggested-tags" aria-hidden={suggestedTags.length === 0}>
           {suggestedTags.map(tag => (
             <div

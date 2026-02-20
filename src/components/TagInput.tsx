@@ -5,27 +5,28 @@ import './TagInput.scss';
 interface TagInputProps {
   note: Note | null;
   onTagsChanged?: () => void;
+  refreshTrigger?: number;
 }
 
 /*
   TagInput: input on top, active tags below.
-  - Clicking an active tag "arms" removal for that tag.
-  - The armed tag is only removed once the mouse leaves that tag.
-  - Clicking the same active tag again while still hovering cancels the armed removal.
+  Deletion UX: first click arms, second click deletes immediately.
+  Moving mouse away cancels the arm.
+  refreshTrigger: when parent increments this, component reloads tags.
 */
 
-export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
+export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refreshTrigger }) => {
   const [inputValue, setInputValue] = useState('');
   const [noteTags, setNoteTags] = useState<NoteTag[]>([]);
   const [placeholders, setPlaceholders] = useState<Record<number, Tag>>({});
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // which index is currently armed for deletion (clicked, awaiting mouseleave)
+  // which index is currently armed for deletion (clicked once)
   const [deleteArmedIndex, setDeleteArmedIndex] = useState<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // normalize on the frontend too (defensive)
+  // defensive normalization
   const normalizeTagName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
 
   useEffect(() => {
@@ -40,6 +41,15 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note]);
+
+  // reload when parent signals refresh (sibling panel changed tags)
+  useEffect(() => {
+    if (note) {
+      loadNoteTags();
+      setDeleteArmedIndex(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTrigger]);
 
   const loadNoteTags = async () => {
     if (!note) return;
@@ -64,37 +74,44 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleAddTag();
     }
   };
 
-  // Arm / disarm deletion on click (no immediate removal)
-  const handleActiveTagClick = (index: number) => {
-    setDeleteArmedIndex(prev => (prev === index ? null : index));
-  };
-
-  // On mouse leave, if this tag is armed, remove it and show placeholder
-  const handleActiveTagMouseLeave = async (index: number, tag: Tag, tagId: number) => {
-    if (deleteArmedIndex !== index) {
-      return;
-    }
-
+  // Click behavior:
+  // - If click on a tag when it's not armed -> arm it
+  // - If click on a tag when it's already armed -> delete it immediately
+  const handleActiveTagClick = async (index: number, tag: Tag, tagId: number) => {
     if (!note) return;
 
-    try {
-      await window.electronAPI.removeTagFromNote(note.id, tagId);
-    } catch (err) {
-      console.warn('Failed to remove tag', err);
+    if (deleteArmedIndex === index) {
+      // second click -> delete immediately
+      try {
+        await window.electronAPI.removeTagFromNote(note.id, tagId);
+      } catch (err) {
+        console.warn('Failed to remove tag', err);
+        setDeleteArmedIndex(null);
+        return;
+      }
+
+      setPlaceholders(prev => ({ ...prev, [index]: tag }));
       setDeleteArmedIndex(null);
+
+      await loadNoteTags();
+      if (onTagsChanged) onTagsChanged();
       return;
     }
 
-    setPlaceholders(prev => ({ ...prev, [index]: tag }));
-    setDeleteArmedIndex(null);
+    // first click -> arm
+    setDeleteArmedIndex(index);
+  };
 
-    await loadNoteTags();
-
-    if (onTagsChanged) onTagsChanged();
+  // Mouse leave cancels the armed deletion (do not delete)
+  const handleActiveTagMouseLeave = (index: number) => {
+    if (deleteArmedIndex === index) {
+      setDeleteArmedIndex(null);
+    }
   };
 
   const handlePlaceholderClick = async (index: number, tag: Tag) => {
@@ -205,11 +222,9 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged }) => {
                   onDragStart={() => handleDragStart(slotIdx)}
                   onDragOver={(e) => handleDragOver(e)}
                   onDrop={(e) => handleDrop(e, slotIdx)}
-                  onClick={() => handleActiveTagClick(slotIdx)}
-                  onMouseLeave={() =>
-                    handleActiveTagMouseLeave(slotIdx, noteTag.tag as Tag, noteTag.tagId)
-                  }
-                  title={armed ? 'Release mouse to remove tag' : 'Click to arm removal'}
+                  onClick={() => handleActiveTagClick(slotIdx, noteTag.tag as Tag, noteTag.tagId)}
+                  onMouseLeave={() => handleActiveTagMouseLeave(slotIdx)}
+                  title={armed ? 'Click again to delete or move cursor away to cancel' : 'Click to arm deletion'}
                 >
                   {noteTag.tag?.name}
                 </div>

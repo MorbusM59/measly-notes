@@ -130,6 +130,7 @@ export const App: React.FC = () => {
     setSidebarRefreshTrigger(t => t + 1);
   };
 
+  // Called by children when tags change so sibling panels can sync
   const handleSidebarRefresh = () => {
     setSidebarRefreshTrigger(t => t + 1);
   };
@@ -243,7 +244,7 @@ export const App: React.FC = () => {
   }, [isDraggingDividerLeft, isDraggingDividerRight, suggestionsWidth, utilityWidth]);
 
   // Grid: include divider columns explicitly (they occupy grid space)
-  const gridTemplateColumns = `${sidebarWidth}px 10px 1fr 4px ${suggestionsWidth}px 4px ${utilityWidth}px`;
+  const gridTemplateColumns = `${sidebarWidth}px 8px 1fr 8px ${suggestionsWidth}px 8px ${utilityWidth}px`;
   const gridTemplateRows = 'auto 1fr';
   const gridTemplateAreas = `
     "sidebar d-sidebar taginput d-left suggested d-right utility"
@@ -294,7 +295,11 @@ export const App: React.FC = () => {
 
       {/* Tag input top-left area */}
       <div className="tag-input-grid" style={{ gridArea: 'taginput' }}>
-        <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} />
+        <TagInput
+          note={selectedNote}
+          onTagsChanged={handleSidebarRefresh}
+          refreshTrigger={sidebarRefreshTrigger}
+        />
       </div>
 
       {/* Divider between Tag input and Suggested (full grid area) */}
