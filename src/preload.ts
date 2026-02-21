@@ -148,6 +148,25 @@ const electronAPI: IElectronAPI & {
     }
   },
 
+  // Per-note UI state helpers
+  saveNoteUiState: async (noteId: number, state) => {
+    assertPositiveInteger(noteId, 'noteId');
+    try {
+      await ipcRenderer.invoke('save-note-ui-state', noteId, state);
+    } catch (err) {
+      // non-fatal
+    }
+  },
+
+  getNoteUiState: async (noteId: number) => {
+    assertPositiveInteger(noteId, 'noteId');
+    try {
+      return (await ipcRenderer.invoke('get-note-ui-state', noteId)) as { progressPreview: number | null; progressEdit: number | null; cursorPos: number | null; scrollTop: number | null };
+    } catch (err) {
+      return { progressPreview: null, progressEdit: null, cursorPos: null, scrollTop: null };
+    }
+  },
+
   // Force-save flow: request is routed via main (so focused window receives do-force-save),
   // and renderer will respond with forceSaveComplete which main waits for.
   requestForceSave: async () => {

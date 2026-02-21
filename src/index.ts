@@ -4,7 +4,7 @@ import {
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
   addTagToNote, removeTagFromNote, reorderNoteTags, getNoteTags,
   getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy, getLastEditedNote,
-  upsertNoteFts, removeNoteFts, searchNotes
+  upsertNoteFts, removeNoteFts, searchNotes, saveNoteUiState, getNoteUiState
 } from './main/database';
 import { initFileSystem, saveNoteContent, loadNoteContent, deleteNoteFile } from './main/fileSystem';
 import { SearchResult } from './shared/types';
@@ -326,6 +326,17 @@ app.whenReady().then(async () => {
     ipcMain.handle('get-notes-by-primary-tag', async () => getNotesByPrimaryTag());
     ipcMain.handle('get-category-hierarchy', async () => getCategoryHierarchy());
     ipcMain.handle('get-last-edited-note', async () => getLastEditedNote() ?? null);
+
+    ipcMain.handle('save-note-ui-state', async (_event, noteId: unknown, state: unknown) => {
+      if (!isPositiveInteger(noteId) || typeof state !== 'object' || state === null) throw new Error('Invalid args');
+      const s = state as { progressPreview?: number | null; progressEdit?: number | null; cursorPos?: number | null; scrollTop?: number | null };
+      try { saveNoteUiState(Number(noteId), s); } catch (err) { console.warn('[main] saveNoteUiState failed', err); }
+    });
+
+    ipcMain.handle('get-note-ui-state', async (_event, noteId: unknown) => {
+      if (!isPositiveInteger(noteId)) throw new Error('Invalid args');
+      try { return getNoteUiState(Number(noteId)); } catch (err) { console.warn('[main] getNoteUiState failed', err); return { progressPreview: null, progressEdit: null, cursorPos: null, scrollTop: null }; }
+    });
 
     // request-force-save: send do-force-save with requestId to focused window and wait for completion or timeout
     ipcMain.handle('request-force-save', async () => {

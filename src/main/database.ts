@@ -45,6 +45,18 @@ export async function initDatabase(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tagId);
   `);
 
+  // Ensure UI state columns exist on `notes` table. Use a migration-friendly approach
+  try {
+    const cols = db.prepare("PRAGMA table_info(notes)").all() as Array<{ name: string }>;
+    const names = new Set(cols.map(c => String(c.name)));
+    if (!names.has('progressPreview')) db.prepare('ALTER TABLE notes ADD COLUMN progressPreview REAL DEFAULT 0').run();
+    if (!names.has('progressEdit')) db.prepare('ALTER TABLE notes ADD COLUMN progressEdit REAL DEFAULT 0').run();
+    if (!names.has('cursorPos')) db.prepare('ALTER TABLE notes ADD COLUMN cursorPos INTEGER DEFAULT 0').run();
+    if (!names.has('scrollTop')) db.prepare('ALTER TABLE notes ADD COLUMN scrollTop REAL DEFAULT 0').run();
+  } catch (merr) {
+    console.warn('[db] UI-state migration check failed', merr);
+  }
+
   try {
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
@@ -94,6 +106,31 @@ export function getAllNotes(): Note[] {
 export function getNoteById(id: number): Note | undefined {
   const stmt = db.prepare('SELECT * FROM notes WHERE id = ?');
   return stmt.get(id) as Note | undefined;
+}
+
+export function getNoteUiState(noteId: number): { progressPreview: number | null; progressEdit: number | null; cursorPos: number | null; scrollTop: number | null } {
+  const stmt = db.prepare('SELECT progressPreview, progressEdit, cursorPos, scrollTop FROM notes WHERE id = ?');
+  const row = stmt.get(noteId) as { progressPreview?: number; progressEdit?: number; cursorPos?: number; scrollTop?: number } | undefined;
+  if (!row) return { progressPreview: null, progressEdit: null, cursorPos: null, scrollTop: null };
+  return {
+    progressPreview: row.progressPreview == null ? null : Number(row.progressPreview),
+    progressEdit: row.progressEdit == null ? null : Number(row.progressEdit),
+    cursorPos: row.cursorPos == null ? null : Number(row.cursorPos),
+    scrollTop: row.scrollTop == null ? null : Number(row.scrollTop),
+  };
+}
+
+export function saveNoteUiState(noteId: number, state: { progressPreview?: number | null; progressEdit?: number | null; cursorPos?: number | null; scrollTop?: number | null }): void {
+  const parts: string[] = [];
+  const values: any[] = [];
+  if (state.progressPreview !== undefined) { parts.push('progressPreview = ?'); values.push(state.progressPreview); }
+  if (state.progressEdit !== undefined) { parts.push('progressEdit = ?'); values.push(state.progressEdit); }
+  if (state.cursorPos !== undefined) { parts.push('cursorPos = ?'); values.push(state.cursorPos); }
+  if (state.scrollTop !== undefined) { parts.push('scrollTop = ?'); values.push(state.scrollTop); }
+  if (parts.length === 0) return;
+  const sql = `UPDATE notes SET ${parts.join(', ')} WHERE id = ?`;
+  values.push(noteId);
+  db.prepare(sql).run(...values);
 }
 
 export function updateNote(id: number): void {

@@ -7,6 +7,11 @@ export interface Note {
   createdAt: string;
   updatedAt: string;
   lastEdited?: string | null;
+  // UI state persisted per-note
+  progressPreview?: number | null;
+  progressEdit?: number | null;
+  cursorPos?: number | null;
+  scrollTop?: number | null;
 }
 
 export interface Tag {
@@ -109,4 +114,7 @@ export interface IElectronAPI {
 
   // Runtime controls
   setSpellcheckerLanguages: (langs: string[]) => Promise<{ ok: boolean; error?: string }>;
+  // Per-note UI state (progress/cursor) persistence
+  saveNoteUiState: (noteId: number, state: { progressPreview?: number | null; progressEdit?: number | null; cursorPos?: number | null; scrollTop?: number | null }) => Promise<void>;
+  getNoteUiState: (noteId: number) => Promise<{ progressPreview: number | null; progressEdit: number | null; cursorPos: number | null; scrollTop: number | null }>;
 }

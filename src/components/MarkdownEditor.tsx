@@ -64,7 +64,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Helpers to persist per-note edit state
   const getEditStateKey = (noteId: number) => `${EDIT_STATE_KEY_PREFIX}${noteId}`;
 
-  const saveEditState = (noteId: number) => {
+  const saveEditState = async (noteId: number) => {
     const ta = textareaRef.current;
     const editorContent = editorContentRef.current;
     if (!ta || !editorContent) return;
@@ -73,14 +73,28 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       scrollTop: editorContent.scrollTop,
     };
     try {
+      // persist to DB via preload API (best-effort)
+      try { await window.electronAPI.saveNoteUiState(noteId, { cursorPos: state.selectionStart, scrollTop: state.scrollTop, progressEdit: (editorContent.scrollHeight > editorContent.clientHeight ? editorContent.scrollTop / (editorContent.scrollHeight - editorContent.clientHeight) : 0) }); } catch {}
+    } catch {
+      // ignore
+    }
+
+    try {
       localStorage.setItem(getEditStateKey(noteId), JSON.stringify(state));
     } catch {
       // ignore storage errors
     }
   };
 
-  const loadEditState = (noteId: number): EditState | null => {
+  const loadEditState = async (noteId: number): Promise<EditState | null> => {
     try {
+      try {
+        const st = await window.electronAPI.getNoteUiState(noteId);
+        if (st && (st.cursorPos != null || st.scrollTop != null)) {
+          return { selectionStart: (st.cursorPos ?? 0), scrollTop: (st.scrollTop ?? 0) };
+        }
+      } catch {}
+
       const raw = localStorage.getItem(getEditStateKey(noteId));
       if (!raw) return null;
       const parsed = JSON.parse(raw) as EditState;
@@ -98,14 +112,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         autoSaveTimeoutRef.current = null;
       }
       // Save edit state when we enter preview so it can be restored when returning to edit.
-      if (note?.id != null) saveEditState(note.id);
+      if (note?.id != null) void saveEditState(note.id);
     } else {
       // when entering edit mode, attempt to restore scroll/selection (handled in note load or note-change flow)
-      setTimeout(() => {
+      setTimeout(async () => {
         const ta = textareaRef.current;
         const editorContent = editorContentRef.current;
         if (!ta || !editorContent || !note) return;
-        const st = loadEditState(note.id);
+        const st = await loadEditState(note.id);
         if (st) {
           ta.selectionStart = ta.selectionEnd = st.selectionStart;
           editorContent.scrollTop = st.scrollTop;
@@ -134,12 +148,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
         // Focus & position cursor for edit mode
         if (!showPreview) {
-          setTimeout(() => {
+          setTimeout(async () => {
             const textarea = textareaRef.current;
             const editorContent = editorContentRef.current;
             if (textarea) {
               // restore edit state if available
-              const st = loadEditState(note.id);
+              const st = await loadEditState(note.id);
               if (st) {
                 textarea.focus();
                 textarea.setSelectionRange(st.selectionStart, st.selectionStart);
@@ -681,7 +695,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       if (note?.id != null) {
         if (selectionSaveTimeout.current) clearTimeout(selectionSaveTimeout.current);
         selectionSaveTimeout.current = setTimeout(() => {
-          saveEditState(note.id as number);
+          void saveEditState(note.id as number);
         }, 250);
       }
     };
@@ -797,10 +811,52 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   useEffect(() => {
     return () => {
       if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-      if (note?.id != null) saveEditState(note.id);
+      if (note?.id != null) {
+        if (showPreview) {
+          // save preview progress
+          try {
+            const editorContent = editorContentRef.current;
+            if (editorContent) {
+              const ratio = editorContent.scrollHeight > editorContent.clientHeight ? editorContent.scrollTop / (editorContent.scrollHeight - editorContent.clientHeight) : 0;
+              void window.electronAPI.saveNoteUiState(note.id, { progressPreview: ratio });
+            }
+          } catch {}
+        } else {
+          void saveEditState(note.id);
+        }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Persist scrolling/progress in both preview and edit modes.
+  useEffect(() => {
+    if (!note?.id) return;
+    const id = note.id;
+    let timer: NodeJS.Timeout | null = null;
+    const handler = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const el = editorContentRef.current;
+        if (!el) return;
+        const ratio = el.scrollHeight > el.clientHeight ? el.scrollTop / (el.scrollHeight - el.clientHeight) : 0;
+        if (showPreview) {
+          void window.electronAPI.saveNoteUiState(id, { progressPreview: ratio });
+        } else {
+          void window.electronAPI.saveNoteUiState(id, { progressEdit: ratio, cursorPos: textareaRef.current?.selectionStart ?? null, scrollTop: el.scrollTop });
+        }
+      }, 200);
+    };
+
+    const el = editorContentRef.current;
+    if (el) {
+      el.addEventListener('scroll', handler);
+    }
+    return () => {
+      if (el) el.removeEventListener('scroll', handler);
+      if (timer) clearTimeout(timer);
+    };
+  }, [showPreview, note?.id]);
 
   if (!note) {
     return (
