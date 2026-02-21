@@ -1,4 +1,6 @@
 import { app, BrowserWindow, ipcMain, session, shell, Menu } from 'electron';
+import * as path from 'path';
+import * as fs from 'fs';
 import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote,
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
@@ -75,6 +77,10 @@ function shouldOpenExternally(urlStr: string, internalHosts: Set<string>): boole
 const createWindow = (): void => {
   console.log('[main] createWindow() - start');
   try {
+    // pick best dev icon per-platform (Windows prefers .ico for taskbar)
+    const devIconFile = process.platform === 'win32' ? path.join(__dirname, '..', 'assets', 'icon.ico') : path.join(__dirname, '..', 'assets', 'icon.png');
+    try { console.log('[main] using dev icon:', devIconFile, 'exists=', fs.existsSync(devIconFile)); } catch (_) {}
+
     mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
@@ -86,6 +92,8 @@ const createWindow = (): void => {
         nodeIntegration: false,
         spellcheck: true,
       },
+      // Use platform-specific icon during development.
+      icon: devIconFile,
       show: false,
       autoHideMenuBar: true,
     });

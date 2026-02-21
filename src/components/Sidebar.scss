@@ -41,6 +41,11 @@
   @extend .panel;
   border-radius: 0 var(--border-radius-regular) var(--border-radius-regular) 0;
   border-left:none;
+  /* Watermark logo at bottom center of the scrollable content area */
+  background-image: url('/assets/logo.png');
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: auto;
 }
 
 .notes-list {

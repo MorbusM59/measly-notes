@@ -14,6 +14,8 @@ import { rendererConfig } from './webpack.renderer.config';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // icon base path (packagers will look for .ico / .icns / png variants)
+    icon: 'assets/icon',
   },
   rebuildConfig: {},
   makers: [
