@@ -475,7 +475,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="note-date">
               {new Date(result.note.updatedAt).toLocaleDateString()}
               {result.note.lastEdited ? (
-                <span className="note-edited"> (edited: {formatLastEdited(result.note.lastEdited)})</span>
+                <span className="note-edited">[{formatLastEdited(result.note.lastEdited)}]</span>
               ) : null}
             </div>
           </div>
@@ -501,7 +501,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="note-date">
                   {new Date(note.updatedAt).toLocaleDateString()}
                   {note.lastEdited ? (
-                    <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span>
+                    <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span>
                   ) : null}
                 </div>
               </div>
@@ -605,7 +605,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="note-title">{note.title}</div>
                                 <div className="note-date">
                                   {new Date(note.updatedAt).toLocaleDateString()}
-                                  {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                                  {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                                 </div>
                               </div>
                               <button
@@ -633,7 +633,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     <div className="note-title">{note.title}</div>
                                     <div className="note-date">
                                       {new Date(note.updatedAt).toLocaleDateString()}
-                                      {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                                      {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                                     </div>
                                   </div>
                                   <button
@@ -665,7 +665,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <div className="note-title">{note.title}</div>
                       <div className="note-date">
                         {new Date(note.updatedAt).toLocaleDateString()}
-                        {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                        {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                       </div>
                     </div>
                     <button
@@ -702,7 +702,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <div className="note-title">{note.title}</div>
                   <div className="note-date">
                     {new Date(note.updatedAt).toLocaleDateString()}
-                    {note.lastEdited ? <span className="note-edited"> (edited: {formatLastEdited(note.lastEdited)})</span> : null}
+                    {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                   </div>
                 </div>
                 <button

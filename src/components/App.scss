@@ -126,3 +126,52 @@
     display: none;
   }
 }
+
+/* Minimal layout constraints — append only (do not replace file) */
+
+/* enforce minimum app size so columns won't wrap under sidebar */
+.app-grid {
+  min-width: 790px;
+  min-height: 550px;
+  overflow: auto; /* allow scrolling rather than reflowing */
+}
+
+/* ensure grid children can shrink without forcing overflow */
+.app-grid > * {
+  min-width: 0;
+}
+
+/* sidebar minimum */
+.sidebar {
+  min-width: 216px;
+}
+
+/* tag input column minimum */
+.tag-input-grid {
+  min-width: 250px;
+}
+
+/* suggested column minimum */
+.suggested-grid {
+  min-width: 100px;
+}
+
+/* utility fixed width */
+.utility-grid {
+  min-width: 150px;
+  max-width: 150px;
+}
+
+/* right divider is fixed/non-draggable (visual only) */
+.divider-right {
+  cursor: default;
+  /* do not change pointer-events if you want it clickable for some reason,
+     but JS should not be binding drag handlers to it */
+}
+
+/* on narrow viewports, allow horizontal scroll instead of wrapping */
+@media (max-width: 790px) {
+  .app-grid {
+    overflow-x: auto;
+  }
+}
