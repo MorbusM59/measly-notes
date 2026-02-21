@@ -571,7 +571,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     gap: '8px',
     height: '44px',
     lineHeight: '44px',
-    padding: '0 8px',
+    padding: '0',
     flexWrap: 'nowrap',   // prevent wrapping to next line
     overflow: 'hidden',   // clip overflow so content is cut off at the edge
   };
