@@ -12,6 +12,13 @@ interface MarkdownEditorProps {
   onTogglePreview: (next: boolean) => void;
 }
 
+type EditState = {
+  selectionStart: number;
+  scrollTop: number;
+};
+
+const EDIT_STATE_KEY_PREFIX = 'md-edit-state-';
+
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview }) => {
   const [content, setContent] = useState('');
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
@@ -27,11 +34,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [editorSpacing, setEditorSpacing] = useState<string>('cozy');
 
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorContentRef = useRef<HTMLDivElement | null>(null);
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef('');
   const lastSavedTitleRef = useRef('');
   const currentNoteIdRef = useRef<number | null>(null);
+
+  // Debounce for selection save
+  const selectionSaveTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Editor style options — Syne and Red Hat.
   const editorStyleOptions: { key: string; label: string; family: string }[] = [
@@ -50,6 +61,35 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     return first.replace(/^['"]|['"]$/g, '') || null;
   };
 
+  // Helpers to persist per-note edit state
+  const getEditStateKey = (noteId: number) => `${EDIT_STATE_KEY_PREFIX}${noteId}`;
+
+  const saveEditState = (noteId: number) => {
+    const ta = textareaRef.current;
+    const editorContent = editorContentRef.current;
+    if (!ta || !editorContent) return;
+    const state: EditState = {
+      selectionStart: ta.selectionStart,
+      scrollTop: editorContent.scrollTop,
+    };
+    try {
+      localStorage.setItem(getEditStateKey(noteId), JSON.stringify(state));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const loadEditState = (noteId: number): EditState | null => {
+    try {
+      const raw = localStorage.getItem(getEditStateKey(noteId));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as EditState;
+      return parsed;
+    } catch {
+      return null;
+    }
+  };
+
   // When entering view mode, clear any pending autosave so nothing runs during preview.
   useEffect(() => {
     if (showPreview) {
@@ -57,7 +97,25 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         clearTimeout(autoSaveTimeoutRef.current);
         autoSaveTimeoutRef.current = null;
       }
+      // Save edit state when we enter preview so it can be restored when returning to edit.
+      if (note?.id != null) saveEditState(note.id);
+    } else {
+      // when entering edit mode, attempt to restore scroll/selection (handled in note load or note-change flow)
+      setTimeout(() => {
+        const ta = textareaRef.current;
+        const editorContent = editorContentRef.current;
+        if (!ta || !editorContent || !note) return;
+        const st = loadEditState(note.id);
+        if (st) {
+          ta.selectionStart = ta.selectionEnd = st.selectionStart;
+          editorContent.scrollTop = st.scrollTop;
+        }
+        // ensure proper sizing and visibility
+        autosizeTextarea(ta);
+        ensureCaretVisible();
+      }, 0);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPreview]);
 
   // Load note content when note changes
@@ -78,13 +136,27 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         if (!showPreview) {
           setTimeout(() => {
             const textarea = textareaRef.current;
+            const editorContent = editorContentRef.current;
             if (textarea) {
-              textarea.focus();
-              if (noteContent === '# ') {
-                textarea.setSelectionRange(2, 2);
+              // restore edit state if available
+              const st = loadEditState(note.id);
+              if (st) {
+                textarea.focus();
+                textarea.setSelectionRange(st.selectionStart, st.selectionStart);
+                if (editorContent) {
+                  editorContent.scrollTop = st.scrollTop;
+                }
               } else {
-                textarea.setSelectionRange(noteContent.length, noteContent.length);
+                // default behavior: put cursor at end or after '# '
+                textarea.focus();
+                if (noteContent === '# ') {
+                  textarea.setSelectionRange(2, 2);
+                } else {
+                  textarea.setSelectionRange((noteContent || '').length, (noteContent || '').length);
+                }
               }
+              autosizeTextarea(textarea);
+              ensureCaretVisible();
             }
           }, 10);
         }
@@ -97,9 +169,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       lastSavedTitleRef.current = '';
       currentNoteIdRef.current = null;
     }
-  }, [note, showPreview]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note]);
 
-  // If switched to edit mode, focus textarea
+  // If switched to edit mode, focus textarea (restore handled elsewhere)
   useEffect(() => {
     if (!showPreview) {
       setTimeout(() => textareaRef.current?.focus(), 10);
@@ -171,13 +244,92 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Autosize helper: set textarea height to its content height.
   const autosizeTextarea = useCallback((ta?: HTMLTextAreaElement | null) => {
     const el = ta ?? textareaRef.current;
+    const editorContent = editorContentRef.current;
     if (!el) return;
+    // preserve scrollTop of the scrolling container so we don't jump
+    const prevScrollTop = editorContent ? editorContent.scrollTop : 0;
+
     // Reset so scrollHeight is measured correctly
     el.style.height = 'auto';
     // Add a small fudge to avoid cutting off last line on some browsers
     const newHeight = el.scrollHeight + 2;
     el.style.height = `${newHeight}px`;
+
+    // restore container scrollTop to previous value (keeps view stable)
+    if (editorContent) {
+      const maxScroll = editorContent.scrollHeight - editorContent.clientHeight;
+      editorContent.scrollTop = Math.max(0, Math.min(prevScrollTop, maxScroll));
+    }
   }, []);
+
+  // Compute approximate caret Y (relative to editorContent's scrollTop)
+  const getCaretApproxY = (): number | null => {
+    const ta = textareaRef.current;
+    const editorContent = editorContentRef.current;
+    if (!ta || !editorContent) return null;
+
+    // Determine caret line number
+    const pos = ta.selectionStart ?? 0;
+    const textUpToCursor = content.substring(0, pos);
+    const lineIndex = textUpToCursor.split('\n').length - 1;
+
+    const cs = window.getComputedStyle(ta);
+    // get line-height; fallback to font-size * 1.2
+    let lineHeight = parseFloat(cs.lineHeight || '0');
+    if (!lineHeight || Number.isNaN(lineHeight)) {
+      const fontSize = parseFloat(cs.fontSize || '16');
+      lineHeight = fontSize * 1.2;
+    }
+
+    // compute padding-top of textarea
+    const paddingTop = parseFloat(cs.paddingTop || '0');
+
+    // textarea offset relative to editorContent
+    let textareaOffsetTop = 0;
+    let node: HTMLElement | null = ta;
+    while (node && node !== editorContent && node.offsetParent) {
+      textareaOffsetTop += node.offsetTop;
+      node = node.offsetParent as HTMLElement | null;
+    }
+    // caret Y within editorContent coordinate space
+    const caretY = textareaOffsetTop + paddingTop + lineIndex * lineHeight;
+    return caretY;
+  };
+
+  // Ensure caret is visible in editorContent. Only scroll if caret is below visible area.
+  const ensureCaretVisible = () => {
+    const editorContent = editorContentRef.current;
+    if (!editorContent) return;
+    const caretY = getCaretApproxY();
+    if (caretY === null) return;
+
+    const visibleTop = editorContent.scrollTop;
+    const visibleBottom = visibleTop + editorContent.clientHeight;
+    // estimate single line height (approx)
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const cs = window.getComputedStyle(ta);
+    let lineHeight = parseFloat(cs.lineHeight || '0');
+    if (!lineHeight || Number.isNaN(lineHeight)) {
+      const fontSize = parseFloat(cs.fontSize || '16');
+      lineHeight = fontSize * 1.2;
+    }
+
+    // If caret is above visible top -> scroll up to keep it visible at top (rare)
+    if (caretY < visibleTop) {
+      editorContent.scrollTop = Math.max(0, caretY - 8);
+      return;
+    }
+
+    // If caret is within visible area -> do nothing (we want to keep view unchanged)
+    if (caretY >= visibleTop && caretY < visibleBottom) {
+      return;
+    }
+
+    // If caret is below visible area, scroll so caret is one line above bottom
+    const target = Math.max(0, Math.round(caretY - (editorContent.clientHeight - Math.round(lineHeight) - 8)));
+    editorContent.scrollTop = target;
+  };
 
   // Run autosize when content changes or when switching to edit mode.
   useEffect(() => {
@@ -186,17 +338,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     if (!showPreview) {
       autosizeTextarea(ta);
+      // ensure caret visible only if needed
+      ensureCaretVisible();
     } else {
       // Clearing height when in preview so textarea doesn't force layout
       ta.style.height = '';
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, showPreview, autosizeTextarea]);
 
   // Attach an input listener to autosize while the user types/pastes.
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    const onInput = () => autosizeTextarea(ta);
+    const onInput = () => {
+      autosizeTextarea(ta);
+      ensureCaretVisible();
+    };
     ta.addEventListener('input', onInput);
     // Ensure initial sizing
     autosizeTextarea(ta);
@@ -382,6 +540,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(start + text.length, start + text.length);
+      ensureCaretVisible();
     }, 0);
   };
 
@@ -517,6 +676,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const handleSelectionChange = () => {
       checkCursorPosition();
       checkFormatting();
+
+      // debounce save edit state for current note
+      if (note?.id != null) {
+        if (selectionSaveTimeout.current) clearTimeout(selectionSaveTimeout.current);
+        selectionSaveTimeout.current = setTimeout(() => {
+          saveEditState(note.id as number);
+        }, 250);
+      }
     };
     textarea.addEventListener('click', handleSelectionChange);
     textarea.addEventListener('keyup', handleSelectionChange);
@@ -525,8 +692,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       textarea.removeEventListener('click', handleSelectionChange);
       textarea.removeEventListener('keyup', handleSelectionChange);
       textarea.removeEventListener('select', handleSelectionChange);
+      if (selectionSaveTimeout.current) {
+        clearTimeout(selectionSaveTimeout.current);
+        selectionSaveTimeout.current = null;
+      }
     };
-  }, [checkCursorPosition, checkFormatting]);
+  }, [checkCursorPosition, checkFormatting, note]);
 
   // trigger auto-save when moving off first line
   useEffect(() => {
@@ -536,7 +707,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         void autoSave();
       }, 1000);
     }
-  }, [isOnFirstLine, note, content, autoSave]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnFirstLine, note, content]);
 
   // reflow after fonts arrive (helps initial wrapping)
   useEffect(() => {
@@ -562,6 +734,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const t = setTimeout(reflowTextarea, 100);
       return () => clearTimeout(t);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorStyle, autosizeTextarea]);
 
   // toolbar layout styles: two flex areas (left/right) and fixed toolbar height/line-height
@@ -624,7 +797,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   useEffect(() => {
     return () => {
       if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+      if (note?.id != null) saveEditState(note.id);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!note) {
@@ -761,11 +936,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             </>
           )}
         </div>
-
-        {isOnFirstLine && <span className="auto-save-status">Auto-save paused (editing title)</span>}
       </div>
 
-      <div className="editor-content">
+      <div className="editor-content" ref={editorContentRef}>
         {!showPreview ? (
           <textarea
             ref={textareaRef}
