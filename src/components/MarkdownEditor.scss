@@ -118,18 +118,21 @@
 
 .style-selector select {
   padding: 6px 12px;
-  border: 1px solid #ddd;
-  background: white;
-  border-radius: 4px;
   font-size: 14px;
+  width: 100%;
+  border: 1px solid var(--color-border-highlight);
+  border-radius: var(--border-radius-regular);
+  box-shadow: 
+    inset 0 0 2px rgba(0,0,0,0.5),
+    inset 0 0 6px rgba(0,0,0,0.2),
+    0 0 2px var(--color-shadow-white);
+  font-size: 14px;
+  outline: none;
+  background: var(--color-input-backdrop);
   transition: all 0.2s;
 }
-.style-selector select:hover {
-  border-color: #bbb;
-}
 .style-selector select:focus {
-  outline: none;
-  border-color: #007bff;
+  border-color: var(--color-border-selected);
 }
 
 .toolbar-btn {

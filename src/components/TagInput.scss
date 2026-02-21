@@ -36,63 +36,29 @@
 /* Tags display area (below input) */
 .tags-display {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
+  flex-wrap: nowrap;
   min-height: 32px;
-  padding-top: 4px;
-}
-
-/* Tag pill styles (kept consistent with Shared) */
-.tag-pill {
-  display: inline-flex;
-  align-items: center;
+  max-height: 32px;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 13px;
-  user-select: none;
-  transition: all 0.18s ease;
-  white-space: nowrap;
+  align-items: center;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .tag-pill.active {
   background: var(--color-tag-active-bg);
   color: var(--color-tag-active-text);
   border: 1px solid var(--color-tag-active-border);
+  flex: 0 0 auto;
+}
+
+/* Visual for an armed tag */
+.tag-pill.active.armed {
+  outline: 2px solid var(--color-tag-remove-border, #d9534f);
+  background: var(--color-tag-remove-bg, #feecec);
+  color: var(--color-tag-remove-text, #b71c1c);
 }
 
 .tag-pill.active:hover {
   transform: translateY(-1px);
   box-shadow: 0 1px 4px rgba(25, 118, 210, 0.12);
-}
-
-.tag-pill.suggested {
-  background: var(--color-tag-suggested-bg);
-  color: var(--color-tag-suggested-text);
-  border: 1px solid var(--color-tag-suggested-border);
-  padding: 4px 8px;
-}
-
-.tag-pill.suggested:hover {
-  background: #e8e8e8;
-  border-color: #bbb;
-}
-
-.tag-pill.suggested.placeholder {
-  opacity: 0.95;
-  border-style: dashed;
-}
-
-/* Responsive: keep input and tags usable on small screens */
-@media (max-width: 720px) {
-  .tag-input-section {
-    gap: 6px;
-  }
-
-  .tags-display {
-    gap: 6px;
-  }
 }

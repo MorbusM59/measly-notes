@@ -148,3 +148,16 @@ h1, h2, h3, h4, h5, h6 {
   gap: 8px;
 }
 
+/* Tag pill styles (kept consistent with Shared) */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  user-select: none;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
