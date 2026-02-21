@@ -33,11 +33,20 @@
   box-sizing: border-box;
 }
 
+.suggested-panel {
+  max-width: 100%;
+}
+
+.suggested-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* Tags display area (below input) */
 .tags-display {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
   align-items: center;
   min-height: 32px;
   padding-top: 4px;
@@ -47,7 +56,6 @@
 .tag-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   padding: 4px 10px;
   border-radius: 12px;
   font-size: 13px;

@@ -13,21 +13,13 @@
 
 .search-box {
   @extend .input-bar;
-  margin: 0 0 0 4px;
+  border-bottom-left-radius: 0;
+  border-left:none;
+  margin: 0;
 }
 
 .search-box input {
   @extend .input-base;
-}
-
-.date-filter {
-  @extend .panel;
-  padding: 4px;
-  border-width: 1px;
-  border-style: solid solid hidden solid;
-  border-color: #FFFFFF22;
-  border-radius: var(--border-radius-regular) var(--border-radius-regular) 0 0;
-  margin: 2px 0 2px 4px;
 }
 
 .view-toggle {
@@ -44,9 +36,11 @@
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
-  margin: 2px 0 2px 4px;
-  padding: 08px;
+  margin: 0;
+  padding: 8px;
   @extend .panel;
+  border-radius: 0 var(--border-radius-regular) var(--border-radius-regular) 0;
+  border-left:none;
 }
 
 .notes-list {

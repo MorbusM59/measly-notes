@@ -44,8 +44,7 @@
 /* Panels & Containers */
 .panel {
   background: var(--color-background-light);
-  box-shadow: inset 0 0 3px var(--color-panel-shadow),
-              0 0 8px rgba(0,15,30,0.1);
+  box-shadow: inset 0 0 3px var(--color-panel-shadow);
   border-radius: var(--border-radius-regular);
   border: 1px solid var(--color-panel-border);
 }

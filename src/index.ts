@@ -78,6 +78,9 @@ const createWindow = (): void => {
     mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
+      // Enforce minimum size so the renderer never can be smaller than app layout minima
+      minWidth: 790,
+      minHeight: 550,
       webPreferences: {
         preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
         contextIsolation: true,

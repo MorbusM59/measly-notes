@@ -22,7 +22,6 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #F5F3F2;
 }
 
 .markdown-editor.empty {
@@ -35,6 +34,7 @@
 .editor-toolbar {
   display: flex;
   align-items: center;
+  margin: 0 4px;
   padding: 0;
   height: 44px;
   min-height: 44px;
@@ -200,14 +200,14 @@
   min-height: 0;
   min-width: 0;
   background: var(--color-background-light);
-  box-shadow: inset 0 0 3px rgba(20,0,0,0.4),
-              0 0 8px rgba(0,15,30,0.1);
+  box-shadow: inset 0 0 3px rgba(20,0,0,0.4);
   border-width: 1px;
   border-color: #FFFFFF33;
-  border-style: solid solid hidden solid;
-  border-radius: 6px 6px 0 0;
+  border-style: solid hidden hidden solid;
+  border-radius: var(--border-radius-regular) 0 0 0;
   box-sizing: border-box;
   padding: 0;
+  margin: 0 0 0 4px;
   text-shadow: 0 -1px 0px #55000022, 0 1px 0px #ffffff;
 }
 

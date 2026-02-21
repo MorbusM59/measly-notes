@@ -24,10 +24,10 @@ export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'date' | 'category'>('date');
 
   // Draggable / layout state and constraints
-  const SIDEBAR_MIN = 216;
+  const SIDEBAR_MIN = 220;
   const TAG_MIN = 250;
   const TAG_DEFAULT = 350;
-  const SUGGESTED_MIN = 100;
+  const SUGGESTED_MIN = 150;
   const UTILITY_FIXED = 150;
   const DIVIDER_W = 8;
   const APP_MIN_WIDTH = 790;
@@ -50,6 +50,10 @@ export const App: React.FC = () => {
     const saved = localStorage.getItem('tag-suggestions-width');
     return saved ? parseInt(saved, 10) : 240;
   });
+
+  // Keep a ref of the last user-set ratio (tag / (tag + suggested)).
+  // This is used during window resize to preserve the user's relative sizes.
+  const ratioRef = useRef<number>(tagWidth / Math.max(1, tagWidth + suggestedWidth));
 
   // Only left divider (between tag and suggested) is draggable
   const [isDraggingLeftDivider, setIsDraggingLeftDivider] = useState(false);
@@ -170,57 +174,40 @@ export const App: React.FC = () => {
   // Utilities
   const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
-  // Recalculate tag/suggested widths to preserve ratio when availableMain changes
-  const adjustTagAndSuggestedForMain = (availableMain: number, prevTag: number, prevSug: number) => {
-    // Ensure availableMain >= TAG_MIN + SUGGESTED_MIN else we'll end up with small values
-    const minSum = TAG_MIN + SUGGESTED_MIN;
-    if (availableMain <= minSum) {
-      // Just give mins (resulting layout may force scroll)
-      return { t: TAG_MIN, s: SUGGESTED_MIN };
-    }
-    const totalPrev = prevTag + prevSug;
-    let t = Math.round((prevTag / totalPrev) * availableMain);
-    let s = availableMain - t;
-
-    // enforce minima
-    if (t < TAG_MIN) {
-      t = TAG_MIN;
-      s = availableMain - t;
-      if (s < SUGGESTED_MIN) {
-        s = SUGGESTED_MIN;
-        t = availableMain - s;
-      }
-    }
-    if (s < SUGGESTED_MIN) {
-      s = SUGGESTED_MIN;
-      t = availableMain - s;
-      if (t < TAG_MIN) {
-        t = TAG_MIN;
-        s = availableMain - t;
-      }
-    }
-
-    return { t, s };
-  };
-
-  // Sidebar dragging: update sidebarWidth and proportionally resize tag/suggested
+  // When user drags the sidebar, we proportionally adjust tag/suggested to keep ratioRef.
   useEffect(() => {
     if (!isDraggingSidebar) return;
 
     const handleMove = (e: MouseEvent) => {
       if (!appRef.current) return;
       const rect = appRef.current.getBoundingClientRect();
-      const newSidebar = clamp(Math.round(e.clientX - rect.left), SIDEBAR_MIN, Math.max(SIDEBAR_MIN, rect.width - (TAG_MIN + SUGGESTED_MIN + UTILITY_FIXED + DIVIDER_W * 3)));
-      const prevMain = rect.width - sidebarWidth - (DIVIDER_W * 3) - UTILITY_FIXED;
-      const newMain = rect.width - newSidebar - (DIVIDER_W * 3) - UTILITY_FIXED;
-      if (prevMain <= 0 || newMain <= 0) {
+      // clamp sidebar between minimum and something reasonable
+      const maxSidebar = Math.max(SIDEBAR_MIN, rect.width - (TAG_MIN + SUGGESTED_MIN + UTILITY_FIXED + DIVIDER_W * 3));
+      const newSidebar = clamp(Math.round(e.clientX - rect.left), SIDEBAR_MIN, maxSidebar);
+
+      const availableMain = rect.width - newSidebar - (DIVIDER_W * 3) - UTILITY_FIXED;
+      if (availableMain <= 0) {
         setSidebarWidth(newSidebar);
         return;
       }
-      const adjusted = adjustTagAndSuggestedForMain(newMain, tagWidth, suggestedWidth);
+
+      // Preserve the last user ratio (ratioRef); compute new widths from it but enforce minima
+      const minSum = TAG_MIN + SUGGESTED_MIN;
+      let newTag = Math.round(ratioRef.current * availableMain);
+      let newSug = availableMain - newTag;
+
+      if (newTag < TAG_MIN) {
+        newTag = TAG_MIN;
+        newSug = Math.max(SUGGESTED_MIN, availableMain - newTag);
+      }
+      if (newSug < SUGGESTED_MIN) {
+        newSug = SUGGESTED_MIN;
+        newTag = Math.max(TAG_MIN, availableMain - newSug);
+      }
+
       setSidebarWidth(newSidebar);
-      setTagWidth(adjusted.t);
-      setSuggestedWidth(adjusted.s);
+      setTagWidth(newTag);
+      setSuggestedWidth(newSug);
     };
 
     const handleUp = () => {
@@ -239,29 +226,34 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDraggingSidebar, sidebarWidth, tagWidth, suggestedWidth]);
 
-  // Left divider drag (between tag and suggested)
+  // Left divider drag (between tag and suggested) — update ratioRef on drag end.
   useEffect(() => {
     if (!isDraggingLeftDivider) return;
 
     const handleMove = (e: MouseEvent) => {
       if (!appRef.current) return;
       const rect = appRef.current.getBoundingClientRect();
-      // mainLeft = left edge of tag column (after sidebar + d-sidebar)
       const mainLeft = rect.left + sidebarWidth + DIVIDER_W;
-      const mainRight = rect.right - (UTILITY_FIXED + DIVIDER_W * 2); // reserve right divider + utility
+      const mainRight = rect.right - (UTILITY_FIXED + DIVIDER_W * 2);
       const availableMain = Math.max(0, Math.round(mainRight - mainLeft));
       let newTag = clamp(Math.round(e.clientX - mainLeft), TAG_MIN, Math.max(TAG_MIN, availableMain - SUGGESTED_MIN));
-      let newSug = availableMain - newTag;
-      if (newSug < SUGGESTED_MIN) {
-        newSug = SUGGESTED_MIN;
-        newTag = availableMain - newSug;
+      let newSug = Math.max(SUGGESTED_MIN, availableMain - newTag);
+
+      // If availableMain smaller than minima, keep minima as best-effort.
+      if (availableMain < TAG_MIN + SUGGESTED_MIN) {
+        // distribute with priorities: keep tag at least TAG_MIN
+        newTag = clamp(newTag, TAG_MIN, Math.max(TAG_MIN, availableMain - SUGGESTED_MIN));
+        newSug = availableMain - newTag;
       }
+
       setTagWidth(newTag);
       setSuggestedWidth(newSug);
     };
 
     const handleUp = () => {
       setIsDraggingLeftDivider(false);
+      // update ratioRef to the user's new ratio
+      ratioRef.current = tagWidth / Math.max(1, tagWidth + suggestedWidth);
       localStorage.setItem('tag-input-width', String(tagWidth));
       localStorage.setItem('tag-suggestions-width', String(suggestedWidth));
     };
@@ -275,28 +267,57 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDraggingLeftDivider, sidebarWidth, tagWidth, suggestedWidth]);
 
-  // Window resize: preserve ratio of tag / suggested until minima
+  // Window resize: preserve the last user ratio (ratioRef) and adjust tag/suggested accordingly.
   useEffect(() => {
     const handleResize = () => {
       if (!appRef.current) return;
       const rect = appRef.current.getBoundingClientRect();
-      // Total width available to the two middle columns:
+
+      // compute available width for tag+suggested given current sidebar and fixed utility
       const availableMain = rect.width - sidebarWidth - (DIVIDER_W * 3) - UTILITY_FIXED;
       if (availableMain <= 0) return;
-      const adjusted = adjustTagAndSuggestedForMain(availableMain, tagWidth, suggestedWidth);
-      setTagWidth(adjusted.t);
-      setSuggestedWidth(adjusted.s);
+
+      const minSum = TAG_MIN + SUGGESTED_MIN;
+
+      // If availableMain is large enough, use the stored ratio to compute widths.
+      if (availableMain >= minSum) {
+        let newTag = Math.round(ratioRef.current * availableMain);
+        let newSug = availableMain - newTag;
+
+        // enforce minima
+        if (newTag < TAG_MIN) {
+          newTag = TAG_MIN;
+          newSug = Math.max(SUGGESTED_MIN, availableMain - newTag);
+        }
+        if (newSug < SUGGESTED_MIN) {
+          newSug = SUGGESTED_MIN;
+          newTag = Math.max(TAG_MIN, availableMain - newSug);
+        }
+
+        setTagWidth(newTag);
+        setSuggestedWidth(newSug);
+        return;
+      }
+
+      // If we don't have enough space for minima, fall back to minima distribution:
+      setTagWidth(TAG_MIN);
+      setSuggestedWidth(Math.max(SUGGESTED_MIN, availableMain - TAG_MIN));
     };
 
     window.addEventListener('resize', handleResize);
-    // run once
+    // run once to ensure values consistent on load
     handleResize();
 
     return () => window.removeEventListener('resize', handleResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarWidth]);
 
-  // Enforce app minimum sizes (CSS will cause scroll when below)
+  // Save ratio whenever user updates the widths programmatically (keeps ratioRef reasonably up-to-date)
+  useEffect(() => {
+    ratioRef.current = tagWidth / Math.max(1, tagWidth + suggestedWidth);
+  }, [tagWidth, suggestedWidth]);
+
+  // Grid columns and areas
   const gridTemplateColumns = `${sidebarWidth}px ${DIVIDER_W}px ${tagWidth}px ${DIVIDER_W}px ${suggestedWidth}px ${DIVIDER_W}px ${UTILITY_FIXED}px`;
   const gridTemplateRows = 'auto 1fr';
   const gridTemplateAreas = `
@@ -304,7 +325,6 @@ export const App: React.FC = () => {
     "sidebar d-sidebar viewer  viewer    viewer    viewer    viewer"
   `;
 
-  // the rest of the app behavior stays the same as before; pass refreshTrigger down
   return (
     <div
       className="app app-grid"
