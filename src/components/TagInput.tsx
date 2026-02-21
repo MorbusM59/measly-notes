@@ -9,7 +9,7 @@ interface TagInputProps {
 }
 
 /*
-  TagInput: input on top, active tags below.
+  TagInput: simplified active-tags-only rendering (no lingering "ghost" placeholders).
   Deletion UX: first click arms, second click deletes immediately.
   Moving mouse away cancels the arm.
   refreshTrigger: when parent increments this, component reloads tags.
@@ -18,7 +18,6 @@ interface TagInputProps {
 export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refreshTrigger }) => {
   const [inputValue, setInputValue] = useState('');
   const [noteTags, setNoteTags] = useState<NoteTag[]>([]);
-  const [placeholders, setPlaceholders] = useState<Record<number, Tag>>({});
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   // which index is currently armed for deletion (clicked once)
@@ -32,11 +31,9 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
   useEffect(() => {
     if (note) {
       loadNoteTags();
-      setPlaceholders({});
       setDeleteArmedIndex(null);
     } else {
       setNoteTags([]);
-      setPlaceholders({});
       setDeleteArmedIndex(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -95,7 +92,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
         return;
       }
 
-      setPlaceholders(prev => ({ ...prev, [index]: tag }));
+      // No placeholder/ghost behavior anymore — simply reload active tags
       setDeleteArmedIndex(null);
 
       await loadNoteTags();
@@ -112,35 +109,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
     if (deleteArmedIndex === index) {
       setDeleteArmedIndex(null);
     }
-  };
-
-  const handlePlaceholderClick = async (index: number, tag: Tag) => {
-    if (!note) return;
-    const normalized = normalizeTagName(tag.name);
-    const position = index;
-    await window.electronAPI.addTagToNote(note.id, normalized, position);
-
-    setPlaceholders(prev => {
-      const copy = { ...prev };
-      delete copy[index];
-      return copy;
-    });
-
-    await loadNoteTags();
-
-    if (onTagsChanged) {
-      onTagsChanged();
-    }
-  };
-
-  const handlePlaceholderMouseLeave = async (index: number) => {
-    setPlaceholders(prev => {
-      const copy = { ...prev };
-      delete copy[index];
-      return copy;
-    });
-
-    await loadNoteTags();
   };
 
   const handleDragStart = (index: number) => {
@@ -166,13 +134,6 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
     if (onTagsChanged) onTagsChanged();
   };
 
-  const placeholderIndices = Object.keys(placeholders).map(k => parseInt(k, 10));
-  const slotsCount = Math.max(
-    noteTags.length + placeholderIndices.length,
-    Math.max(...(placeholderIndices.length ? placeholderIndices : [-1]), -1) + 1,
-    noteTags.length
-  );
-
   if (!note) {
     return null;
   }
@@ -196,42 +157,24 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
         </div>
 
         <div className="tags-display" aria-live="polite">
-          {Array.from({ length: slotsCount }).map((_, slotIdx) => {
-            if (placeholders[slotIdx]) {
-              const tag = placeholders[slotIdx];
-              return (
-                <div
-                  key={`ph-${slotIdx}-${tag.id}`}
-                  className="tag-pill suggested placeholder"
-                  onClick={() => handlePlaceholderClick(slotIdx, tag)}
-                  onMouseLeave={() => handlePlaceholderMouseLeave(slotIdx)}
-                >
-                  {tag.name}
-                </div>
-              );
-            }
-
-            const noteTag = noteTags[slotIdx];
-            if (noteTag) {
-              const armed = deleteArmedIndex === slotIdx;
-              return (
-                <div
-                  key={noteTag.tagId}
-                  className={`tag-pill active${armed ? ' armed' : ''}`}
-                  draggable
-                  onDragStart={() => handleDragStart(slotIdx)}
-                  onDragOver={(e) => handleDragOver(e)}
-                  onDrop={(e) => handleDrop(e, slotIdx)}
-                  onClick={() => handleActiveTagClick(slotIdx, noteTag.tag as Tag, noteTag.tagId)}
-                  onMouseLeave={() => handleActiveTagMouseLeave(slotIdx)}
-                  title={armed ? 'Click again to delete or move cursor away to cancel' : 'Click to arm deletion'}
-                >
-                  {noteTag.tag?.name}
-                </div>
-              );
-            }
-
-            return null;
+          {noteTags.map((noteTag, slotIdx) => {
+            const tag = noteTag.tag as Tag;
+            const armed = deleteArmedIndex === slotIdx;
+            return (
+              <div
+                key={noteTag.tagId}
+                className={`tag-pill active${armed ? ' armed' : ''}`}
+                draggable
+                onDragStart={() => handleDragStart(slotIdx)}
+                onDragOver={(e) => handleDragOver(e)}
+                onDrop={(e) => handleDrop(e, slotIdx)}
+                onClick={() => handleActiveTagClick(slotIdx, tag, noteTag.tagId)}
+                onMouseLeave={() => handleActiveTagMouseLeave(slotIdx)}
+                title={armed ? 'Click again to delete or move cursor away to cancel' : 'Click to arm deletion'}
+              >
+                {tag?.name}
+              </div>
+            );
           })}
         </div>
       </div>

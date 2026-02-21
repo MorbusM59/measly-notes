@@ -51,28 +51,20 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
   };
 
   return (
-    <aside
-      className="suggested-panel"
-      style={{ width }}
-      aria-label="Suggested tags and options"
-    >
-      <div className="suggested-section">
-        <div className="suggested-tags" aria-hidden={suggestedTags.length === 0}>
-          {suggestedTags.map(tag => (
-            <div
-              key={`s-${tag.id}`}
-              className="tag-pill suggested"
-              onClick={() => handleAddSuggested(tag.name)}
-              title={`Add ${tag.name}`}
-            >
-              {tag.name}
-            </div>
-          ))}
-          {suggestedTags.length === 0 && (
-            <div className="suggested-empty">No suggestions</div>
-          )}
+    <div className="suggested-tags" aria-hidden={suggestedTags.length === 0}>
+      {suggestedTags.map(tag => (
+        <div
+          key={`s-${tag.id}`}
+          className="tag-pill suggested"
+          onClick={() => handleAddSuggested(tag.name)}
+          title={`Add ${tag.name}`}
+        >
+          {tag.name}
         </div>
-      </div>
-    </aside>
+      ))}
+      {suggestedTags.length === 0 && (
+        <div className="suggested-empty">No suggestions</div>
+      )}
+    </div>
   );
 };
