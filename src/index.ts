@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, session, shell, Menu } from 'electron';
 import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote,
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
@@ -78,7 +78,6 @@ const createWindow = (): void => {
     mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
-      // Enforce minimum size so the renderer never can be smaller than app layout minima
       minWidth: 790,
       minHeight: 550,
       webPreferences: {
@@ -88,6 +87,7 @@ const createWindow = (): void => {
         spellcheck: true,
       },
       show: false,
+      autoHideMenuBar: true,
     });
 
     mainWindow.once('ready-to-show', () => {
