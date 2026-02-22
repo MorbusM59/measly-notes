@@ -432,6 +432,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           }
           try {
             await autoSave();
+            // Persist edit UI state (cursor/scroll) while textarea is still mounted.
+            try {
+              if (note?.id != null) await saveEditState(note.id);
+            } catch (err) {
+              // non-fatal
+            }
           } catch (err) {
             // ignore save errors; still signal completion
             console.warn('autoSave during force-save failed', err);
