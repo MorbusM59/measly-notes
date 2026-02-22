@@ -88,6 +88,13 @@ export function createNote(title: string, filePath: string): Note {
   `);
   const result = stmt.run(title, filePath, now, now, now);
 
+  // Ensure freshly-created notes have no persisted cursor/scroll state
+  try {
+    db.prepare('UPDATE notes SET cursorPos = NULL, scrollTop = NULL WHERE id = ?').run(result.lastInsertRowid as number);
+  } catch (err) {
+    // non-fatal - leave as-is if the update fails
+  }
+
   return {
     id: result.lastInsertRowid as number,
     title,
