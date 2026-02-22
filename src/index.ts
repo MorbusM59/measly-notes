@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, session, shell, Menu, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getDataDir } from './main/paths';
@@ -249,6 +249,67 @@ ipcMain.on('force-save-complete', (event, requestId?: string) => {
   clearTimeout(pending.timer);
   pending.resolve(true);
   pendingForceSaves.delete(requestId);
+});
+
+// Allow renderer to show a folder picker for export destination
+ipcMain.handle('select-export-folder', async (event) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined;
+    const res = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
+    if (!res || res.canceled || !res.filePaths || res.filePaths.length === 0) return null;
+    return res.filePaths[0];
+  } catch (err) {
+    console.warn('[main] select-export-folder failed', err);
+    return null;
+  }
+});
+
+// Export a PDF using the sender's webContents (current window). Expects full folder path and desired fileName.
+ipcMain.handle('export-pdf', async (event, folderPath: string, fileName: string) => {
+  try {
+    if (!folderPath || !fileName) return { ok: false, error: 'Invalid arguments' };
+
+    // ensure folder exists
+    try { fs.mkdirSync(folderPath, { recursive: true }); } catch (e) {}
+
+    const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
+    const base = sanitize(fileName);
+    let outPath = path.join(folderPath, base);
+    // if exists, append a colon-free time suffix: " (hh-mm)". If that also exists,
+    // append a version marker like " (hh-mm) v2", " (hh-mm) v3", etc.
+    if (fs.existsSync(outPath)) {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const timeSuffix = ` (${hh}-${mm})`;
+      const ext = path.extname(base);
+      const nameOnly = base.substring(0, base.length - ext.length);
+      let candidate = `${nameOnly}${timeSuffix}${ext}`;
+      let counter = 1;
+      let candidatePath = path.join(folderPath, candidate);
+      while (fs.existsSync(candidatePath)) {
+        counter += 1;
+        candidate = `${nameOnly}${timeSuffix} v${counter}${ext}`;
+        candidatePath = path.join(folderPath, candidate);
+      }
+      outPath = candidatePath;
+    }
+
+    // Use the sender webContents to print to PDF. The renderer is expected to have injected
+    // any print-specific styles (white background, @page margins) before calling this.
+    const pdfOpts: any = {
+      printBackground: true,
+      // request A4; many Electron versions accept pageSize: 'A4'
+      pageSize: 'A4',
+    };
+
+    const data = await event.sender.printToPDF(pdfOpts);
+    fs.writeFileSync(outPath, data);
+    return { ok: true, path: outPath };
+  } catch (err: any) {
+    console.warn('[main] export-pdf failed', err);
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
 });
 
 app.whenReady().then(async () => {

@@ -117,4 +117,7 @@ export interface IElectronAPI {
   // Per-note UI state (progress/cursor) persistence
   saveNoteUiState: (noteId: number, state: { progressPreview?: number | null; progressEdit?: number | null; cursorPos?: number | null; scrollTop?: number | null }) => Promise<void>;
   getNoteUiState: (noteId: number) => Promise<{ progressPreview: number | null; progressEdit: number | null; cursorPos: number | null; scrollTop: number | null }>;
+  // PDF export helpers
+  selectExportFolder: () => Promise<string | null>;
+  exportPdf: (folderPath: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
 }

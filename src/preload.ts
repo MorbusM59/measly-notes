@@ -167,6 +167,21 @@ const electronAPI: IElectronAPI & {
     }
   },
 
+  // Export PDF helpers
+  selectExportFolder: async () => {
+    try {
+      return (await ipcRenderer.invoke('select-export-folder')) as string | null;
+    } catch (err) {
+      return null;
+    }
+  },
+
+  exportPdf: async (folderPath: string, fileName: string) => {
+    assertNonEmptyString(folderPath, 'folderPath');
+    assertNonEmptyString(fileName, 'fileName');
+    return (await ipcRenderer.invoke('export-pdf', folderPath, fileName)) as { ok: boolean; path?: string; error?: string };
+  },
+
   // Force-save flow: request is routed via main (so focused window receives do-force-save),
   // and renderer will respond with forceSaveComplete which main waits for.
   requestForceSave: async () => {

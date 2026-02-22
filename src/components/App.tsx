@@ -409,7 +409,125 @@ export const App: React.FC = () => {
 
       {/* Utility fixed */}
       <div className="utility-grid" style={{ gridArea: 'utility' }}>
-        <div className="utility-area" aria-hidden="true" />
+        <div className="utility-area">
+          <button
+            className="toolbar-btn"
+            title="Export to PDF (Shift+click to choose folder)"
+            onClick={async (e) => {
+              const reselect = e.shiftKey;
+              try {
+                // Determine export folder (persist in localStorage)
+                const saved = localStorage.getItem('pdf-export-folder');
+                let folder = saved && !reselect ? saved : null;
+                if (!folder) {
+                  folder = await (window as any).electronAPI.selectExportFolder();
+                  if (!folder) return; // user cancelled
+                  localStorage.setItem('pdf-export-folder', folder);
+                }
+
+                // Export whatever is currently visible (edit or view) — do not switch modes.
+
+                // compute visible padding from preview container
+                const previewEl = document.querySelector('.markdown-preview') as HTMLElement | null;
+                const container = previewEl ?? document.querySelector('.editor-content') as HTMLElement | null;
+                const style = container ? window.getComputedStyle(container) : null;
+                const padTop = style ? parseFloat(style.paddingTop || '0') : 0;
+                const padRight = style ? parseFloat(style.paddingRight || '0') : 0;
+                const padBottom = style ? parseFloat(style.paddingBottom || '0') : 0;
+                const padLeft = style ? parseFloat(style.paddingLeft || '0') : 0;
+
+                // Create a print-only ghost element that copies `.editor-content` and sits at top-left
+                // so printing produces a tightly-packed PDF without offsets. We inject print CSS
+                // that hides all other content and sizes the ghost to the A4 printable width.
+                const orig = document.querySelector('.editor-content') as HTMLElement | null;
+                if (!orig) return;
+
+                // Remove any existing ghost
+                const existingGhost = document.getElementById('pdf-export-ghost');
+                if (existingGhost) existingGhost.remove();
+
+                const ghost = document.createElement('div');
+                ghost.id = 'pdf-export-ghost';
+                // clone the editor content (deep)
+                const clone = orig.cloneNode(true) as HTMLElement;
+                // remove ids that might conflict
+                clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+                // copy textarea values so the clone reflects current edit content
+                try {
+                  const origTextareas = Array.from(orig.querySelectorAll('textarea')) as HTMLTextAreaElement[];
+                  const cloneTextareas = Array.from(clone.querySelectorAll('textarea')) as HTMLTextAreaElement[];
+                  for (let i = 0; i < origTextareas.length; i++) {
+                    const ota = origTextareas[i];
+                    const cta = cloneTextareas[i];
+                    if (cta && ota) {
+                      cta.value = ota.value;
+                      // also set textContent for some rendering engines
+                      cta.textContent = ota.value;
+                    }
+                  }
+                } catch {}
+                ghost.appendChild(clone);
+                // keep hidden until print
+                ghost.style.display = 'none';
+                document.body.appendChild(ghost);
+
+                // compute CSS that makes only the ghost visible during print and sizes it to A4 printable width
+                const css = `
+                  /* PDF export temporary styles */
+                  @media print {
+                    @page { size: A4; margin: calc(1cm + ${padTop}px) calc(1cm + ${padRight}px) calc(1cm + ${padBottom}px) calc(1cm + ${padLeft}px); }
+                    html, body { margin: 0; background: white !important; }
+                    /* hide everything except our ghost */
+                    body > *:not(#pdf-export-ghost) { display: none !important; }
+                    /* show ghost and its contents */
+                    #pdf-export-ghost { display: block !important; position: relative !important; margin: 0 !important; background: white !important; }
+                    /* width: A4 page width minus left/right page margins (1cm + visible padding each) */
+                    #pdf-export-ghost { width: calc(210mm - ( (1cm + ${padLeft}px) + (1cm + ${padRight}px) )); }
+                    /* remove borders and shadows inside exported content and force white backgrounds */
+                    #pdf-export-ghost, #pdf-export-ghost * { box-shadow: none !important; -webkit-box-shadow: none !important; border: none !important; outline: none !important; background: white !important; }
+                  }
+                `;
+                const styleEl = document.createElement('style');
+                styleEl.id = 'pdf-export-style';
+                styleEl.appendChild(document.createTextNode(css));
+                document.head.appendChild(styleEl);
+
+                // build file name: YY-MM-DD_<title truncated to 50>.pdf
+                const now = new Date();
+                const yy = String(now.getFullYear()).slice(-2);
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const datePart = `${yy}-${mm}-${dd}`;
+                const rawTitle = (selectedNote?.title ?? 'Untitled').trim() || 'Untitled';
+                const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
+                const truncated = sanitize(rawTitle).substring(0, 50);
+                let fileName = `${datePart}_${truncated}.pdf`;
+
+                const res = await (window as any).electronAPI.exportPdf(folder, fileName);
+
+                // clean up temporary styles and ghost element
+                try {
+                  const ex = document.getElementById('pdf-export-style'); if (ex) ex.remove();
+                } catch {}
+                try {
+                  const g = document.getElementById('pdf-export-ghost'); if (g) g.remove();
+                } catch {}
+
+                if (!res || !res.ok) {
+                  console.warn('PDF export failed', res?.error);
+                } else {
+                  console.log('Exported PDF to', res.path);
+                }
+
+                // no temporary preview switching; nothing to restore here
+              } catch (err) {
+                console.warn('Export PDF error', err);
+              }
+            }}
+          >
+            Export PDF
+          </button>
+        </div>
       </div>
 
       {/* Viewer/editor */}
