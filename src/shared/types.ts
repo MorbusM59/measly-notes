@@ -120,4 +120,6 @@ export interface IElectronAPI {
   // PDF export helpers
   selectExportFolder: () => Promise<string | null>;
   exportPdf: (folderPath: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  // Tag management
+  renameTag: (tagId: number, newName: string) => Promise<{ ok: boolean; error?: string }>;
 }

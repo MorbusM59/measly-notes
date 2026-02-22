@@ -181,6 +181,16 @@ const electronAPI: IElectronAPI & {
     assertNonEmptyString(fileName, 'fileName');
     return (await ipcRenderer.invoke('export-pdf', folderPath, fileName)) as { ok: boolean; path?: string; error?: string };
   },
+  // Tag renaming
+  renameTag: async (tagId: number, newName: string) => {
+    assertPositiveInteger(tagId, 'tagId');
+    assertNonEmptyString(newName, 'newName');
+    try {
+      return (await ipcRenderer.invoke('rename-tag', tagId, newName)) as { ok: boolean; error?: string };
+    } catch (err) {
+      return { ok: false, error: (err as any)?.message ?? String(err) };
+    }
+  },
 
   // Force-save flow: request is routed via main (so focused window receives do-force-save),
   // and renderer will respond with forceSaveComplete which main waits for.

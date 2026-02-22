@@ -192,6 +192,31 @@ export function createOrGetTag(name: string): Tag {
   return { id: result.lastInsertRowid as number, name: normalized };
 }
 
+export function renameTag(tagId: number, newName: string): void {
+  const normalized = normalizeTagName(newName);
+  const existingTag = db.prepare('SELECT * FROM tags WHERE id = ?').get(tagId) as Tag | undefined;
+  if (!existingTag) throw new Error('Tag not found');
+
+  const conflict = db.prepare('SELECT * FROM tags WHERE name = ?').get(normalized) as Tag | undefined;
+  if (conflict && conflict.id !== tagId) {
+    // Merge: point note_tags to the conflict.id where no duplicate exists, then remove old tag rows
+    const updateStmt = db.prepare(`
+      UPDATE note_tags
+      SET tagId = ?
+      WHERE tagId = ? AND NOT EXISTS (
+        SELECT 1 FROM note_tags nt2 WHERE nt2.noteId = note_tags.noteId AND nt2.tagId = ?
+      )
+    `);
+    updateStmt.run(conflict.id, tagId, conflict.id);
+    // remove any remaining old tag references
+    db.prepare('DELETE FROM note_tags WHERE tagId = ?').run(tagId);
+    // remove the old tag row
+    db.prepare('DELETE FROM tags WHERE id = ?').run(tagId);
+  } else {
+    db.prepare('UPDATE tags SET name = ? WHERE id = ?').run(normalized, tagId);
+  }
+}
+
 export function addTagToNote(noteId: number, tagName: string, position: number): NoteTag {
   const tag = createOrGetTag(tagName);
   db.prepare('DELETE FROM note_tags WHERE noteId = ? AND tagId = ?').run(noteId, tag.id);
@@ -288,7 +313,7 @@ function buildFtsMatchExpression(query: string): string {
       for (const t of toks) phraseTokens.push(`${t}*`);
     }
   }
-  let stripped = query.replace(phraseRegex, ' ');
+  const stripped = query.replace(phraseRegex, ' ');
   const tokens = stripped.split(/\s+/).map(t => t.trim()).filter(Boolean);
   const tokenParts: string[] = [];
   for (const raw of tokens) {
@@ -314,7 +339,7 @@ export async function searchNotes(query: string): Promise<SearchResult[]> {
     if (phrase) quotedPhrases.push(phrase);
   }
 
-  let stripped = trimmed.replace(phraseRegex, ' ');
+  const stripped = trimmed.replace(phraseRegex, ' ');
   const tokens = stripped.split(/\s+/).map(t => t.trim()).filter(Boolean);
   const tokenPatterns = tokens
     .map(t => t.replace(/[^A-Za-z0-9_-]+/g, ''))
@@ -549,7 +574,7 @@ export async function searchNotes(query: string): Promise<SearchResult[]> {
         const phrase = pm2[1].trim();
         if (phrase) phrasesFallback.push(phrase);
       }
-      let stripped2 = trimmed.replace(phraseRegexFallback, ' ');
+      const stripped2 = trimmed.replace(phraseRegexFallback, ' ');
       const tokensFallback = stripped2.split(/\s+/).map(t => t.trim()).filter(Boolean)
         .map(t => t.replace(/[^A-Za-z0-9_-]+/g, '').toLowerCase())
         .filter(Boolean);

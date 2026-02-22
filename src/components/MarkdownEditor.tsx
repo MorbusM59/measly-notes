@@ -74,7 +74,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     };
     try {
       // persist to DB via preload API (best-effort)
-      try { await window.electronAPI.saveNoteUiState(noteId, { cursorPos: state.selectionStart, scrollTop: state.scrollTop, progressEdit: (editorContent.scrollHeight > editorContent.clientHeight ? editorContent.scrollTop / (editorContent.scrollHeight - editorContent.clientHeight) : 0) }); } catch {}
+      try { await window.electronAPI.saveNoteUiState(noteId, { cursorPos: state.selectionStart, scrollTop: state.scrollTop, progressEdit: (editorContent.scrollHeight > editorContent.clientHeight ? editorContent.scrollTop / (editorContent.scrollHeight - editorContent.clientHeight) : 0) }); } catch (err) { console.warn('saveNoteUiState failed', err); }
     } catch {
       // ignore
     }
@@ -93,7 +93,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         if (st && (st.cursorPos != null || st.scrollTop != null)) {
           return { selectionStart: (st.cursorPos ?? 0), scrollTop: (st.scrollTop ?? 0) };
         }
-      } catch {}
+      } catch (err) { console.warn('loadNote failed to provide content', err); }
 
       const raw = localStorage.getItem(getEditStateKey(noteId));
       if (!raw) return null;
@@ -248,7 +248,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     try {
       if ((document as any).fonts && typeof (document as any).fonts.load === 'function') {
-        void (document as any).fonts.load(`12px "${primary}"`).catch(() => {});
+        void (document as any).fonts.load(`12px "${primary}"`).catch((err: any) => { console.warn('fonts.load failed', err); });
       }
     } catch (err) {
       // ignore
@@ -436,15 +436,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             try {
               if (note?.id != null) await saveEditState(note.id);
             } catch (err) {
-              // non-fatal
+              console.warn('saveEditState during force-save failed', err);
             }
           } catch (err) {
             // ignore save errors; still signal completion
             console.warn('autoSave during force-save failed', err);
-          } finally {
+            } finally {
             try {
               api.forceSaveComplete?.(requestId);
-            } catch (_) {}
+            } catch (err) { console.warn('forceSaveComplete notification failed', err); }
           }
         });
       }
@@ -452,7 +452,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       console.warn('Failed to register onForceSave:', err);
     }
     return () => {
-      try { unsub?.unsubscribe(); } catch {}
+      try { unsub?.unsubscribe(); } catch (err) { console.warn('failed to unsubscribe editor listeners', err); }
     };
   }, [autoSave, note, content]);
 
@@ -935,7 +935,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               const ratio = editorContent.scrollHeight > editorContent.clientHeight ? editorContent.scrollTop / (editorContent.scrollHeight - editorContent.clientHeight) : 0;
               void window.electronAPI.saveNoteUiState(note.id, { progressPreview: ratio });
             }
-          } catch {}
+          } catch (err) { console.warn('failed to restore selection after load', err); }
         } else {
           void saveEditState(note.id);
         }
@@ -1029,7 +1029,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               <span className="toolbar-divider">|</span>
               <button className={`toolbar-btn-icon ${activeFormats.has('bullet') ? 'active' : ''}`} onClick={() => prependToLines('- ')} title="Bulleted List">≡</button>
               <button className={`toolbar-btn-icon ${activeFormats.has('number') ? 'active' : ''}`} onClick={() => prependToLines('', true)} title="Numbered List">#</button>
-              <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">"</button>
+              <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">&quot;</button>
               <button className="toolbar-btn-icon" onClick={() => insertAtCursor('\n---\n')} title="Horizontal Rule">—</button>
             </div>
           )}

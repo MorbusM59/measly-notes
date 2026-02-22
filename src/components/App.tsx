@@ -227,7 +227,7 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDraggingSidebar, sidebarWidth, tagWidth, suggestedWidth]);
 
-  // Left divider drag (between tag and suggested) — update ratioRef on drag end.
+  // Left divider drag (between tag and suggested) ï¿½ update ratioRef on drag end.
   useEffect(() => {
     if (!isDraggingLeftDivider) return;
 
@@ -425,7 +425,7 @@ export const App: React.FC = () => {
                   localStorage.setItem('pdf-export-folder', folder);
                 }
 
-                // Export whatever is currently visible (edit or view) — do not switch modes.
+                // Export whatever is currently visible (edit or view) ï¿½ do not switch modes.
 
                 // compute visible padding from the element we will export (preview or textarea)
                 const previewEl = document.querySelector('.markdown-preview') as HTMLElement | null;
@@ -464,7 +464,7 @@ export const App: React.FC = () => {
                     const fontFamily = computed.fontFamily || 'monospace';
                     const fontSize = computed.fontSize || '16px';
                     // compute integer pixel line-height to avoid subpixel rounding issues
-                    let lineHeight = computed.lineHeight;
+                    const lineHeight = computed.lineHeight;
                     let lhPx = 0;
                     if (lineHeight && lineHeight !== 'normal') {
                       lhPx = Math.round(parseFloat(lineHeight));
@@ -508,7 +508,9 @@ export const App: React.FC = () => {
                           cta.textContent = ota.value;
                         }
                       }
-                    } catch {}
+                      } catch (err) {
+                        console.warn('App: failed copying textarea values into clone', err);
+                      }
                     ghost.appendChild(clone);
                   }
                 } catch (err) {
@@ -574,17 +576,21 @@ export const App: React.FC = () => {
                 const rawTitle = (selectedNote?.title ?? 'Untitled').trim() || 'Untitled';
                 const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
                 const truncated = sanitize(rawTitle).substring(0, 50);
-                let fileName = `${datePart}_${truncated}.pdf`;
+                const fileName = `${datePart}_${truncated}.pdf`;
 
                 const res = await (window as any).electronAPI.exportPdf(folder, fileName);
 
                 // clean up temporary styles and ghost element
                 try {
                   const ex = document.getElementById('pdf-export-style'); if (ex) ex.remove();
-                } catch {}
+                    } catch (err) {
+                      console.warn('App: failed to create printable clone, falling back to node clone', err);
+                    }
                 try {
                   const g = document.getElementById('pdf-export-ghost'); if (g) g.remove();
-                } catch {}
+                } catch (err) {
+                  console.warn('App: cleanup of temporary export elements failed', err);
+                }
 
                 if (!res || !res.ok) {
                   console.warn('PDF export failed', res?.error);

@@ -8,7 +8,8 @@ import {
   addTagToNote, removeTagFromNote, reorderNoteTags, getNoteTags,
   getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy, getLastEditedNote,
   upsertNoteFts, removeNoteFts, searchNotes, saveNoteUiState, getNoteUiState
-} from './main/database';
+, renameTag } from './main/database';
+
 import { initFileSystem, saveNoteContent, loadNoteContent, deleteNoteFile } from './main/fileSystem';
 import { SearchResult } from './shared/types';
 
@@ -58,7 +59,7 @@ function getInternalHostnames(): Set<string> {
       const u = new URL(MAIN_WINDOW_WEBPACK_ENTRY);
       if (u.hostname) hosts.add(u.hostname);
     }
-  } catch (_) {}
+  } catch (err) { console.warn('[main] getInternalHostnames parse failed', err); }
   return hosts;
 }
 
@@ -92,7 +93,7 @@ const createWindow = (): void => {
     }
     // pick best dev icon per-platform (Windows prefers .ico for taskbar)
     const devIconFile = process.platform === 'win32' ? path.join(__dirname, '..', 'assets', 'icon.ico') : path.join(__dirname, '..', 'assets', 'icon.png');
-    try { console.log('[main] using dev icon:', devIconFile, 'exists=', fs.existsSync(devIconFile)); } catch (_) {}
+    try { console.log('[main] using dev icon:', devIconFile, 'exists=', fs.existsSync(devIconFile)); } catch (err) { console.warn('[main] dev icon check failed', err); }
 
     const bwOpts: any = {
       width: restoredState.width ?? 1200,
@@ -123,7 +124,7 @@ const createWindow = (): void => {
         if (restoredState.isMaximized && mainWindow && !mainWindow.isDestroyed()) {
           try { mainWindow.maximize(); } catch (err) { console.warn('[main] failed to maximize on restore', err); }
         }
-      } catch {}
+      } catch (err) { console.warn('[main] ready-to-show handler failed', err); }
     });
 
     const internalHosts = getInternalHostnames();
@@ -159,7 +160,7 @@ const createWindow = (): void => {
         });
       } else if (wcAny && typeof wcAny.on === 'function') {
         wcAny.on('new-window', (event: any, url: any) => {
-          try { event.preventDefault(); } catch (_) {}
+          try { event.preventDefault(); } catch (err) { console.warn('[main] event.preventDefault failed', err); }
           const urlStr = String(url || '');
           if (shouldOpenExternally(urlStr, internalHosts)) {
             try { shell.openExternal(urlStr); console.log('[main] opened external URL from new-window fallback:', urlStr); }
@@ -186,9 +187,8 @@ const createWindow = (): void => {
           let bounds = mainWindow.getBounds();
           try {
             // getNormalBounds exists on modern Electron; fallback to getBounds
-            // @ts-ignore
-            if (isMax && typeof mainWindow.getNormalBounds === 'function') bounds = mainWindow.getNormalBounds();
-          } catch {}
+            if (isMax && (mainWindow as any) && typeof (mainWindow as any).getNormalBounds === 'function') bounds = (mainWindow as any).getNormalBounds();
+          } catch (err) { console.warn('[main] failed to get normal bounds', err); }
           const out = {
             x: bounds.x,
             y: bounds.y,
@@ -198,7 +198,7 @@ const createWindow = (): void => {
           };
           try {
             fs.mkdirSync(getDataDir(), { recursive: true });
-          } catch {}
+          } catch (err) { console.warn('[main] failed to create data dir', err); }
           try { fs.writeFileSync(stateFilePath, JSON.stringify(out), 'utf8'); } catch (err) { console.warn('[main] failed to write window state', err); }
         } catch (err) {
           console.warn('[main] error while saving window state', err);
@@ -208,8 +208,24 @@ const createWindow = (): void => {
       console.warn('[main] failed to register window state saver', err);
     }
 
-    mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY).catch(err => {
+    mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY).catch(async (err) => {
       console.error('[main] loadURL failed', err && err.stack ? err.stack : err);
+      try {
+        // Dev server port mismatch can happen; try a common alternative (9000) if the entry references 3000
+        if (typeof MAIN_WINDOW_WEBPACK_ENTRY === 'string' && MAIN_WINDOW_WEBPACK_ENTRY.includes(':3000')) {
+          const alt = MAIN_WINDOW_WEBPACK_ENTRY.replace(':3000', ':9000');
+          console.log('[main] attempting fallback dev URL:', alt);
+          try {
+            await mainWindow?.loadURL(alt);
+            console.log('[main] fallback dev URL loaded successfully');
+            return;
+          } catch (err2) {
+            console.warn('[main] fallback dev URL failed', err2);
+          }
+        }
+      } catch (e) {
+        console.warn('[main] error in loadURL fallback', e);
+      }
     });
 
     if (process.env.NODE_ENV === 'development') {
@@ -270,7 +286,7 @@ ipcMain.handle('export-pdf', async (event, folderPath: string, fileName: string)
     if (!folderPath || !fileName) return { ok: false, error: 'Invalid arguments' };
 
     // ensure folder exists
-    try { fs.mkdirSync(folderPath, { recursive: true }); } catch (e) {}
+    try { fs.mkdirSync(folderPath, { recursive: true }); } catch (e) { console.warn('[main] export-pdf mkdir failed', e); }
 
     const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
     const base = sanitize(fileName);
@@ -312,6 +328,22 @@ ipcMain.handle('export-pdf', async (event, folderPath: string, fileName: string)
   }
 });
 
+// Rename a tag (merge if target name exists)
+ipcMain.handle('rename-tag', async (event, tagId: number, newName: string) => {
+  try {
+    if (typeof tagId !== 'number' || Number.isNaN(tagId) || !newName) return { ok: false, error: 'Invalid arguments' };
+    try {
+      renameTag(tagId, String(newName));
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  } catch (err: any) {
+    console.warn('[main] rename-tag handler failed', err);
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+});
+
 app.whenReady().then(async () => {
   console.log('[main] app.whenReady started');
   try {
@@ -327,7 +359,7 @@ app.whenReady().then(async () => {
           const mainHost = new URL(MAIN_WINDOW_WEBPACK_ENTRY).hostname;
           whitelistHostnames.add(mainHost);
         }
-      } catch (_) {}
+      } catch (err) { console.warn('[main] failed to parse MAIN_WINDOW_WEBPACK_ENTRY', err); }
 
       // Block http(s) and ws(s) in production only
       session.defaultSession.webRequest.onBeforeRequest(
