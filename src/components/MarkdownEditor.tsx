@@ -689,6 +689,60 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
   };
 
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab' && !showPreview) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        // remove up to three leading spaces from each selected line (or from current line)
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+        const lineEnd = content.indexOf('\n', end);
+        const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
+        const selected = content.substring(lineStart, actualLineEnd);
+        const lines = selected.split('\n');
+
+        let pos = lineStart;
+        let removedBeforeStart = 0;
+        let removedBeforeEnd = 0;
+        const newLines = lines.map((ln, idx) => {
+          const lead = ln.match(/^\s*/)?.[0] ?? '';
+          const toRemove = Math.min(3, lead.length);
+          // update removed counters relative to selection bounds
+          const origLen = ln.length;
+          if (start > pos) {
+            const within = Math.max(0, Math.min(start - pos, origLen));
+            removedBeforeStart += Math.min(toRemove, within);
+          }
+          if (end > pos) {
+            const withinEnd = Math.max(0, Math.min(end - pos, origLen));
+            removedBeforeEnd += Math.min(toRemove, withinEnd);
+          }
+          // advance pos: include newline for all but last line
+          pos += origLen + (idx < lines.length - 1 ? 1 : 0);
+          return ln.substring(toRemove);
+        });
+
+        const newText = content.substring(0, lineStart) + newLines.join('\n') + content.substring(actualLineEnd);
+        setContent(newText);
+        handleContentChange(newText);
+
+        setTimeout(() => {
+          textarea.focus();
+          const newStart = Math.max(0, start - removedBeforeStart);
+          const newEnd = Math.max(0, end - removedBeforeEnd);
+          textarea.setSelectionRange(newStart, newEnd);
+          checkFormatting();
+        }, 0);
+      } else {
+        // Insert three spaces at cursor (use helper to keep behavior consistent)
+        insertAtCursor('   ');
+      }
+    }
+  };
+
   // selection listeners
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -1008,6 +1062,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
             onKeyUp={handleTextareaKeyUp}
+            onKeyDown={handleTextareaKeyDown}
             onPaste={handlePaste}
             placeholder={`# Note Title
 
