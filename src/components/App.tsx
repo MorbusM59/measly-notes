@@ -97,7 +97,8 @@ export const App: React.FC = () => {
         handleCreateNote();
         return;
       }
-      if (e.shiftKey && e.key === 'Enter') {
+      // Use Escape to toggle preview/edit mode instead of Shift+Enter
+      if (e.key === 'Escape') {
         e.preventDefault();
         togglePreview(!showPreview);
       }

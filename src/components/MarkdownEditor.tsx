@@ -690,6 +690,61 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   };
 
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !showPreview) {
+      // Handle Enter: preserve leading indentation; if current line is a list item ('- '),
+      // continue the list on the next line. If Shift+Enter, create a new line without the list marker.
+      e.preventDefault();
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+      const currentLine = content.substring(lineStart, start);
+      const leading = (currentLine.match(/^[ \t]*/)?.[0]) || '';
+
+      const listMatch = currentLine.match(/^[ \t]*([-])\s+/);
+      let insert: string;
+      if (e.shiftKey) {
+        // Shift+Enter: add two trailing spaces to current line to create a Markdown hard break,
+        // then create a new line with same indentation but no list marker
+        const before = content.substring(0, start);
+        const after = content.substring(end);
+        const currentLineBeforeCursor = content.substring(lineStart, start);
+        const needsSpaces = !currentLineBeforeCursor.endsWith('  ');
+        const spaces = needsSpaces ? '  ' : '';
+        // We'll insert spaces before the newline so they remain on the previous line
+        insert = spaces + '\n' + leading;
+        // build newText using original before/after
+        const newText = before + insert + after;
+        const newCursorPos = start + spaces.length + 1 + leading.length;
+        setContent(newText);
+        handleContentChange(newText);
+        setTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(newCursorPos, newCursorPos);
+          ensureCaretVisible();
+        }, 0);
+        return;
+      } else if (listMatch) {
+        // Continue list: keep leading indent + '- '
+        insert = '\n' + leading + listMatch[1] + ' ';
+      } else {
+        // Default: preserve indentation
+        insert = '\n' + leading;
+      }
+
+      const newText = content.substring(0, start) + insert + content.substring(end);
+      const newCursorPos = start + insert.length;
+      setContent(newText);
+      handleContentChange(newText);
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        ensureCaretVisible();
+      }, 0);
+      return;
+    }
+
     if (e.key === 'Tab' && !showPreview) {
       e.preventDefault();
       if (e.shiftKey) {
