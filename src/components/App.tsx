@@ -452,25 +452,71 @@ export const App: React.FC = () => {
 
                 const ghost = document.createElement('div');
                 ghost.id = 'pdf-export-ghost';
-                // clone the editor content (deep)
-                const clone = orig.cloneNode(true) as HTMLElement;
-                // remove ids that might conflict
-                clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
-                // copy textarea values so the clone reflects current edit content
+
+                // If the source is a textarea (edit mode), create a printable div that preserves
+                // the textarea's text styling but renders as normal flow content to avoid line splitting.
+                let clone: HTMLElement;
                 try {
-                  const origTextareas: HTMLTextAreaElement[] = orig.tagName === 'TEXTAREA' ? [orig as HTMLTextAreaElement] : Array.from(orig.querySelectorAll('textarea')) as HTMLTextAreaElement[];
-                  const cloneTextareas: HTMLTextAreaElement[] = clone.tagName === 'TEXTAREA' ? [clone as HTMLTextAreaElement] : Array.from(clone.querySelectorAll('textarea')) as HTMLTextAreaElement[];
-                  for (let i = 0; i < origTextareas.length; i++) {
-                    const ota = origTextareas[i];
-                    const cta = cloneTextareas[i];
-                    if (cta && ota) {
-                      cta.value = ota.value;
-                      // also set textContent for some rendering engines
-                      cta.textContent = ota.value;
+                  const isTextarea = orig.tagName === 'TEXTAREA' || orig.classList.contains('markdown-textarea');
+                  if (isTextarea) {
+                    const ta = orig as HTMLTextAreaElement;
+                    const computed = window.getComputedStyle(ta);
+                    const fontFamily = computed.fontFamily || 'monospace';
+                    const fontSize = computed.fontSize || '16px';
+                    // compute integer pixel line-height to avoid subpixel rounding issues
+                    let lineHeight = computed.lineHeight;
+                    let lhPx = 0;
+                    if (lineHeight && lineHeight !== 'normal') {
+                      lhPx = Math.round(parseFloat(lineHeight));
+                    } else {
+                      lhPx = Math.round(parseFloat(fontSize) * 1.2);
                     }
+
+                    const printable = document.createElement('div');
+                    printable.className = 'pdf-export-textarea-clone';
+                    // Use textContent to preserve plaintext and newlines
+                    printable.textContent = ta.value;
+                    // Apply inline styles to mimic the textarea visual (but render as flow content)
+                    printable.style.whiteSpace = 'pre-wrap';
+                    printable.style.wordBreak = 'break-word';
+                    printable.style.fontFamily = fontFamily;
+                    printable.style.fontSize = fontSize;
+                    printable.style.lineHeight = `${lhPx}px`;
+                    printable.style.color = computed.color || '#000';
+                    printable.style.background = 'white';
+                    printable.style.padding = computed.padding || '0';
+                    printable.style.margin = '0';
+                    printable.style.overflow = 'visible';
+                    // prevent page breaks inside this block
+                    printable.style.pageBreakInside = 'avoid';
+                    printable.style.breakInside = 'avoid';
+                    ghost.appendChild(printable);
+                    clone = printable;
+                  } else {
+                    // clone the selected element (preview) normally
+                    clone = orig.cloneNode(true) as HTMLElement;
+                    clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+                    // copy textarea values inside preview if any
+                    try {
+                      const origTextareas = Array.from(orig.querySelectorAll('textarea')) as HTMLTextAreaElement[];
+                      const cloneTextareas = Array.from(clone.querySelectorAll('textarea')) as HTMLTextAreaElement[];
+                      for (let i = 0; i < origTextareas.length; i++) {
+                        const ota = origTextareas[i];
+                        const cta = cloneTextareas[i];
+                        if (cta && ota) {
+                          cta.value = ota.value;
+                          cta.textContent = ota.value;
+                        }
+                      }
+                    } catch {}
+                    ghost.appendChild(clone);
                   }
-                } catch {}
-                ghost.appendChild(clone);
+                } catch (err) {
+                  // fallback to cloning orig
+                  clone = orig.cloneNode(true) as HTMLElement;
+                  clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+                  ghost.appendChild(clone);
+                }
                 // keep hidden until print
                 ghost.style.display = 'none';
                 document.body.appendChild(ghost);
@@ -489,6 +535,29 @@ export const App: React.FC = () => {
                     #pdf-export-ghost { width: calc(210mm - ( (1cm + ${padLeft}px) + (1cm + ${padRight}px) )); }
                     /* remove borders and shadows from the ghost container itself, but preserve styling of nested elements */
                     #pdf-export-ghost { box-shadow: none !important; -webkit-box-shadow: none !important; border: none !important; outline: none !important; background: white !important; }
+
+                    /* Printing tweaks to avoid splitting lines across pages. Preserve nested element styling,
+                       but prevent page breaks inside block-level content where possible. Also ensure overflow
+                       is visible so lines aren't clipped. */
+                    #pdf-export-ghost, #pdf-export-ghost * { -webkit-print-color-adjust: exact !important; }
+                    #pdf-export-ghost p,
+                    #pdf-export-ghost pre,
+                    #pdf-export-ghost code,
+                    #pdf-export-ghost li,
+                    #pdf-export-ghost h1,
+                    #pdf-export-ghost h2,
+                    #pdf-export-ghost h3,
+                    #pdf-export-ghost h4,
+                    #pdf-export-ghost h5,
+                    #pdf-export-ghost h6,
+                    #pdf-export-ghost blockquote {
+                      page-break-inside: avoid !important;
+                      break-inside: avoid !important;
+                      -webkit-column-break-inside: avoid !important;
+                      overflow: visible !important;
+                    }
+                    /* Avoid orphaning single lines across pages */
+                    #pdf-export-ghost * { widows: 2; orphans: 2; }
                   }
                 `;
                 const styleEl = document.createElement('style');
