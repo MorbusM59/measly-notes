@@ -64,13 +64,19 @@ export const App: React.FC = () => {
   });
 
   const appRef = useRef<HTMLDivElement | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   // Keep selected note behavior as before
   useEffect(() => {
     (async () => {
       try {
         const last = await window.electronAPI.getLastEditedNote();
-        if (last) setSelectedNote(last);
+        if (last && isMountedRef.current) setSelectedNote(last);
       } catch (err) {
         console.warn('Could not get last edited note', err);
       }
@@ -115,6 +121,7 @@ export const App: React.FC = () => {
       console.warn('requestForceSave failed', err);
     }
 
+    if (!isMountedRef.current) return;
     setShowPreview(false);
     localStorage.setItem('markdown-show-preview', 'false');
 
@@ -122,6 +129,7 @@ export const App: React.FC = () => {
     const initialContent = '# ';
     await window.electronAPI.saveNote(note.id, initialContent);
 
+    if (!isMountedRef.current) return;
     setSelectedNote(note);
     setRefreshKey(k => k + 1);
   };
@@ -132,7 +140,7 @@ export const App: React.FC = () => {
     } catch (err) {
       console.warn('requestForceSave failed on note select', err);
     }
-    setSelectedNote(note);
+    if (isMountedRef.current) setSelectedNote(note);
   };
 
   const handleNoteUpdate = (updatedNote: Note) => {

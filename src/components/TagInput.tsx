@@ -26,6 +26,19 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
   const [renamingTagId, setRenamingTagId] = useState<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const isMountedRef = useRef(true);
+  const focusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (focusTimeoutRef.current) {
+        clearTimeout(focusTimeoutRef.current);
+        focusTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // defensive normalization
   const normalizeTagName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
@@ -52,8 +65,13 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
 
   const loadNoteTags = async () => {
     if (!note) return;
-    const tags = await window.electronAPI.getNoteTags(note.id);
-    setNoteTags(tags);
+    try {
+      const tags = await window.electronAPI.getNoteTags(note.id);
+      if (!isMountedRef.current) return;
+      setNoteTags(tags);
+    } catch (err) {
+      console.warn('loadNoteTags failed', err);
+    }
   };
 
   const handleAddTag = async () => {
@@ -63,15 +81,20 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
     if (!normalized) return;
 
     const position = noteTags.length;
-    await window.electronAPI.addTagToNote(note.id, normalized, position);
-    setInputValue('');
-    await loadNoteTags();
-    inputRef.current?.focus();
+    try {
+      await window.electronAPI.addTagToNote(note.id, normalized, position);
+      if (!isMountedRef.current) return;
+      setInputValue('');
+      await loadNoteTags();
+      inputRef.current?.focus();
+    } catch (err) {
+      console.warn('addTagToNote failed', err);
+    }
 
     if (onTagsChanged) onTagsChanged();
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = async (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       // If we're renaming an existing tag, call rename flow
@@ -79,16 +102,16 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
         const newName = inputValue.trim();
         if (!newName) return;
         try {
-          window.electronAPI.renameTag(renamingTagId, newName).then((res) => {
-            if (res && res.ok) {
-              setRenamingTagId(null);
-              setInputValue('');
-              loadNoteTags();
-              if (onTagsChanged) onTagsChanged();
-            } else {
-              console.warn('Rename failed', res?.error);
-            }
-          });
+          const res = await window.electronAPI.renameTag(renamingTagId, newName);
+          if (res && res.ok) {
+            if (!isMountedRef.current) return;
+            setRenamingTagId(null);
+            setInputValue('');
+            await loadNoteTags();
+            if (onTagsChanged) onTagsChanged();
+          } else {
+            console.warn('Rename failed', res?.error);
+          }
         } catch (err) {
           console.warn('renameTag call failed', err);
         }
@@ -116,18 +139,17 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
       // second click -> delete immediately
       try {
         await window.electronAPI.removeTagFromNote(note.id, tagId);
+        if (!isMountedRef.current) return;
+        // No placeholder/ghost behavior anymore — simply reload active tags
+        setDeleteArmedIndex(null);
+        await loadNoteTags();
+        if (onTagsChanged) onTagsChanged();
+        return;
       } catch (err) {
         console.warn('Failed to remove tag', err);
-        setDeleteArmedIndex(null);
+        if (isMountedRef.current) setDeleteArmedIndex(null);
         return;
       }
-
-      // No placeholder/ghost behavior anymore — simply reload active tags
-      setDeleteArmedIndex(null);
-
-      await loadNoteTags();
-      if (onTagsChanged) onTagsChanged();
-      return;
     }
 
     // first click -> arm
@@ -204,7 +226,11 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
                   // start renaming: load tag name into input and focus
                   setRenamingTagId(noteTag.tagId);
                   setInputValue(tag?.name ?? '');
-                  setTimeout(() => inputRef.current?.focus(), 10);
+                              if (focusTimeoutRef.current) {
+                                clearTimeout(focusTimeoutRef.current);
+                                focusTimeoutRef.current = null;
+                              }
+                              focusTimeoutRef.current = setTimeout(() => inputRef.current?.focus(), 10);
                 }}
                 onMouseLeave={() => handleActiveTagMouseLeave(slotIdx)}
                 title={armed ? 'Click again to delete or move cursor away to cancel' : 'Click to arm deletion'}

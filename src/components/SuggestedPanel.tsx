@@ -13,6 +13,12 @@ const normalizeTagName = (name: string) => name.trim().toLowerCase().replace(/\s
 
 export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onTagsChanged, refreshTrigger }) => {
   const [suggestedTags, setSuggestedTags] = useState<Tag[]>([]);
+  const isMountedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (note) loadSuggestedTags();
@@ -28,10 +34,11 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       const currentTagIds = new Set(currentTags.map(t => t.tagId));
       const filtered = topTags.filter(t => !currentTagIds.has(t.id));
       filtered.sort((a, b) => a.name.localeCompare(b.name));
+      if (!isMountedRef.current) return;
       setSuggestedTags(filtered.slice(0, 15));
     } catch (err) {
       console.warn('Failed to load suggested tags', err);
-      setSuggestedTags([]);
+      if (isMountedRef.current) setSuggestedTags([]);
     }
   };
 
@@ -43,6 +50,7 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       const position = currentTags.length;
       await window.electronAPI.addTagToNote(note.id, normalized, position);
       // reload suggestions and notify parent to refresh siblings
+      if (!isMountedRef.current) return;
       await loadSuggestedTags();
       if (onTagsChanged) onTagsChanged();
     } catch (err) {

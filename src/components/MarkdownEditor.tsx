@@ -36,13 +36,26 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const editorContentRef = useRef<HTMLDivElement | null>(null);
-  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedContentRef = useRef('');
   const lastSavedTitleRef = useRef('');
   const currentNoteIdRef = useRef<number | null>(null);
 
+  // Short-lived UI timeouts that should be cleared on unmount
+  const loadNoteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewRestoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Debounce for selection save
-  const selectionSaveTimeout = useRef<NodeJS.Timeout | null>(null);
+  const selectionSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track all transient timeouts so they can be cleared on unmount
+  const pendingTimeoutsRef = useRef<number[]>([]);
+
+  const scheduleTimeout = (cb: () => void, ms: number) => {
+    const id = window.setTimeout(cb, ms);
+    pendingTimeoutsRef.current.push(id as unknown as number);
+    return id;
+  };
 
   // Editor style options — Syne and Red Hat (display labels simplified).
   const editorStyleOptions: { key: string; label: string; family: string }[] = [
@@ -115,7 +128,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       if (note?.id != null) void saveEditState(note.id);
     } else {
       // when entering edit mode, attempt to restore scroll/selection (handled in note load or note-change flow)
-      setTimeout(async () => {
+      if (previewRestoreTimeoutRef.current) {
+        clearTimeout(previewRestoreTimeoutRef.current);
+        previewRestoreTimeoutRef.current = null;
+      }
+      previewRestoreTimeoutRef.current = scheduleTimeout(async () => {
         const ta = textareaRef.current;
         const editorContent = editorContentRef.current;
         if (!ta || !editorContent || !note) return;
@@ -127,7 +144,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         // ensure proper sizing and visibility
         autosizeTextarea(ta);
         ensureCaretVisible();
-      }, 0);
+      }, 0) as unknown as ReturnType<typeof setTimeout>;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPreview]);
@@ -148,7 +165,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
         // Focus & position cursor for edit mode
         if (!showPreview) {
-          setTimeout(async () => {
+          if (loadNoteTimeoutRef.current) {
+            clearTimeout(loadNoteTimeoutRef.current);
+            loadNoteTimeoutRef.current = null;
+          }
+          loadNoteTimeoutRef.current = scheduleTimeout(async () => {
             const textarea = textareaRef.current;
             const editorContent = editorContentRef.current;
             if (textarea) {
@@ -172,7 +193,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               autosizeTextarea(textarea);
               ensureCaretVisible();
             }
-          }, 10);
+          }, 10) as unknown as ReturnType<typeof setTimeout>;
         }
       }).catch(err => {
         console.warn('loadNote failed', err);
@@ -189,7 +210,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // If switched to edit mode, focus textarea (restore handled elsewhere)
   useEffect(() => {
     if (!showPreview) {
-      setTimeout(() => textareaRef.current?.focus(), 10);
+      if (focusTimeoutRef.current) {
+        clearTimeout(focusTimeoutRef.current);
+        focusTimeoutRef.current = null;
+      }
+      focusTimeoutRef.current = scheduleTimeout(() => textareaRef.current?.focus(), 10) as unknown as ReturnType<typeof setTimeout>;
     }
   }, [showPreview]);
 
@@ -543,7 +568,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setContent(newText);
     handleContentChange(newText);
 
-    setTimeout(() => {
+    scheduleTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(newSelectionStart, newSelectionEnd);
       checkFormatting();
@@ -557,7 +582,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const newText = content.substring(0, start) + text + content.substring(start);
     setContent(newText);
     handleContentChange(newText);
-    setTimeout(() => {
+    scheduleTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(start + text.length, start + text.length);
       ensureCaretVisible();
@@ -597,7 +622,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setContent(newText);
     handleContentChange(newText);
 
-    setTimeout(() => {
+    scheduleTimeout(() => {
       textarea.focus();
       checkFormatting();
     }, 0);
@@ -631,7 +656,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setContent(newText);
     handleContentChange(newText);
 
-    setTimeout(() => {
+    scheduleTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(newCursorPos, newCursorPos);
       checkFormatting();
@@ -671,9 +696,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
 
     if (!isOnFirstLine && note && !showPreview) {
-      autoSaveTimeoutRef.current = setTimeout(() => {
+      autoSaveTimeoutRef.current = scheduleTimeout(() => {
         void autoSave();
-      }, 1000);
+      }, 1000) as unknown as ReturnType<typeof setTimeout>;
     }
   };
 
@@ -719,11 +744,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const newCursorPos = start + spaces.length + 1 + leading.length;
         setContent(newText);
         handleContentChange(newText);
-        setTimeout(() => {
-          textarea.focus();
-          textarea.setSelectionRange(newCursorPos, newCursorPos);
-          ensureCaretVisible();
-        }, 0);
+        scheduleTimeout(() => {
+            textarea.focus();
+            textarea.setSelectionRange(newCursorPos, newCursorPos);
+            ensureCaretVisible();
+          }, 0);
         return;
       } else if (listMatch) {
         // Continue list: keep leading indent + '- '
@@ -737,11 +762,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const newCursorPos = start + insert.length;
       setContent(newText);
       handleContentChange(newText);
-      setTimeout(() => {
-        textarea.focus();
-        textarea.setSelectionRange(newCursorPos, newCursorPos);
-        ensureCaretVisible();
-      }, 0);
+      scheduleTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(newCursorPos, newCursorPos);
+          ensureCaretVisible();
+        }, 0);
       return;
     }
 
@@ -784,7 +809,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         setContent(newText);
         handleContentChange(newText);
 
-        setTimeout(() => {
+        scheduleTimeout(() => {
           textarea.focus();
           const newStart = Math.max(0, start - removedBeforeStart);
           const newEnd = Math.max(0, end - removedBeforeEnd);
@@ -809,9 +834,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       // debounce save edit state for current note
       if (note?.id != null) {
         if (selectionSaveTimeout.current) clearTimeout(selectionSaveTimeout.current);
-        selectionSaveTimeout.current = setTimeout(() => {
-          void saveEditState(note.id as number);
-        }, 250);
+            selectionSaveTimeout.current = scheduleTimeout(() => {
+              void saveEditState(note.id as number);
+            }, 250) as unknown as ReturnType<typeof setTimeout>;
       }
     };
     textarea.addEventListener('click', handleSelectionChange);
@@ -832,9 +857,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   useEffect(() => {
     if (!isOnFirstLine && note && content !== lastSavedContentRef.current) {
       if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-      autoSaveTimeoutRef.current = setTimeout(() => {
+      autoSaveTimeoutRef.current = scheduleTimeout(() => {
         void autoSave();
-      }, 1000);
+      }, 1000) as unknown as ReturnType<typeof setTimeout>;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnFirstLine, note, content]);
@@ -857,10 +882,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       (document as any).fonts.ready.then(() => {
         requestAnimationFrame(() => requestAnimationFrame(reflowTextarea));
       }).catch(() => {
-        setTimeout(reflowTextarea, 100);
+        scheduleTimeout(reflowTextarea, 100);
       });
     } else {
-      const t = setTimeout(reflowTextarea, 100);
+      const t = scheduleTimeout(reflowTextarea, 100);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -926,6 +951,31 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   useEffect(() => {
     return () => {
       if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+      if (selectionSaveTimeout.current) {
+        clearTimeout(selectionSaveTimeout.current);
+        selectionSaveTimeout.current = null;
+      }
+      if (loadNoteTimeoutRef.current) {
+        clearTimeout(loadNoteTimeoutRef.current);
+        loadNoteTimeoutRef.current = null;
+      }
+      if (previewRestoreTimeoutRef.current) {
+        clearTimeout(previewRestoreTimeoutRef.current);
+        previewRestoreTimeoutRef.current = null;
+      }
+      if (focusTimeoutRef.current) {
+        clearTimeout(focusTimeoutRef.current);
+        focusTimeoutRef.current = null;
+      }
+      // Clear any other pending timeouts scheduled via scheduleTimeout
+      try {
+        if (pendingTimeoutsRef.current && pendingTimeoutsRef.current.length) {
+          pendingTimeoutsRef.current.forEach(id => clearTimeout(id));
+          pendingTimeoutsRef.current = [];
+        }
+      } catch (err) {
+        // ignore
+      }
       if (note?.id != null) {
         if (showPreview) {
           // save preview progress

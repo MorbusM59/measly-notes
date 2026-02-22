@@ -48,6 +48,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [collapsedSecondary, setCollapsedSecondary] = useState<Set<string>>(new Set());
   const [deleteArmedId, setDeleteArmedId] = useState<number | null>(null);
   const notesPerPage = 20;
+  const isMountedRef = React.useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
   
   // Use external viewMode if provided, otherwise use internal
   const viewMode = onViewModeChange ? externalViewMode : internalViewMode;
@@ -72,15 +78,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [viewMode, currentPage, searchMode, refreshTrigger]);
 
   const loadDateNotes = async () => {
-    const result = await window.electronAPI.getNotesPage(currentPage, notesPerPage);
-    setDateNotes(result.notes);
-    setTotalNotes(result.total);
+    try {
+      const result = await window.electronAPI.getNotesPage(currentPage, notesPerPage);
+      if (!isMountedRef.current) return;
+      setDateNotes(result.notes);
+      setTotalNotes(result.total);
+    } catch (err) {
+      console.warn('loadDateNotes failed', err);
+    }
   };
 
   const loadCategoryHierarchy = async () => {
-    const data = await window.electronAPI.getCategoryHierarchy();
-    setCategoryHierarchy(data.hierarchy);
-    setUncategorizedNotes(data.uncategorizedNotes);
+    try {
+      const data = await window.electronAPI.getCategoryHierarchy();
+      if (!isMountedRef.current) return;
+      setCategoryHierarchy(data.hierarchy);
+      setUncategorizedNotes(data.uncategorizedNotes);
+    } catch (err) {
+      console.warn('loadCategoryHierarchy failed', err);
+    }
   };
 
   // Auto-expand relevant categories when the hierarchy reloads or the selected note changes.
@@ -227,15 +243,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     if (searchQuery.startsWith('#')) {
       // Tag search
-      const tagName = searchQuery.substring(1);
-      const results = await window.electronAPI.searchNotesByTag(tagName);
-      setSearchResults(results);
-      setSearchMode('tag');
+      try {
+        const tagName = searchQuery.substring(1);
+        const results = await window.electronAPI.searchNotesByTag(tagName);
+        if (!isMountedRef.current) return;
+        setSearchResults(results);
+        setSearchMode('tag');
+      } catch (err) { console.warn('searchNotesByTag failed', err); }
     } else {
       // Text search
-      const results = await window.electronAPI.searchNotes(searchQuery);
-      setSearchResults(results);
-      setSearchMode('text');
+      try {
+        const results = await window.electronAPI.searchNotes(searchQuery);
+        if (!isMountedRef.current) return;
+        setSearchResults(results);
+        setSearchMode('text');
+      } catch (err) { console.warn('searchNotes failed', err); }
     }
   };
 
@@ -353,28 +375,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
           // Fallback: find next/previous visible note in the current view
           nextNote = findNextNoteAfterDeletion(noteId);
         }
-      } catch (err) {
-        // If anything goes wrong, fallback to visible-next behavior
-        console.warn('getLastEditedNote failed, falling back to visible-next', err);
-        nextNote = findNextNoteAfterDeletion(noteId);
-      }
 
-      // Actually delete
-      await window.electronAPI.deleteNote(noteId);
-      setDeleteArmedId(null);
+        // Actually delete
+        await window.electronAPI.deleteNote(noteId);
+        if (!isMountedRef.current) return;
+        setDeleteArmedId(null);
 
-      // Notify parent to handle selection and refresh
-      if (onNoteDelete) {
-        onNoteDelete(noteId, nextNote);
-      }
-
-      // Reload the current view
-      if (searchMode === 'none') {
-        if (viewMode === 'date') {
-          await loadDateNotes();
-        } else {
-          await loadCategoryHierarchy();
+        // Notify parent to handle selection and refresh
+        if (onNoteDelete) {
+          onNoteDelete(noteId, nextNote);
         }
+
+        // Reload the current view
+        if (searchMode === 'none') {
+          if (viewMode === 'date') {
+            await loadDateNotes();
+          } else {
+            await loadCategoryHierarchy();
+          }
+        }
+      } catch (err) {
+        console.warn('delete flow failed', err);
+        if (isMountedRef.current) setDeleteArmedId(null);
       }
     }
   };
