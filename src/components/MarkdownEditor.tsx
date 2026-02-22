@@ -44,10 +44,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Debounce for selection save
   const selectionSaveTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Editor style options — Syne and Red Hat.
+  // Editor style options — Syne and Red Hat (display labels simplified).
   const editorStyleOptions: { key: string; label: string; family: string }[] = [
-    { key: 'syne', label: 'Syne Mono', family: "'Syne Mono', 'Menlo', 'Monaco', monospace" },
-    { key: 'redhat', label: 'Red Hat Mono', family: "'Red Hat Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'syne', label: 'Syne', family: "'Syne Mono', 'Menlo', 'Monaco', monospace" },
+    { key: 'redhat', label: 'Red Hat', family: "'Red Hat Mono', 'Menlo', 'Monaco', monospace" },
   ];
 
   const getEditorFamily = (styleKey: string): string => {

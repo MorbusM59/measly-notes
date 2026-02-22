@@ -117,7 +117,8 @@
 }
 
 .style-selector select {
-  padding: 6px 12px;
+  /* left padding equal to 8px and arrow positioned 8px from right border */
+  padding: 6px 20px 6px 8px; /* top/right/bottom/left */
   font-size: 14px;
   width: 100%;
   border: 1px solid var(--color-border-highlight);
@@ -126,10 +127,17 @@
     inset 0 0 2px rgba(0,0,0,0.5),
     inset 0 0 6px rgba(0,0,0,0.2),
     0 0 2px var(--color-shadow-white);
-  font-size: 14px;
   outline: none;
   background: var(--color-input-backdrop);
   transition: all 0.2s;
+  /* Use a lightweight SVG caret so we can control its position reliably */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23666' d='M0 0l5 6 5-6z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
 }
 .style-selector select:focus {
   border-color: var(--color-border-selected);
