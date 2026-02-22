@@ -483,8 +483,8 @@ export const App: React.FC = () => {
                     #pdf-export-ghost { display: block !important; position: relative !important; margin: 0 !important; background: white !important; }
                     /* width: A4 page width minus left/right page margins (1cm + visible padding each) */
                     #pdf-export-ghost { width: calc(210mm - ( (1cm + ${padLeft}px) + (1cm + ${padRight}px) )); }
-                    /* remove borders and shadows inside exported content and force white backgrounds */
-                    #pdf-export-ghost, #pdf-export-ghost * { box-shadow: none !important; -webkit-box-shadow: none !important; border: none !important; outline: none !important; background: white !important; }
+                    /* remove borders and shadows from the ghost container itself, but preserve styling of nested elements */
+                    #pdf-export-ghost { box-shadow: none !important; -webkit-box-shadow: none !important; border: none !important; outline: none !important; background: white !important; }
                   }
                 `;
                 const styleEl = document.createElement('style');
