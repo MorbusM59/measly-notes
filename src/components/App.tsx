@@ -427,9 +427,12 @@ export const App: React.FC = () => {
 
                 // Export whatever is currently visible (edit or view) — do not switch modes.
 
-                // compute visible padding from preview container
+                // compute visible padding from the element we will export (preview or textarea)
                 const previewEl = document.querySelector('.markdown-preview') as HTMLElement | null;
-                const container = previewEl ?? document.querySelector('.editor-content') as HTMLElement | null;
+                const textareaEl = document.querySelector('.markdown-textarea') as HTMLTextAreaElement | null;
+                // choose element to export based on current mode (showPreview)
+                const origCandidate = showPreview ? (previewEl ?? textareaEl) : (textareaEl ?? previewEl);
+                const container = origCandidate ?? document.querySelector('.editor-content') as HTMLElement | null;
                 const style = container ? window.getComputedStyle(container) : null;
                 const padTop = style ? parseFloat(style.paddingTop || '0') : 0;
                 const padRight = style ? parseFloat(style.paddingRight || '0') : 0;
@@ -439,7 +442,8 @@ export const App: React.FC = () => {
                 // Create a print-only ghost element that copies `.editor-content` and sits at top-left
                 // so printing produces a tightly-packed PDF without offsets. We inject print CSS
                 // that hides all other content and sizes the ghost to the A4 printable width.
-                const orig = document.querySelector('.editor-content') as HTMLElement | null;
+                // Use the selected preview or textarea element as the export source
+                const orig = origCandidate as HTMLElement | null;
                 if (!orig) return;
 
                 // Remove any existing ghost
@@ -454,8 +458,8 @@ export const App: React.FC = () => {
                 clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
                 // copy textarea values so the clone reflects current edit content
                 try {
-                  const origTextareas = Array.from(orig.querySelectorAll('textarea')) as HTMLTextAreaElement[];
-                  const cloneTextareas = Array.from(clone.querySelectorAll('textarea')) as HTMLTextAreaElement[];
+                  const origTextareas: HTMLTextAreaElement[] = orig.tagName === 'TEXTAREA' ? [orig as HTMLTextAreaElement] : Array.from(orig.querySelectorAll('textarea')) as HTMLTextAreaElement[];
+                  const cloneTextareas: HTMLTextAreaElement[] = clone.tagName === 'TEXTAREA' ? [clone as HTMLTextAreaElement] : Array.from(clone.querySelectorAll('textarea')) as HTMLTextAreaElement[];
                   for (let i = 0; i < origTextareas.length; i++) {
                     const ota = origTextareas[i];
                     const cta = cloneTextareas[i];
