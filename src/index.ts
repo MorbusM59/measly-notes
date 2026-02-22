@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, session, shell, Menu } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { getDataDir } from './main/paths';
 import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote,
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
@@ -77,13 +78,25 @@ function shouldOpenExternally(urlStr: string, internalHosts: Set<string>): boole
 const createWindow = (): void => {
   console.log('[main] createWindow() - start');
   try {
+    // Attempt to restore previous window state (bounds + maximized)
+    const stateFile = path.join(getDataDir(), 'window-state.json');
+    let restoredState: { x?: number; y?: number; width?: number; height?: number; isMaximized?: boolean } = {};
+    try {
+      if (fs.existsSync(stateFile)) {
+        const raw = fs.readFileSync(stateFile, 'utf8');
+        restoredState = JSON.parse(raw || '{}');
+      }
+    } catch (err) {
+      console.warn('[main] failed to read window state:', err);
+      restoredState = {};
+    }
     // pick best dev icon per-platform (Windows prefers .ico for taskbar)
     const devIconFile = process.platform === 'win32' ? path.join(__dirname, '..', 'assets', 'icon.ico') : path.join(__dirname, '..', 'assets', 'icon.png');
     try { console.log('[main] using dev icon:', devIconFile, 'exists=', fs.existsSync(devIconFile)); } catch (_) {}
 
-    mainWindow = new BrowserWindow({
-      width: 1200,
-      height: 800,
+    const bwOpts: any = {
+      width: restoredState.width ?? 1200,
+      height: restoredState.height ?? 800,
       minWidth: 790,
       minHeight: 550,
       webPreferences: {
@@ -96,10 +109,21 @@ const createWindow = (): void => {
       icon: devIconFile,
       show: false,
       autoHideMenuBar: true,
-    });
+    };
+    if (typeof restoredState.x === 'number' && typeof restoredState.y === 'number') {
+      bwOpts.x = restoredState.x;
+      bwOpts.y = restoredState.y;
+    }
+
+    mainWindow = new BrowserWindow(bwOpts);
 
     mainWindow.once('ready-to-show', () => {
       try { mainWindow?.show(); } catch (err) { console.error('[main] error showing window', err); }
+      try {
+        if (restoredState.isMaximized && mainWindow && !mainWindow.isDestroyed()) {
+          try { mainWindow.maximize(); } catch (err) { console.warn('[main] failed to maximize on restore', err); }
+        }
+      } catch {}
     });
 
     const internalHosts = getInternalHostnames();
@@ -150,6 +174,39 @@ const createWindow = (): void => {
     }
 
     mainWindow.on('closed', () => { mainWindow = null; });
+
+    // Persist window bounds and maximized state on close
+    try {
+      const stateFilePath = path.join(getDataDir(), 'window-state.json');
+      mainWindow.on('close', () => {
+        try {
+          if (!mainWindow) return;
+          const isMax = mainWindow.isMaximized();
+          // Prefer to store the "normal" bounds if maximized so we can restore properly
+          let bounds = mainWindow.getBounds();
+          try {
+            // getNormalBounds exists on modern Electron; fallback to getBounds
+            // @ts-ignore
+            if (isMax && typeof mainWindow.getNormalBounds === 'function') bounds = mainWindow.getNormalBounds();
+          } catch {}
+          const out = {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+            isMaximized: isMax,
+          };
+          try {
+            fs.mkdirSync(getDataDir(), { recursive: true });
+          } catch {}
+          try { fs.writeFileSync(stateFilePath, JSON.stringify(out), 'utf8'); } catch (err) { console.warn('[main] failed to write window state', err); }
+        } catch (err) {
+          console.warn('[main] error while saving window state', err);
+        }
+      });
+    } catch (err) {
+      console.warn('[main] failed to register window state saver', err);
+    }
 
     mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY).catch(err => {
       console.error('[main] loadURL failed', err && err.stack ? err.stack : err);
