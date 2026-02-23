@@ -243,41 +243,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return notes.filter(filterNotesByDate);
   };
 
-  // Filter category hierarchy
+  // Filter category hierarchy (apply same date-based filtering as Latest view)
   const getFilteredHierarchy = (hierarchy: CategoryHierarchy): CategoryHierarchy => {
     const filtered: CategoryHierarchy = {};
-    
+
     Object.entries(hierarchy).forEach(([primaryTag, primaryData]) => {
       const filteredPrimary = {
         notes: getFilteredNotes(primaryData.notes),
         secondary: {} as CategoryHierarchy[string]['secondary']
       };
-      
+
       Object.entries(primaryData.secondary).forEach(([secondaryTag, secondaryData]) => {
         const filteredSecondary = {
           notes: getFilteredNotes(secondaryData.notes),
           tertiary: {} as CategoryHierarchy[string]['secondary'][string]['tertiary']
         };
-        
+
         Object.entries(secondaryData.tertiary).forEach(([tertiaryTag, notes]) => {
           const filteredTertiary = getFilteredNotes(notes);
           if (filteredTertiary.length > 0) {
             filteredSecondary.tertiary[tertiaryTag] = filteredTertiary;
           }
         });
-        
-        // Only include secondary if it has notes or tertiary groups
+
         if (filteredSecondary.notes.length > 0 || Object.keys(filteredSecondary.tertiary).length > 0) {
           filteredPrimary.secondary[secondaryTag] = filteredSecondary;
         }
       });
-      
-      // Only include primary if it has notes or secondary groups
+
       if (filteredPrimary.notes.length > 0 || Object.keys(filteredPrimary.secondary).length > 0) {
         filtered[primaryTag] = filteredPrimary;
       }
     });
-    
+
     return filtered;
   };
 
