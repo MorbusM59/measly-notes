@@ -46,11 +46,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [uncategorizedNotes, setUncategorizedNotes] = useState<Note[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalNotes, setTotalNotes] = useState(0);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(20);
   const [collapsedPrimary, setCollapsedPrimary] = useState<Set<string>>(new Set());
   const [collapsedSecondary, setCollapsedSecondary] = useState<Set<string>>(new Set());
   const [deleteArmedId, setDeleteArmedId] = useState<number | null>(null);
   const [armed, setArmed] = useState<{ kind: 'none' | 'delete' | 'archive' | 'permanent'; noteId?: number | null; category?: string | null }>({ kind: 'none' });
-  const notesPerPage = 20;
+  
   const isMountedRef = React.useRef(true);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [showPagination, setShowPagination] = useState(false);
@@ -84,11 +85,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         loadTrashNotes();
       }
     }
-  }, [viewMode, currentPage, searchMode, refreshTrigger]);
+  }, [viewMode, currentPage, searchMode, refreshTrigger, itemsPerPage]);
 
   const loadDateNotes = async () => {
     try {
-      const result = await window.electronAPI.getNotesPage(currentPage, notesPerPage);
+      const result = await window.electronAPI.getNotesPage(currentPage, itemsPerPage);
       if (!isMountedRef.current) return;
       // Exclude notes whose primary tag is 'deleted'; exclude 'archived' unless date filters are active
       const filtered = (result.notes || []).filter((n: any) => {
@@ -101,6 +102,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       });
       setDateNotes(filtered);
       setTotalNotes(result.total);
+      // Adjust current page if it is now out of range
+      const newTotalPages = Math.max(1, Math.ceil(result.total / itemsPerPage));
+      if (currentPage > newTotalPages) {
+        setCurrentPage(newTotalPages);
+      }
     } catch (err) {
       console.warn('loadDateNotes failed', err);
     }
@@ -134,6 +140,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (!isMountedRef.current) return;
       setDateNotes(notes);
       setTotalNotes(notes.length);
+      const newTotalPages = Math.max(1, Math.ceil(notes.length / itemsPerPage));
+      if (currentPage > newTotalPages) setCurrentPage(newTotalPages);
     } catch (err) {
       console.warn('loadTrashNotes failed', err);
     }
@@ -600,15 +608,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
-  const totalPages = Math.ceil(totalNotes / notesPerPage);
+  const totalPages = Math.max(1, Math.ceil(totalNotes / itemsPerPage));
 
   // Detect whether the sidebar-content currently requires scrolling; show pagination
   useEffect(() => {
-    // Show pagination whenever more than one page exists in Latest/Trash views
-    const shouldShow = (viewMode === 'latest' || viewMode === 'trash') && totalPages > 1 && searchMode === 'none';
-    setShowPagination(shouldShow);
-    // Keep it simple: show/hide when relevant dependencies change
-  }, [viewMode, totalPages, searchMode]);
+    // Compute itemsPerPage based on available height and fixed item size
+    const ITEM_HEIGHT = 56; // fixed per .date-view .note-item
+    const ITEM_MARGIN_V = 8; // total vertical margin (4px top + 4px bottom)
+    const ITEM_TOTAL = ITEM_HEIGHT + ITEM_MARGIN_V;
+    const PAGINATION_HEIGHT = 40; // approximate height of pagination controls
+
+    const compute = () => {
+      const el = contentRef.current;
+      if (!el) return;
+      const contentH = el.clientHeight;
+      // naive full-capacity without pagination
+      let items = Math.floor(contentH / ITEM_TOTAL);
+      if (items < 1) items = 1;
+
+      // If more notes than items, pagination will be shown; ensure there is space for pagination controls
+      if (totalNotes > items) {
+        while (items > 1 && (items * ITEM_TOTAL + PAGINATION_HEIGHT) > contentH) {
+          items -= 1;
+        }
+      }
+
+      if (items !== itemsPerPage) setItemsPerPage(items);
+      // Show pagination whenever more than one page exists in Latest/Trash views
+      const shouldShow = (viewMode === 'latest' || viewMode === 'trash') && Math.ceil(totalNotes / Math.max(1, items)) > 1 && searchMode === 'none';
+      setShowPagination(shouldShow);
+    };
+
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, [viewMode, totalNotes, searchMode, selectedMonths, selectedYears]);
 
   // Reset to page 1 when view mode or filters change to avoid stale pages
   useEffect(() => {
@@ -650,11 +684,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const renderDateView = () => {
     const filteredNotes = viewMode === 'trash' ? dateNotes : getFilteredNotes(dateNotes);
-    
+    // Determine which notes to show on this page. For `latest` we fetch a page from the DB
+    // so `dateNotes` already contains the current page. For `trash` we paginate client-side.
+    let displayedNotes: Note[] = [];
+    if (viewMode === 'latest') {
+      displayedNotes = filteredNotes;
+    } else {
+      const start = (currentPage - 1) * itemsPerPage;
+      displayedNotes = filteredNotes.slice(start, start + itemsPerPage);
+    }
+
     return (
       <div className="date-view">
         <div className="notes-list">
-          {filteredNotes.map(note => (
+          {displayedNotes.map(note => (
             <div
               key={note.id}
               className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}

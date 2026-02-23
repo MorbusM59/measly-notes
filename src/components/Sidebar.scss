@@ -88,6 +88,14 @@
   transition: box-shadow 0.2s;
   cursor: default;
 }
+/* Fixed-height note items for date/trash (uncategorized) views to allow reliable pagination */
+.date-view .note-item,
+.sidebar .date-view .note-item {
+  height: 56px;
+  padding: 8px;
+  box-sizing: border-box;
+  margin: 4px 0;
+}
 .note-item.selected {
   background: #FFFFFF;
   border: 1px solid var(--color-border-selected);
@@ -136,6 +144,13 @@
   font-weight: 500;
   margin-bottom: 4px;
   font-size: 14px;
+}
+/* Single-line truncation for titles in date/trash views */
+.date-view .note-title,
+.sidebar .date-view .note-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .note-date {
   font-size: 12px;
