@@ -21,7 +21,7 @@ export const App: React.FC = () => {
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [selectedYears, setSelectedYears] = useState<Set<number | 'older'>>(new Set());
-  const [viewMode, setViewMode] = useState<'date' | 'category'>('date');
+  const [viewMode, setViewMode] = useState<'latest' | 'active' | 'archived' | 'trash'>('latest');
 
   // Draggable / layout state and constraints
   const SIDEBAR_MIN = 220;
@@ -159,7 +159,9 @@ export const App: React.FC = () => {
         if (!tags || tags.length === 0) return;
         const primary = tags[0].tag?.name?.trim().toLowerCase();
         if (primary === 'deleted' || primary === 'archived') {
-          if (viewMode === 'date') setViewMode('category');
+          if (viewMode === 'latest') {
+            setViewMode(primary === 'deleted' ? 'trash' : 'archived');
+          }
         }
       } catch (err) {
         // non-fatal

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
 import { DateFilter } from './DateFilter';
 import { YearValue } from '../shared/filterConstants';
@@ -19,7 +19,7 @@ interface SidebarProps {
   onNoteDelete?: (noteId: number, nextNoteToSelect?: Note | null) => void;
 }
 
-type ViewMode = 'date' | 'category';
+type ViewMode = 'latest' | 'active' | 'archived' | 'trash';
 type SearchMode = 'none' | 'text' | 'tag';
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -31,14 +31,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedYears = new Set(),
   onMonthToggle,
   onYearToggle,
-  viewMode: externalViewMode = 'date',
+  viewMode: externalViewMode = 'latest',
   onViewModeChange,
   width = 320,
   onNoteDelete
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
-  const [internalViewMode, setInternalViewMode] = useState<ViewMode>('date');
+  const [internalViewMode, setInternalViewMode] = useState<ViewMode>('latest');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [dateNotes, setDateNotes] = useState<Note[]>([]);
   const [categoryHierarchy, setCategoryHierarchy] = useState<CategoryHierarchy>({});
@@ -51,6 +51,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [armed, setArmed] = useState<{ kind: 'none' | 'delete' | 'archive' | 'permanent'; noteId?: number | null; category?: string | null }>({ kind: 'none' });
   const notesPerPage = 20;
   const isMountedRef = React.useRef(true);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [showPagination, setShowPagination] = useState(false);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -71,10 +73,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Load notes based on view mode
   useEffect(() => {
     if (searchMode === 'none') {
-      if (viewMode === 'date') {
+      if (viewMode === 'latest') {
         loadDateNotes();
-      } else {
+      } else if (viewMode === 'active') {
         loadCategoryHierarchy();
+      } else if (viewMode === 'archived') {
+        loadArchivedHierarchy();
+      } else if (viewMode === 'trash') {
+        loadTrashNotes();
       }
     }
   }, [viewMode, currentPage, searchMode, refreshTrigger]);
@@ -110,12 +116,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
+  const loadArchivedHierarchy = async () => {
+    try {
+      const data = await window.electronAPI.getHierarchyForTag('archived');
+      if (!isMountedRef.current) return;
+      setCategoryHierarchy(data.hierarchy);
+      setUncategorizedNotes(data.uncategorizedNotes);
+    } catch (err) {
+      console.warn('loadArchivedHierarchy failed', err);
+    }
+  };
+
+  const loadTrashNotes = async () => {
+    try {
+      const notes = await window.electronAPI.getNotesInTrash();
+      if (!isMountedRef.current) return;
+      setDateNotes(notes);
+      setTotalNotes(notes.length);
+    } catch (err) {
+      console.warn('loadTrashNotes failed', err);
+    }
+  };
+
   // Auto-expand relevant categories when the hierarchy reloads or the selected note changes.
   // This makes tag changes reflect immediately in the menu: the note's primary and
   // secondary will be unfolded and all other primary/secondary entries will be folded in.
   useEffect(() => {
-    // Only apply this behavior in category view and when not searching.
-    if (viewMode !== 'category' || searchMode !== 'none') return;
+    // Only apply this behavior in active/archived (category-style) view and when not searching.
+    if ((viewMode !== 'active' && viewMode !== 'archived') || searchMode !== 'none') return;
     if (!selectedNote) return;
     if (!categoryHierarchy || Object.keys(categoryHierarchy).length === 0) return;
 
@@ -400,7 +428,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               if (onNoteDelete) onNoteDelete(note.id, nextNote);
               if (onNotesUpdate) onNotesUpdate();
               if (searchMode === 'none') {
-                if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+                if (viewMode === 'latest') await loadDateNotes(); else await loadCategoryHierarchy();
               }
             } catch (err) { console.warn('permanent delete failed', err); setArmed({ kind: 'none' }); }
           } else {
@@ -418,7 +446,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               // notify parent so TagInput and other panels refresh
               if (onNotesUpdate) onNotesUpdate();
               if (searchMode === 'none') {
-                if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+                if (viewMode === 'latest') await loadDateNotes(); else await loadCategoryHierarchy();
               }
             } catch (err) { console.warn('assign deleted failed', err); setArmed({ kind: 'none' }); }
           } else {
@@ -439,7 +467,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             if (!isMountedRef.current) return;
             if (onNotesUpdate) onNotesUpdate();
             if (searchMode === 'none') {
-              if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+              if (viewMode === 'latest') await loadDateNotes(); else await loadCategoryHierarchy();
             }
           } catch (err) { console.warn('remove protected tags failed', err); }
           return;
@@ -455,7 +483,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             setArmed({ kind: 'none' });
             if (onNotesUpdate) onNotesUpdate();
             if (searchMode === 'none') {
-              if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+              if (viewMode === 'latest') await loadDateNotes(); else await loadCategoryHierarchy();
             }
           } catch (err) { console.warn('assign archived failed', err); setArmed({ kind: 'none' }); }
         } else {
@@ -483,7 +511,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             setArmed({ kind: 'none' });
             if (onNotesUpdate) onNotesUpdate();
             if (searchMode === 'none') {
-              if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+              if (viewMode === 'latest') await loadDateNotes(); else await loadCategoryHierarchy();
             }
           } catch (err) { console.warn('mass delete failed', err); setArmed({ kind: 'none' }); }
         } else {
@@ -510,7 +538,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return searchResults.map(r => r.note);
     }
     
-    if (viewMode === 'date') {
+    if (viewMode === 'latest') {
       return getFilteredNotes(dateNotes);
     }
     
@@ -571,6 +599,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const totalPages = Math.ceil(totalNotes / notesPerPage);
 
+  // Detect whether the sidebar-content currently requires scrolling; show pagination
+  useEffect(() => {
+    const checkOverflow = () => {
+      const el = contentRef.current;
+      if (!el) { setShowPagination(false); return; }
+      const needsScroll = el.scrollHeight > el.clientHeight;
+      // Show pagination if content overflows OR we're on a later page (so user can go back)
+      const shouldShow = (needsScroll || currentPage > 1) && (viewMode === 'latest' || viewMode === 'trash') && totalPages > 1 && searchMode === 'none';
+      setShowPagination(shouldShow);
+    };
+
+    checkOverflow();
+    window.addEventListener('resize', checkOverflow);
+    return () => window.removeEventListener('resize', checkOverflow);
+  }, [viewMode, dateNotes, categoryHierarchy, uncategorizedNotes, searchMode, totalPages, currentPage, refreshTrigger]);
+
   const renderSearchResults = () => (
     <div className="search-results">
       <div className="search-header">
@@ -605,7 +649,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 
   const renderDateView = () => {
-    const filteredNotes = getFilteredNotes(dateNotes);
+    const filteredNotes = viewMode === 'trash' ? dateNotes : getFilteredNotes(dateNotes);
     
     return (
       <div className="date-view">
@@ -631,28 +675,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ))}
         </div>
         
-        {totalPages > 1 && (
-          <div className="pagination">
-            <button
-              className="page-btn"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            >
-              &lt;
-            </button>
-            <span className="page-info">
-              {((currentPage - 1) * notesPerPage) + 1}-
-              {Math.min(currentPage * notesPerPage, totalNotes)} of {totalNotes}
-            </span>
-            <button
-              className="page-btn"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            >
-              &gt;
-            </button>
-          </div>
-        )}
+        {/* pagination moved to the bottom of the sidebar so it's shown when the content area overflows */}
       </div>
     );
   };
@@ -828,34 +851,62 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {searchMode === 'none' && (
         <div className="view-toggle">
           <button
-            className={`toggle-btn ${viewMode === 'date' ? 'active' : ''}`}
-            onClick={() => handleViewModeChange('date')}
+            className={`toggle-btn ${viewMode === 'latest' ? 'active' : ''}`}
+            onClick={() => handleViewModeChange('latest')}
           >
-            Date
+            Latest
           </button>
           <button
-            className={`toggle-btn ${viewMode === 'category' ? 'active' : ''}`}
-            onClick={() => handleViewModeChange('category')}
+            className={`toggle-btn ${viewMode === 'active' ? 'active' : ''}`}
+            onClick={() => handleViewModeChange('active')}
           >
-            Category
+            Active
+          </button>
+          <button
+            className={`toggle-btn ${viewMode === 'archived' ? 'active' : ''}`}
+            onClick={() => handleViewModeChange('archived')}
+          >
+            Archived
+          </button>
+          <button
+            className={`toggle-btn ${viewMode === 'trash' ? 'active' : ''}`}
+            onClick={() => handleViewModeChange('trash')}
+          >
+            Trash
           </button>
         </div>
       )}
       
-      <div className="sidebar-content">
+      <div className="sidebar-content" ref={contentRef}>
         {searchMode !== 'none' ? renderSearchResults() : 
-         viewMode === 'date' ? renderDateView() : 
+         (viewMode === 'latest' || viewMode === 'trash') ? renderDateView() : 
          renderCategoryView()}
       </div>
-      
-      {searchMode === 'none' && (
-        <DateFilter
-          selectedMonths={selectedMonths}
-          selectedYears={selectedYears}
-          onMonthToggle={onMonthToggle}
-          onYearToggle={onYearToggle}
-        />
-      )}
+    
+        {showPagination && (
+          <div className="sidebar-pagination">
+            <button
+              className="sidebar-page-btn"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            >&lt;</button>
+            <span className="sidebar-page-number">{currentPage}</span>
+            <button
+              className="sidebar-page-btn"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            >&gt;</button>
+          </div>
+        )}
+
+        {searchMode === 'none' && (
+          <DateFilter
+            selectedMonths={selectedMonths}
+            selectedYears={selectedYears}
+            onMonthToggle={onMonthToggle}
+            onYearToggle={onYearToggle}
+          />
+        )}
     </div>
   );
 };

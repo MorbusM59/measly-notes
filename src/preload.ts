@@ -132,6 +132,13 @@ const electronAPI: IElectronAPI & {
   getCategoryHierarchy: async () => {
     return (await ipcRenderer.invoke('get-category-hierarchy')) as CategoryHierarchyResult;
   },
+  getHierarchyForTag: async (tagName: string) => {
+    assertNonEmptyString(tagName, 'tagName');
+    return (await ipcRenderer.invoke('get-hierarchy-for-tag', tagName)) as CategoryHierarchyResult;
+  },
+  getNotesInTrash: async () => {
+    return (await ipcRenderer.invoke('get-notes-in-trash')) as Note[];
+  },
 
   getLastEditedNote: async () => {
     return (await ipcRenderer.invoke('get-last-edited-note')) as Note | null;

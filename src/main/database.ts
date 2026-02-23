@@ -775,7 +775,19 @@ export function getCategoryHierarchy(): { hierarchy: any; uncategorizedNotes: No
       id: row.id, title: row.title, filePath: row.filePath, createdAt: row.createdAt, updatedAt: row.updatedAt,
       lastEdited: row.lastEdited ?? null
     };
-    const primary = row.primaryTag, secondary = row.secondaryTag, tertiary = row.tertiaryTag;
+    // Determine primary as the first non-protected tag among positions 0..2
+    const positions = [row.primaryTag, row.secondaryTag, row.tertiaryTag].map(x => x == null ? null : String(x));
+    let primary: string | null = null;
+    let secondary: string | null = null;
+    let tertiary: string | null = null;
+    for (let i = 0; i < positions.length; i++) {
+      const v = positions[i];
+      if (!v) continue;
+      if (!PROTECTED_TAGS.has(v) && primary == null) { primary = v; continue; }
+      if (!v) continue;
+      if (primary != null && secondary == null && !PROTECTED_TAGS.has(v)) { secondary = v; continue; }
+      if (primary != null && secondary != null && tertiary == null && !PROTECTED_TAGS.has(v)) { tertiary = v; }
+    }
     if (!primary) { uncategorizedNotes.push(note); return; }
 
     if (!hierarchy[primary]) hierarchy[primary] = { notes: [], secondary: {} };
@@ -791,14 +803,81 @@ export function getCategoryHierarchy(): { hierarchy: any; uncategorizedNotes: No
   uncategorizedNotes.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   // Reorder hierarchy keys so that normal tags (alphabetical) come first,
   // then 'archived' then 'deleted' (if present). This controls display order in the UI.
+  // Exclude protected tags from the returned hierarchy (they are special menus)
   const orderedHierarchy: any = {};
-  const keys = Object.keys(hierarchy).filter(Boolean);
-  const protectedOrder = ['archived', 'deleted'];
-  const normalKeys = keys.filter(k => !protectedOrder.includes(k)).sort((a, b) => a.localeCompare(b));
-  for (const k of normalKeys) orderedHierarchy[k] = hierarchy[k];
-  for (const pk of protectedOrder) {
-    if (keys.includes(pk)) orderedHierarchy[pk] = hierarchy[pk];
-  }
-
+  const keys = Object.keys(hierarchy).filter(Boolean).filter(k => !PROTECTED_TAGS.has(k));
+  keys.sort((a, b) => a.localeCompare(b));
+  for (const k of keys) orderedHierarchy[k] = hierarchy[k];
   return { hierarchy: orderedHierarchy, uncategorizedNotes };
+}
+
+export function getHierarchyForTag(tagName: string): { hierarchy: any; uncategorizedNotes: Note[] } {
+  const stmt = db.prepare(`
+    SELECT 
+      n.id, n.title, n.filePath, n.createdAt, n.updatedAt, n.lastEdited,
+      t0.name as pos0,
+      t1.name as pos1,
+      t2.name as pos2
+    FROM notes n
+    JOIN note_tags nt_filter ON n.id = nt_filter.noteId
+    JOIN tags tf ON nt_filter.tagId = tf.id
+    LEFT JOIN note_tags nt0 ON n.id = nt0.noteId AND nt0.position = 0
+    LEFT JOIN tags t0 ON nt0.tagId = t0.id
+    LEFT JOIN note_tags nt1 ON n.id = nt1.noteId AND nt1.position = 1
+    LEFT JOIN tags t1 ON nt1.tagId = t1.id
+    LEFT JOIN note_tags nt2 ON n.id = nt2.noteId AND nt2.position = 2
+    LEFT JOIN tags t2 ON nt2.tagId = t2.id
+    WHERE tf.name = ?
+    ORDER BY n.updatedAt DESC
+  `);
+  const rows = stmt.all(tagName) as Array<any>;
+
+  // Build hierarchy similar to getCategoryHierarchy but only for notes that have the tagName.
+  const hierarchy: any = {};
+  const uncategorizedNotes: Note[] = [];
+
+  rows.forEach(row => {
+    const note: Note = {
+      id: row.id, title: row.title, filePath: row.filePath, createdAt: row.createdAt, updatedAt: row.updatedAt,
+      lastEdited: row.lastEdited ?? null
+    };
+    const positions = [row.pos0, row.pos1, row.pos2].map((x: any) => x == null ? null : String(x));
+    let primary: string | null = null;
+    let secondary: string | null = null;
+    let tertiary: string | null = null;
+    for (let i = 0; i < positions.length; i++) {
+      const v = positions[i];
+      if (!v) continue;
+      if (!PROTECTED_TAGS.has(v) && primary == null) { primary = v; continue; }
+      if (!v) continue;
+      if (primary != null && secondary == null && !PROTECTED_TAGS.has(v)) { secondary = v; continue; }
+      if (primary != null && secondary != null && tertiary == null && !PROTECTED_TAGS.has(v)) { tertiary = v; }
+    }
+    if (!primary) { uncategorizedNotes.push(note); return; }
+    if (!hierarchy[primary]) hierarchy[primary] = { notes: [], secondary: {} };
+    if (!secondary) { hierarchy[primary].notes.push(note); return; }
+    if (!hierarchy[primary].secondary[secondary]) hierarchy[primary].secondary[secondary] = { notes: [], tertiary: {} };
+    if (!tertiary) { hierarchy[primary].secondary[secondary].notes.push(note); return; }
+    if (!hierarchy[primary].secondary[secondary].tertiary[tertiary]) hierarchy[primary].secondary[secondary].tertiary[tertiary] = [];
+    hierarchy[primary].secondary[secondary].tertiary[tertiary].push(note);
+  });
+
+  const ordered: any = {};
+  const keys = Object.keys(hierarchy).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  for (const k of keys) ordered[k] = hierarchy[k];
+  return { hierarchy: ordered, uncategorizedNotes };
+}
+
+export function getNotesInTrash(): Note[] {
+  // Return notes that have tag 'deleted', sorted by lastEdited desc
+  const stmt = db.prepare(`
+    SELECT n.*
+    FROM notes n
+    JOIN note_tags nt ON n.id = nt.noteId
+    JOIN tags t ON nt.tagId = t.id
+    WHERE t.name = 'deleted'
+    ORDER BY n.lastEdited DESC
+  `);
+  const rows = stmt.all() as Note[];
+  return rows;
 }

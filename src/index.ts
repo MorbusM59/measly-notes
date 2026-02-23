@@ -7,7 +7,7 @@ import {
   getNoteById, closeDatabase, updateNoteFilePath, getNotesPage,
   addTagToNote, removeTagFromNote, reorderNoteTags, getNoteTags,
   getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy, getLastEditedNote,
-  upsertNoteFts, removeNoteFts, searchNotes, saveNoteUiState, getNoteUiState
+  upsertNoteFts, removeNoteFts, searchNotes, saveNoteUiState, getNoteUiState, getHierarchyForTag, getNotesInTrash
 , renameTag } from './main/database';
 
 import { initFileSystem, saveNoteContent, loadNoteContent, deleteNoteFile } from './main/fileSystem';
@@ -483,6 +483,11 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('get-notes-by-primary-tag', async () => getNotesByPrimaryTag());
     ipcMain.handle('get-category-hierarchy', async () => getCategoryHierarchy());
+    ipcMain.handle('get-hierarchy-for-tag', async (_event, tagName: unknown) => {
+      if (!isString(tagName)) throw new Error('Invalid tagName');
+      return getHierarchyForTag(String(tagName));
+    });
+    ipcMain.handle('get-notes-in-trash', async () => getNotesInTrash());
     ipcMain.handle('get-last-edited-note', async () => getLastEditedNote() ?? null);
 
     ipcMain.handle('save-note-ui-state', async (_event, noteId: unknown, state: unknown) => {

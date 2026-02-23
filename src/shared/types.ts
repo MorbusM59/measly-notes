@@ -111,6 +111,8 @@ export interface IElectronAPI {
   // Category view operations
   getNotesByPrimaryTag: () => Promise<{ [tagName: string]: Note[] }>;
   getCategoryHierarchy: () => Promise<CategoryHierarchyResult>;
+  getHierarchyForTag: (tagName: string) => Promise<CategoryHierarchyResult>;
+  getNotesInTrash: () => Promise<Note[]>;
   getLastEditedNote: () => Promise<Note | null>;
 
   // Runtime controls
