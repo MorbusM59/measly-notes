@@ -25,6 +25,12 @@
   border-style: dashed;
 }
 
+.suggested-empty {
+  /* use shared empty-state styling (Roboto Condensed 16px) */
+  @extend .empty-state;
+  padding: 8px 0;
+}
+
 /* Responsive: keep input and tags usable on small screens */
 @media (max-width: 720px) {
   .tag-input-section {

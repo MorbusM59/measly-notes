@@ -22,6 +22,7 @@ export const App: React.FC = () => {
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [selectedYears, setSelectedYears] = useState<Set<number | 'older'>>(new Set());
   const [viewMode, setViewMode] = useState<'latest' | 'active' | 'archived' | 'trash'>('latest');
+  const [hasAnyNotes, setHasAnyNotes] = useState<boolean>(false);
 
   // Draggable / layout state and constraints
   const SIDEBAR_MIN = 220;
@@ -77,6 +78,13 @@ export const App: React.FC = () => {
       try {
         const last = await window.electronAPI.getLastEditedNote();
         if (last && isMountedRef.current) setSelectedNote(last);
+        // determine whether any notes exist
+        try {
+          const all = await window.electronAPI.getAllNotes();
+          if (isMountedRef.current) setHasAnyNotes(Array.isArray(all) && all.length > 0);
+        } catch (e) {
+          // non-fatal
+        }
       } catch (err) {
         console.warn('Could not get last edited note', err);
       }
@@ -132,6 +140,7 @@ export const App: React.FC = () => {
     if (!isMountedRef.current) return;
     setSelectedNote(note);
     setRefreshKey(k => k + 1);
+    setHasAnyNotes(true);
   };
 
   const handleSelectNote = async (note: Note) => {
@@ -194,6 +203,13 @@ export const App: React.FC = () => {
     }
     setRefreshKey(k => k + 1);
     setSidebarRefreshTrigger(t => t + 1);
+    // Recompute whether we still have any notes
+    try {
+      const all = await window.electronAPI.getAllNotes();
+      if (isMountedRef.current) setHasAnyNotes(Array.isArray(all) && all.length > 0);
+    } catch (e) {
+      // ignore
+    }
   };
 
   // Utilities
@@ -365,6 +381,7 @@ export const App: React.FC = () => {
       <div className="sidebar" style={{ gridArea: 'sidebar' }}>
         <Sidebar
           key={refreshKey}
+          hasAnyNotes={hasAnyNotes}
           selectedNote={selectedNote}
           onSelectNote={handleSelectNote}
           refreshTrigger={sidebarRefreshTrigger}
@@ -395,7 +412,7 @@ export const App: React.FC = () => {
 
       {/* Tag input */}
       <div className="tag-input-grid" style={{ gridArea: 'taginput' }}>
-        <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} refreshTrigger={sidebarRefreshTrigger} />
+          <TagInput note={selectedNote} onTagsChanged={handleSidebarRefresh} refreshTrigger={sidebarRefreshTrigger} hasAnyNotes={hasAnyNotes} />
       </div>
 
       {/* Left divider between tag and suggested (draggable) */}
@@ -418,6 +435,7 @@ export const App: React.FC = () => {
           width={suggestedWidth}
           onTagsChanged={handleSidebarRefresh}
           refreshTrigger={sidebarRefreshTrigger}
+          hasAnyNotes={hasAnyNotes}
         />
       </div>
 
@@ -639,6 +657,7 @@ export const App: React.FC = () => {
           onNoteUpdate={handleNoteUpdate}
           showPreview={showPreview}
           onTogglePreview={(next: boolean) => togglePreview(next)}
+          hasAnyNotes={hasAnyNotes}
         />
       </div>
     </div>

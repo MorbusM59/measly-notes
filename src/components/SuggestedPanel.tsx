@@ -9,9 +9,13 @@ interface SuggestedPanelProps {
   refreshTrigger?: number;
 }
 
+interface SuggestedPanelPropsExtended extends SuggestedPanelProps {
+  hasAnyNotes?: boolean;
+}
+
 const normalizeTagName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
 
-export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onTagsChanged, refreshTrigger }) => {
+export const SuggestedPanel: React.FC<SuggestedPanelPropsExtended> = ({ note, width, onTagsChanged, refreshTrigger, hasAnyNotes }) => {
   const [suggestedTags, setSuggestedTags] = useState<Tag[]>([]);
   const isMountedRef = React.useRef(true);
 
@@ -71,7 +75,9 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
         </div>
       ))}
       {suggestedTags.length === 0 && (
-        <div className="suggested-empty">No suggestions</div>
+        <div className="suggested-empty">{
+          note ? '' : 'Tags you have used before will appear here. Click them to quickly assign them to your current note. If a tag is no longer in use, it will disappear from this list.'
+        }</div>
       )}
     </div>
   );

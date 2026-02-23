@@ -44,6 +44,11 @@
   overflow: hidden;
 }
 
+.tag-input-container .empty-state {
+  /* use shared empty-state styling (Roboto Condensed 16px) */
+  @extend .empty-state;
+}
+
 .tag-pill.active {
   background: var(--color-tag-active-bg);
   color: var(--color-tag-active-text);

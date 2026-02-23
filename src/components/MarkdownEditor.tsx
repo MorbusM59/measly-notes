@@ -10,6 +10,7 @@ interface MarkdownEditorProps {
   onNoteUpdate?: (note: Note) => void;
   showPreview: boolean;
   onTogglePreview: (next: boolean) => void;
+  hasAnyNotes?: boolean;
 }
 
 type EditState = {
@@ -19,7 +20,7 @@ type EditState = {
 
 const EDIT_STATE_KEY_PREFIX = 'md-edit-state-';
 
-export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview }) => {
+export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview, hasAnyNotes }) => {
   const [content, setContent] = useState('');
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
 
@@ -1027,7 +1028,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     return (
       <div className="markdown-editor empty">
         <div className="empty-state">
-          <p>Select a note or create a new one with Ctrl+Enter</p>
+          <p>{hasAnyNotes ? 'Select a note or create a new one with Ctrl+Enter' : 'Go ahead and create your first note with Ctrl+Enter.'}</p>
         </div>
       </div>
     );

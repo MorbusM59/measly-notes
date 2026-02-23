@@ -8,6 +8,10 @@ interface TagInputProps {
   refreshTrigger?: number;
 }
 
+interface TagInputPropsExtended extends TagInputProps {
+  hasAnyNotes?: boolean;
+}
+
 /*
   TagInput: simplified active-tags-only rendering (no lingering "ghost" placeholders).
   Deletion UX: first click arms, second click deletes immediately.
@@ -15,7 +19,7 @@ interface TagInputProps {
   refreshTrigger: when parent increments this, component reloads tags.
 */
 
-export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refreshTrigger }) => {
+export const TagInput: React.FC<TagInputPropsExtended> = ({ note, onTagsChanged, refreshTrigger, hasAnyNotes }) => {
   const [inputValue, setInputValue] = useState('');
   const [noteTags, setNoteTags] = useState<NoteTag[]>([]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -150,7 +154,7 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
       try {
         await window.electronAPI.removeTagFromNote(note.id, tagId);
         if (!isMountedRef.current) return;
-        // No placeholder/ghost behavior anymore — simply reload active tags
+        // No placeholder/ghost behavior anymore â€” simply reload active tags
         setDeleteArmedIndex(null);
         await loadNoteTags();
         if (onTagsChanged) onTagsChanged();
@@ -206,7 +210,28 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
   };
 
   if (!note) {
-    return null;
+    // Show placeholder UI so the overall layout remains visible for new users
+    return (
+      <div className="tag-input-container">
+        <div className="tag-input-section">
+          <div className="tag-input-bar">
+            <div className="tag-input-wrapper">
+              <input
+                type="text"
+                className="tag-input"
+                value={''}
+                disabled
+                placeholder={hasAnyNotes ? 'Select a note to edit tags.' : 'Once you have created a note, you can add tags here.'}
+                aria-label="Tag input disabled"
+              />
+            </div>
+          </div>
+          <div className="tags-display">
+            <div className="empty-state">Tags appear here. Drag to change order, left click to remove or right click to edit them across all notes.</div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

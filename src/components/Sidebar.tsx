@@ -18,6 +18,7 @@ interface SidebarProps {
   onViewModeChange?: (mode: ViewMode) => void;
   width?: number;
   onNoteDelete?: (noteId: number, nextNoteToSelect?: Note | null) => void;
+  hasAnyNotes?: boolean;
 }
 
 type ViewMode = 'latest' | 'active' | 'archived' | 'trash';
@@ -35,7 +36,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   viewMode: externalViewMode = 'latest',
   onViewModeChange,
   width = 320,
-  onNoteDelete
+  onNoteDelete,
+  hasAnyNotes = false
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('none');
@@ -697,7 +699,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return (
       <div className="date-view">
         <div className="notes-list">
-          {displayedNotes.map(note => (
+          {displayedNotes.length === 0 ? (
+            <div className="empty-state" style={{ padding: 16, textAlign: 'center' }}>
+              {hasAnyNotes ? (
+                <div>No notes to show for the current filters.</div>
+              ) : (
+                <div>{viewMode === 'trash' ? 'This is where you will find your deleted notes. Deleted notes can be restored with a right click or purged from the database permanently by holding the control key and right clicking.' : 'This view lists your latest notes in the order they were last edited. This is great way to keep track of your most recent work at a glance. Notes in this view can be right clicked to archive them or moved to the trash bin by holding the control key while right clicking.'}</div>
+              )}
+            </div>
+          ) : (
+            displayedNotes.map(note => (
             <div
               key={note.id}
               className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
@@ -715,7 +726,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
               {/* delete button removed — use context menu (right-click) to arm/archive/delete */}
             </div>
-          ))}
+          ))) }
         </div>
         
         {/* pagination moved to the bottom of the sidebar so it's shown when the content area overflows */}
@@ -727,9 +738,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const filteredHierarchy = getFilteredHierarchy(categoryHierarchy);
     const filteredUncategorized = getFilteredNotes(uncategorizedNotes);
     
+    const hasHierarchy = Object.keys(filteredHierarchy).length > 0 || filteredUncategorized.length > 0;
     return (
       <div className="category-view">
-        {Object.entries(filteredHierarchy).map(([primaryTag, primaryData]) => {
+        {!hasHierarchy ? (
+          <div className="empty-state" style={{ padding: 16, textAlign: 'center' }}>
+            {hasAnyNotes ? (
+              <div>No categories to show. Assign tags to your notes to create categories.</div>
+            ) : (
+              <div>{viewMode === 'archived' ? 'This is where notes go when you archive them. This moves them out of your active notes, allowing you to keep your workspace clean. Archived notes can be restored to your active notes with a right click.' : 'This view groups your active notes by their primary, secondary and tertiary tags. This allows you to keep your workspace organized and easily navigate through your notes.'}</div>
+            )}
+          </div>
+        ) : (
+          Object.entries(filteredHierarchy).map(([primaryTag, primaryData]) => {
         const isPrimaryCollapsed = collapsedPrimary.has(primaryTag);
         const primaryNoteCount = primaryData.notes.length + 
           Object.values(primaryData.secondary).reduce((sum, secData) => {
@@ -845,7 +866,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
         );
-      })}
+      })) }
       
       {/* Uncategorized notes section */}
       {filteredUncategorized.length > 0 && (

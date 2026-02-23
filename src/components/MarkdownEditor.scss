@@ -184,10 +184,11 @@
 }
 
 /* Empty-state */
-.empty-state {
+.markdown-editor.empty .empty-state {
+  font-family: 'Roboto Condensed', 'Arial Narrow', 'Helvetica Condensed', sans-serif;
   text-align: center;
   color: #999;
-  font-size: 16px;
+  font-size: 24px; /* larger info text for markdown textarea */
 }
 
 /* --- Size classes for textarea --- */
