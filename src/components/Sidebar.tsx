@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+// icon assets are referenced by path at runtime
 import { Note, SearchResult, CategoryHierarchy } from '../shared/types';
 import { DateFilter } from './DateFilter';
 import { YearValue } from '../shared/filterConstants';
@@ -851,29 +852,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {searchMode === 'none' && (
         <div className="view-toggle">
           <button
-            className={`toggle-btn ${viewMode === 'latest' ? 'active' : ''}`}
+            className={`toggle-btn icon-btn btn-latest ${viewMode === 'latest' ? 'active' : ''}`}
             onClick={() => handleViewModeChange('latest')}
-          >
-            Latest
-          </button>
+            title="Latest"
+            aria-label="Latest"
+          />
           <button
-            className={`toggle-btn ${viewMode === 'active' ? 'active' : ''}`}
+            className={`toggle-btn icon-btn btn-active ${viewMode === 'active' ? 'active' : ''}`}
             onClick={() => handleViewModeChange('active')}
-          >
-            Active
-          </button>
+            title="Active"
+            aria-label="Active"
+          />
           <button
-            className={`toggle-btn ${viewMode === 'archived' ? 'active' : ''}`}
+            className={`toggle-btn icon-btn btn-archived ${viewMode === 'archived' ? 'active' : ''}`}
             onClick={() => handleViewModeChange('archived')}
-          >
-            Archived
-          </button>
+            title="Archived"
+            aria-label="Archived"
+          />
           <button
-            className={`toggle-btn ${viewMode === 'trash' ? 'active' : ''}`}
+            className={`toggle-btn icon-btn btn-deleted ${viewMode === 'trash' ? 'active' : ''}`}
             onClick={() => handleViewModeChange('trash')}
-          >
-            Trash
-          </button>
+            title="Trash"
+            aria-label="Trash"
+          />
         </div>
       )}
       
