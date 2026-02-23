@@ -32,7 +32,7 @@ export const SuggestedPanel: React.FC<SuggestedPanelProps> = ({ note, width, onT
       const topTags = await window.electronAPI.getTopTags(30);
       const currentTags = await window.electronAPI.getNoteTags(note.id);
       const currentTagIds = new Set(currentTags.map(t => t.tagId));
-      const filtered = topTags.filter(t => !currentTagIds.has(t.id));
+      const filtered = topTags.filter(t => !currentTagIds.has(t.id) && !['deleted', 'archived'].includes((t.name || '').trim().toLowerCase()));
       filtered.sort((a, b) => a.name.localeCompare(b.name));
       if (!isMountedRef.current) return;
       setSuggestedTags(filtered.slice(0, 15));

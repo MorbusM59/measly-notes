@@ -51,6 +51,24 @@
   flex: 0 0 auto;
 }
 
+/* Protected tags (deleted / archived) - visually distinct */
+.tag-pill.active.protected {
+  background: #ffffff; /* white bg */
+  border: 1px solid #000000; /* black outline */
+  box-shadow: none;
+}
+.tag-pill.active.protected.deleted {
+  color: #b71c1c; /* red text */
+}
+.tag-pill.active.protected.archived {
+  color: #000000; /* black text */
+}
+
+/* Protected tags are not draggable; show pointer but no drag feedback */
+.tag-pill.active.protected[draggable="false"] {
+  cursor: default;
+}
+
 /* Visual for an armed tag */
 .tag-pill.active.armed {
   outline: 2px solid var(--color-tag-remove-border, #d9534f);

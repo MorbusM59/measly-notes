@@ -4,6 +4,7 @@ import { Note, Tag, NoteTag, SearchResult, SnippetSegment } from '../shared/type
 import { getDataDir, getDbPath } from './paths';
 
 let db: Database.Database;
+const PROTECTED_TAGS = new Set(['deleted', 'archived']);
 
 // Initialize database schema
 export async function initDatabase(): Promise<void> {
@@ -86,6 +87,19 @@ export function createNote(title: string, filePath: string): Note {
     INSERT INTO notes (title, filePath, createdAt, updatedAt, lastEdited)
     VALUES (?, ?, ?, ?, ?)
   `);
+
+  // Ensure protected tags exist
+  try {
+    // createOrGetTag is declared below; call via normalized names after it's available
+    // We'll lazily ensure tags exist after function definitions by calling here is not safe,
+    // so instead ensure at end of initDatabase by creating them directly via SQL if absent.
+    const existing = db.prepare('SELECT name FROM tags WHERE name IN (?, ?)').all('deleted', 'archived') as Array<{ name: string }>;
+    const found = new Set(existing.map(r => r.name));
+    if (!found.has('deleted')) db.prepare('INSERT INTO tags (name) VALUES (?)').run('deleted');
+    if (!found.has('archived')) db.prepare('INSERT INTO tags (name) VALUES (?)').run('archived');
+  } catch (err) {
+    console.warn('[db] ensure protected tags failed', err);
+  }
   const result = stmt.run(title, filePath, now, now, now);
 
   // Ensure freshly-created notes have no persisted cursor/scroll state
@@ -175,9 +189,16 @@ export function closeDatabase(): void {
 /* Pagination */
 export function getNotesPage(page: number, perPage: number): { notes: Note[]; total: number } {
   const offset = (page - 1) * perPage;
-  const notesStmt = db.prepare('SELECT * FROM notes ORDER BY updatedAt DESC LIMIT ? OFFSET ?');
+  const notesStmt = db.prepare(`
+    SELECT n.*, t0.name as primaryTag
+    FROM notes n
+    LEFT JOIN note_tags nt0 ON n.id = nt0.noteId AND nt0.position = 0
+    LEFT JOIN tags t0 ON nt0.tagId = t0.id
+    ORDER BY n.updatedAt DESC
+    LIMIT ? OFFSET ?
+  `);
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM notes');
-  const notes = notesStmt.all(perPage, offset) as Note[];
+  const notes = notesStmt.all(perPage, offset) as Array<Note & { primaryTag?: string | null }>;
   const result = countStmt.get() as { count: number };
   return { notes, total: result.count };
 }
@@ -196,6 +217,11 @@ export function renameTag(tagId: number, newName: string): void {
   const normalized = normalizeTagName(newName);
   const existingTag = db.prepare('SELECT * FROM tags WHERE id = ?').get(tagId) as Tag | undefined;
   if (!existingTag) throw new Error('Tag not found');
+
+  // Prevent renaming protected tags
+  if (PROTECTED_TAGS.has(existingTag.name)) {
+    throw new Error('This tag is protected and cannot be renamed');
+  }
 
   const conflict = db.prepare('SELECT * FROM tags WHERE name = ?').get(normalized) as Tag | undefined;
   if (conflict && conflict.id !== tagId) {
@@ -219,9 +245,37 @@ export function renameTag(tagId: number, newName: string): void {
 
 export function addTagToNote(noteId: number, tagName: string, position: number): NoteTag {
   const tag = createOrGetTag(tagName);
+
+  // If adding a protected tag, force it to primary (position 0) and shift existing positions up.
+  if (PROTECTED_TAGS.has(tag.name)) {
+    position = 0;
+  }
+  // If inserting at primary (position 0), shift existing positions up to make room.
+  if (position === 0) {
+    db.prepare('UPDATE note_tags SET position = position + 1 WHERE noteId = ?').run(noteId);
+  }
+
+  // Remove any existing relation for this tag (safe)
   db.prepare('DELETE FROM note_tags WHERE noteId = ? AND tagId = ?').run(noteId, tag.id);
+
+  // If adding a protected tag, remove the other protected tag(s) from this note to enforce mutual exclusion
+  if (PROTECTED_TAGS.has(tag.name)) {
+    for (const other of PROTECTED_TAGS) {
+      if (other === tag.name) continue;
+      const otherRow = db.prepare('SELECT id FROM tags WHERE name = ?').get(other) as { id: number } | undefined;
+      if (otherRow) db.prepare('DELETE FROM note_tags WHERE noteId = ? AND tagId = ?').run(noteId, otherRow.id);
+    }
+  }
+
   db.prepare('INSERT INTO note_tags (noteId, tagId, position) VALUES (?, ?, ?)').run(noteId, tag.id, position);
-  return { noteId, tagId: tag.id, position, tag };
+
+  // Re-normalize positions to 0..n-1 in current order
+  const rows = db.prepare('SELECT tagId FROM note_tags WHERE noteId = ? ORDER BY position').all(noteId) as Array<{ tagId: number }>;
+  rows.forEach((r, idx) => {
+    db.prepare('UPDATE note_tags SET position = ? WHERE noteId = ? AND tagId = ?').run(idx, noteId, r.tagId);
+  });
+
+  return { noteId, tagId: tag.id, position: rows.findIndex(r => r.tagId === tag.id), tag };
 }
 
 export function removeTagFromNote(noteId: number, tagId: number): void {
@@ -268,6 +322,7 @@ export function getTopTags(limit: number): Tag[] {
     JOIN note_tags nt ON t.id = nt.tagId
     JOIN notes n ON nt.noteId = n.id
     WHERE (n.updatedAt >= ? OR n.createdAt >= ? OR (n.lastEdited IS NOT NULL AND n.lastEdited >= ?))
+      AND t.name NOT IN ('deleted', 'archived')
     GROUP BY t.id
     HAVING usage_count > 0
     ORDER BY usage_count DESC, t.name
@@ -734,5 +789,16 @@ export function getCategoryHierarchy(): { hierarchy: any; uncategorizedNotes: No
   });
 
   uncategorizedNotes.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  return { hierarchy, uncategorizedNotes };
+  // Reorder hierarchy keys so that normal tags (alphabetical) come first,
+  // then 'archived' then 'deleted' (if present). This controls display order in the UI.
+  const orderedHierarchy: any = {};
+  const keys = Object.keys(hierarchy).filter(Boolean);
+  const protectedOrder = ['archived', 'deleted'];
+  const normalKeys = keys.filter(k => !protectedOrder.includes(k)).sort((a, b) => a.localeCompare(b));
+  for (const k of normalKeys) orderedHierarchy[k] = hierarchy[k];
+  for (const pk of protectedOrder) {
+    if (keys.includes(pk)) orderedHierarchy[pk] = hierarchy[pk];
+  }
+
+  return { hierarchy: orderedHierarchy, uncategorizedNotes };
 }

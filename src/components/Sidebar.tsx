@@ -25,6 +25,7 @@ type SearchMode = 'none' | 'text' | 'tag';
 export const Sidebar: React.FC<SidebarProps> = ({ 
   onSelectNote, 
   selectedNote, 
+  onNotesUpdate,
   refreshTrigger,
   selectedMonths = new Set(),
   selectedYears = new Set(),
@@ -47,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [collapsedPrimary, setCollapsedPrimary] = useState<Set<string>>(new Set());
   const [collapsedSecondary, setCollapsedSecondary] = useState<Set<string>>(new Set());
   const [deleteArmedId, setDeleteArmedId] = useState<number | null>(null);
+  const [armed, setArmed] = useState<{ kind: 'none' | 'delete' | 'archive' | 'permanent'; noteId?: number | null; category?: string | null }>({ kind: 'none' });
   const notesPerPage = 20;
   const isMountedRef = React.useRef(true);
 
@@ -81,7 +83,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     try {
       const result = await window.electronAPI.getNotesPage(currentPage, notesPerPage);
       if (!isMountedRef.current) return;
-      setDateNotes(result.notes);
+      // Exclude notes whose primary tag is 'deleted'; exclude 'archived' unless date filters are active
+      const filtered = (result.notes || []).filter((n: any) => {
+        const primary = (n as any).primaryTag as string | undefined | null;
+        if (!primary) return true;
+        const p = primary.trim().toLowerCase();
+        if (p === 'deleted') return false;
+        if (p === 'archived' && selectedMonths.size === 0 && selectedYears.size === 0) return false;
+        return true;
+      });
+      setDateNotes(filtered);
       setTotalNotes(result.total);
     } catch (err) {
       console.warn('loadDateNotes failed', err);
@@ -189,6 +200,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
     }
     
+    // Exclude notes with primary tag 'deleted' from date view entirely
+    const primary = (note as any).primaryTag as string | undefined | null;
+    if (primary === 'deleted') return false;
+    // Archived notes are hidden in date view unless a date filter is active
+    if (primary === 'archived' && !hasMonthFilter && !hasYearFilter) return false;
+
     return monthMatch && yearMatch;
   };
 
@@ -356,54 +373,135 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCollapsedSecondary(newCollapsedSecondary);
   };
 
-  const handleDeleteNote = async (e: React.MouseEvent, noteId: number) => {
-    e.stopPropagation();
-
-    if (deleteArmedId !== noteId) {
-      // First click - arm the button
-      setDeleteArmedId(noteId);
-    } else {
-      // Second click - prefer the last-edited note as the selection target
-      let nextNote: Note | null = null;
-
+  const handleNoteContextMenu = async (e: React.MouseEvent, note: Note) => {
+    e.preventDefault();
+    try {
+      // Ensure we derive the primary tag from the DB to be robust across views
+      let primary: string | undefined | null = (note as any).primaryTag as string | undefined | null;
       try {
-        // Ask the backend for the last edited note (may return null)
-        const lastEdited = await window.electronAPI.getLastEditedNote();
-        if (lastEdited && lastEdited.id !== noteId) {
-          nextNote = lastEdited;
-        } else {
-          // Fallback: find next/previous visible note in the current view
-          nextNote = findNextNoteAfterDeletion(noteId);
-        }
-
-        // Actually delete
-        await window.electronAPI.deleteNote(noteId);
-        if (!isMountedRef.current) return;
-        setDeleteArmedId(null);
-
-        // Notify parent to handle selection and refresh
-        if (onNoteDelete) {
-          onNoteDelete(noteId, nextNote);
-        }
-
-        // Reload the current view
-        if (searchMode === 'none') {
-          if (viewMode === 'date') {
-            await loadDateNotes();
+        const tags = await window.electronAPI.getNoteTags(note.id);
+        if (tags && tags.length > 0) primary = tags[0].tag?.name ?? primary;
+      } catch (err) {
+        // ignore - fall back to whatever was present on `note`
+      }
+      if (e.ctrlKey) {
+        // Shift + right-click -> delete flow (arm then assign 'deleted' as primary)
+        if (primary === 'deleted') {
+          // Already deleted -> arm for permanent deletion
+          if (armed.kind === 'permanent' && armed.noteId === note.id) {
+            // Confirm permanent delete
+            try {
+              await window.electronAPI.deleteNote(note.id);
+              if (!isMountedRef.current) return;
+              setArmed({ kind: 'none' });
+              const last = await window.electronAPI.getLastEditedNote();
+              let nextNote: Note | null = null;
+              if (last && last.id !== note.id) nextNote = last; else nextNote = findNextNoteAfterDeletion(note.id);
+              if (onNoteDelete) onNoteDelete(note.id, nextNote);
+              if (onNotesUpdate) onNotesUpdate();
+              if (searchMode === 'none') {
+                if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+              }
+            } catch (err) { console.warn('permanent delete failed', err); setArmed({ kind: 'none' }); }
           } else {
-            await loadCategoryHierarchy();
+            setArmed({ kind: 'permanent', noteId: note.id });
+          }
+        } else {
+          // Arm for assigning 'deleted'
+          if (armed.kind === 'delete' && armed.noteId === note.id) {
+            try {
+              await window.electronAPI.addTagToNote(note.id, 'deleted', 0);
+              const tags = await window.electronAPI.getNoteTags(note.id);
+              await window.electronAPI.reorderNoteTags(note.id, tags.map(t => t.tagId));
+              if (!isMountedRef.current) return;
+              setArmed({ kind: 'none' });
+              // notify parent so TagInput and other panels refresh
+              if (onNotesUpdate) onNotesUpdate();
+              if (searchMode === 'none') {
+                if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+              }
+            } catch (err) { console.warn('assign deleted failed', err); setArmed({ kind: 'none' }); }
+          } else {
+            setArmed({ kind: 'delete', noteId: note.id });
           }
         }
-      } catch (err) {
-        console.warn('delete flow failed', err);
-        if (isMountedRef.current) setDeleteArmedId(null);
+      } else {
+        // Right-click without Ctrl -> if the note is protected, remove protected tags; otherwise archive flow (arm then assign 'archived')
+        if (primary === 'archived' || primary === 'deleted') {
+          try {
+            const tags = await window.electronAPI.getNoteTags(note.id);
+            for (const t of tags) {
+              const n = (t.tag?.name || '').trim().toLowerCase();
+              if (n === 'archived' || n === 'deleted') {
+                await window.electronAPI.removeTagFromNote(note.id, t.tagId);
+              }
+            }
+            if (!isMountedRef.current) return;
+            if (onNotesUpdate) onNotesUpdate();
+            if (searchMode === 'none') {
+              if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+            }
+          } catch (err) { console.warn('remove protected tags failed', err); }
+          return;
+        }
+
+        // Right-click without Ctrl -> archive flow (arm then assign 'archived')
+        if (armed.kind === 'archive' && armed.noteId === note.id) {
+          try {
+            await window.electronAPI.addTagToNote(note.id, 'archived', 0);
+            const tags = await window.electronAPI.getNoteTags(note.id);
+            await window.electronAPI.reorderNoteTags(note.id, tags.map(t => t.tagId));
+            if (!isMountedRef.current) return;
+            setArmed({ kind: 'none' });
+            if (onNotesUpdate) onNotesUpdate();
+            if (searchMode === 'none') {
+              if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+            }
+          } catch (err) { console.warn('assign archived failed', err); setArmed({ kind: 'none' }); }
+        } else {
+          setArmed({ kind: 'archive', noteId: note.id });
+        }
       }
+    } catch (err) {
+      console.warn('note context menu failed', err);
     }
+  };
+
+  const handleCategoryHeaderContextMenu = async (e: React.MouseEvent, primaryTag: string) => {
+    e.preventDefault();
+    try {
+      if (primaryTag === 'deleted' && e.ctrlKey) {
+        if (armed.kind === 'permanent' && armed.category === primaryTag) {
+          // Confirm permanent deletion of all notes in this category
+          try {
+            const groups = await window.electronAPI.getNotesByPrimaryTag();
+            const notes = groups['deleted'] || [];
+            for (const n of notes) {
+              try { await window.electronAPI.deleteNote(n.id); } catch (err) { console.warn('delete note failed', n.id, err); }
+            }
+            if (!isMountedRef.current) return;
+            setArmed({ kind: 'none' });
+            if (onNotesUpdate) onNotesUpdate();
+            if (searchMode === 'none') {
+              if (viewMode === 'date') await loadDateNotes(); else await loadCategoryHierarchy();
+            }
+          } catch (err) { console.warn('mass delete failed', err); setArmed({ kind: 'none' }); }
+        } else {
+          setArmed({ kind: 'permanent', category: primaryTag });
+        }
+      }
+    } catch (err) { console.warn('category context menu failed', err); }
+  };
+
+  const handleDeleteNote = async (e: React.MouseEvent, noteId: number) => {
+    // Legacy delete button removed. Keep function for compatibility but no-op.
+    e.stopPropagation();
+    return;
   };
 
   const handleDeleteMouseLeave = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setDeleteArmedId(null);
+    setArmed({ kind: 'none' });
   };
 
   // Helper function to get all visible notes in current view
@@ -515,8 +613,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {filteredNotes.map(note => (
             <div
               key={note.id}
-              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-              onClick={() => onSelectNote(note)}
+              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
+              onClick={() => { setArmed({ kind: 'none' }); onSelectNote(note); }}
+              onContextMenu={(e) => handleNoteContextMenu(e, note)}
             >
               <div className="note-content">
                 <div className="note-title">{note.title}</div>
@@ -527,14 +626,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ) : null}
                 </div>
               </div>
-              <button
-                className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
-                onClick={(e) => handleDeleteNote(e, note.id)}
-                onMouseLeave={handleDeleteMouseLeave}
-                title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
-              >
-                ×
-              </button>
+              {/* delete button removed — use context menu (right-click) to arm/archive/delete */}
             </div>
           ))}
         </div>
@@ -584,6 +676,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div
               className="category-header primary"
               onClick={() => togglePrimaryCategory(primaryTag)}
+              onContextMenu={(e) => handleCategoryHeaderContextMenu(e, primaryTag)}
             >
               <span className="category-arrow">
                 {isPrimaryCollapsed ? '▶' : '▼'}
@@ -620,8 +713,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           {secondaryData.notes.map(note => (
                             <div
                               key={note.id}
-                              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-                              onClick={() => onSelectNote(note)}
+                              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
+                              onClick={() => { setArmed({ kind: 'none' }); onSelectNote(note); }}
+                              onContextMenu={(e) => handleNoteContextMenu(e, note)}
                             >
                               <div className="note-content">
                                 <div className="note-title">{note.title}</div>
@@ -630,14 +724,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                                 </div>
                               </div>
-                              <button
-                                className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
-                                onClick={(e) => handleDeleteNote(e, note.id)}
-                                onMouseLeave={handleDeleteMouseLeave}
-                                title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
-                              >
-                                ×
-                              </button>
+                              {/* delete button removed — use context menu (right-click) to arm/archive/delete */}
                             </div>
                           ))}
                           
@@ -648,8 +735,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               {notes.map(note => (
                                 <div
                                   key={note.id}
-                                  className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-                                  onClick={() => onSelectNote(note)}
+                                  className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
+                                  onClick={() => { setArmed({ kind: 'none' }); onSelectNote(note); }}
+                                  onContextMenu={(e) => handleNoteContextMenu(e, note)}
                                 >
                                   <div className="note-content">
                                     <div className="note-title">{note.title}</div>
@@ -658,14 +746,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                       {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                                     </div>
                                   </div>
-                                  <button
-                                    className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
-                                    onClick={(e) => handleDeleteNote(e, note.id)}
-                                    onMouseLeave={handleDeleteMouseLeave}
-                                    title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
-                                  >
-                                    ×
-                                  </button>
+                                  {/* delete button removed — use context menu (right-click) to arm/archive/delete */}
                                 </div>
                               ))}
                             </div>
@@ -680,8 +761,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {primaryData.notes.map(note => (
                   <div
                     key={note.id}
-                    className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-                    onClick={() => onSelectNote(note)}
+                    className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
+                    onClick={() => { setArmed({ kind: 'none' }); onSelectNote(note); }}
+                    onContextMenu={(e) => handleNoteContextMenu(e, note)}
                   >
                     <div className="note-content">
                       <div className="note-title">{note.title}</div>
@@ -690,14 +772,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                       </div>
                     </div>
-                    <button
-                      className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
-                      onClick={(e) => handleDeleteNote(e, note.id)}
-                      onMouseLeave={handleDeleteMouseLeave}
-                      title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
-                    >
-                      ×
-                    </button>
+                    {/* delete button removed — use context menu (right-click) to arm/archive/delete */}
                   </div>
                 ))}
               </div>
@@ -717,8 +792,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {filteredUncategorized.map(note => (
               <div
                 key={note.id}
-                className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''}`}
-                onClick={() => onSelectNote(note)}
+                className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
+                onClick={() => { setArmed({ kind: 'none' }); onSelectNote(note); }}
+                onContextMenu={(e) => handleNoteContextMenu(e, note)}
               >
                 <div className="note-content">
                   <div className="note-title">{note.title}</div>
@@ -727,14 +803,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {note.lastEdited ? <span className="note-edited">[{formatLastEdited(note.lastEdited)}]</span> : null}
                   </div>
                 </div>
-                <button
-                  className={`note-delete-btn ${deleteArmedId === note.id ? 'delete-armed' : ''}`}
-                  onClick={(e) => handleDeleteNote(e, note.id)}
-                  onMouseLeave={handleDeleteMouseLeave}
-                  title={deleteArmedId === note.id ? 'Click again to confirm deletion' : 'Delete note'}
-                >
-                  ×
-                </button>
+                {/* delete button removed — use context menu (right-click) to arm/archive/delete */}
               </div>
             ))}
           </div>

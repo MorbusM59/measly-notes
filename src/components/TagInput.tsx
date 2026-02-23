@@ -28,6 +28,10 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
   const inputRef = useRef<HTMLInputElement>(null);
   const isMountedRef = useRef(true);
   const focusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isProtectedTag = (name?: string) => {
+    const n = (name || '').trim().toLowerCase();
+    return n === 'deleted' || n === 'archived';
+  };
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -79,6 +83,12 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
 
     const normalized = normalizeTagName(inputValue);
     if (!normalized) return;
+    if (isProtectedTag(normalized)) {
+      // Protected tags must be assigned via the sidebar context menu to ensure primary placement
+      console.warn('Protected tags (deleted/archived) must be assigned via sidebar context menu');
+      setInputValue('');
+      return;
+    }
 
     const position = noteTags.length;
     try {
@@ -164,6 +174,8 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
   };
 
   const handleDragStart = (index: number) => {
+    const t = noteTags[index]?.tag?.name;
+    if (isProtectedTag(t)) return; // disallow dragging protected tags
     setDraggedIndex(index);
   };
 
@@ -173,7 +185,14 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
 
   const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
-    if (!note || draggedIndex === null || draggedIndex === targetIndex) return;
+    if (!note || draggedIndex === null || draggedIndex === targetIndex) { setDraggedIndex(null); return; }
+
+    // If the drop target is a protected tag, cancel reorder and return dragged tag to original position
+    const targetTagName = noteTags[targetIndex]?.tag?.name ?? '';
+    if (isProtectedTag(targetTagName)) {
+      setDraggedIndex(null);
+      return;
+    }
 
     const newTags = [...noteTags];
     const [moved] = newTags.splice(draggedIndex, 1);
@@ -212,25 +231,33 @@ export const TagInput: React.FC<TagInputProps> = ({ note, onTagsChanged, refresh
           {noteTags.map((noteTag, slotIdx) => {
             const tag = noteTag.tag as Tag;
             const armed = deleteArmedIndex === slotIdx;
+            const protectedFlag = isProtectedTag(tag?.name);
+            const protectedClass = protectedFlag ? ` protected ${((tag?.name||'').trim().toLowerCase())}` : '';
             return (
               <div
                 key={noteTag.tagId}
-                className={`tag-pill active${armed ? ' armed' : ''}`}
-                draggable
+                className={`tag-pill active${armed ? ' armed' : ''}${protectedClass}`}
+                draggable={!protectedFlag}
                 onDragStart={() => handleDragStart(slotIdx)}
                 onDragOver={(e) => handleDragOver(e)}
                 onDrop={(e) => handleDrop(e, slotIdx)}
                 onClick={() => handleActiveTagClick(slotIdx, tag, noteTag.tagId)}
                 onContextMenu={(ev) => {
                   ev.preventDefault();
+                  // Prevent renaming protected tags
+                  const normalized = (tag?.name || '').trim().toLowerCase();
+                  if (normalized === 'deleted' || normalized === 'archived') {
+                    // no-op: protected tag cannot be renamed
+                    return;
+                  }
                   // start renaming: load tag name into input and focus
                   setRenamingTagId(noteTag.tagId);
                   setInputValue(tag?.name ?? '');
-                              if (focusTimeoutRef.current) {
-                                clearTimeout(focusTimeoutRef.current);
-                                focusTimeoutRef.current = null;
-                              }
-                              focusTimeoutRef.current = setTimeout(() => inputRef.current?.focus(), 10);
+                  if (focusTimeoutRef.current) {
+                    clearTimeout(focusTimeoutRef.current);
+                    focusTimeoutRef.current = null;
+                  }
+                  focusTimeoutRef.current = setTimeout(() => inputRef.current?.focus(), 10);
                 }}
                 onMouseLeave={() => handleActiveTagMouseLeave(slotIdx)}
                 title={armed ? 'Click again to delete or move cursor away to cancel' : 'Click to arm deletion'}

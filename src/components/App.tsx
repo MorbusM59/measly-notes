@@ -150,7 +150,21 @@ export const App: React.FC = () => {
   };
 
   const handleSidebarRefresh = () => {
-    setSidebarRefreshTrigger(t => t + 1);
+    (async () => {
+      setSidebarRefreshTrigger(t => t + 1);
+      // If the selected note became 'deleted' or 'archived', switch to category view so it's visible
+      try {
+        if (!selectedNote) return;
+        const tags = await window.electronAPI.getNoteTags(selectedNote.id);
+        if (!tags || tags.length === 0) return;
+        const primary = tags[0].tag?.name?.trim().toLowerCase();
+        if (primary === 'deleted' || primary === 'archived') {
+          if (viewMode === 'date') setViewMode('category');
+        }
+      } catch (err) {
+        // non-fatal
+      }
+    })();
   };
 
   const handleMonthToggle = (month: number, event: React.MouseEvent) => {
@@ -362,6 +376,7 @@ export const App: React.FC = () => {
           onViewModeChange={setViewMode}
           width={sidebarWidth}
           onNoteDelete={handleNoteDelete}
+          onNotesUpdate={handleSidebarRefresh}
         />
       </div>
 

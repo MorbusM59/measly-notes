@@ -7,6 +7,7 @@ export interface Note {
   createdAt: string;
   updatedAt: string;
   lastEdited?: string | null;
+  primaryTag?: string | null;
   // UI state persisted per-note
   progressPreview?: number | null;
   progressEdit?: number | null;
