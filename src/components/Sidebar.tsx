@@ -604,19 +604,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Detect whether the sidebar-content currently requires scrolling; show pagination
   useEffect(() => {
-    const checkOverflow = () => {
-      const el = contentRef.current;
-      if (!el) { setShowPagination(false); return; }
-      const needsScroll = el.scrollHeight > el.clientHeight;
-      // Show pagination if content overflows OR we're on a later page (so user can go back)
-      const shouldShow = (needsScroll || currentPage > 1) && (viewMode === 'latest' || viewMode === 'trash') && totalPages > 1 && searchMode === 'none';
-      setShowPagination(shouldShow);
-    };
+    // Show pagination whenever more than one page exists in Latest/Trash views
+    const shouldShow = (viewMode === 'latest' || viewMode === 'trash') && totalPages > 1 && searchMode === 'none';
+    setShowPagination(shouldShow);
+    // Keep it simple: show/hide when relevant dependencies change
+  }, [viewMode, totalPages, searchMode]);
 
-    checkOverflow();
-    window.addEventListener('resize', checkOverflow);
-    return () => window.removeEventListener('resize', checkOverflow);
-  }, [viewMode, dateNotes, categoryHierarchy, uncategorizedNotes, searchMode, totalPages, currentPage, refreshTrigger]);
+  // Reset to page 1 when view mode or filters change to avoid stale pages
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [viewMode, selectedMonths, selectedYears, searchMode]);
 
   const renderSearchResults = () => (
     <div className="search-results">

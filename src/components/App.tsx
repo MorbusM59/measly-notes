@@ -248,8 +248,7 @@ export const App: React.FC = () => {
       document.removeEventListener('mousemove', handleMove);
       document.removeEventListener('mouseup', handleUp);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDraggingSidebar, sidebarWidth, tagWidth, suggestedWidth]);
+  }, [isDraggingSidebar]);
 
   // Left divider drag (between tag and suggested) � update ratioRef on drag end.
   useEffect(() => {
@@ -289,8 +288,7 @@ export const App: React.FC = () => {
       document.removeEventListener('mousemove', handleMove);
       document.removeEventListener('mouseup', handleUp);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDraggingLeftDivider, sidebarWidth, tagWidth, suggestedWidth]);
+  }, [isDraggingLeftDivider]);
 
   // Window resize: preserve the last user ratio (ratioRef) and adjust tag/suggested accordingly.
   useEffect(() => {
