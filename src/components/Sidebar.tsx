@@ -231,9 +231,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     
     // Exclude notes with primary tag 'deleted' from date view entirely
     const primary = (note as any).primaryTag as string | undefined | null;
-    if (primary === 'deleted') return false;
+    const p = primary ? primary.trim().toLowerCase() : null;
+    if (p === 'deleted') return false;
     // Archived notes are hidden in date view unless a date filter is active
-    if (primary === 'archived' && !hasMonthFilter && !hasYearFilter) return false;
+    if (p === 'archived' && !hasMonthFilter && !hasYearFilter) return false;
 
     return monthMatch && yearMatch;
   };
@@ -411,8 +412,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       } catch (err) {
         // ignore - fall back to whatever was present on `note`
       }
+      // Normalize for robust comparisons
+      primary = primary ? (primary as string).trim().toLowerCase() : primary;
       if (e.ctrlKey) {
-        // Shift + right-click -> delete flow (arm then assign 'deleted' as primary)
+      // Ctrl + right-click -> delete flow (arm then assign 'deleted' as primary)
         if (primary === 'deleted') {
           // Already deleted -> arm for permanent deletion
           if (armed.kind === 'permanent' && armed.noteId === note.id) {
@@ -497,7 +500,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleCategoryHeaderContextMenu = async (e: React.MouseEvent, primaryTag: string) => {
     e.preventDefault();
     try {
-      if (primaryTag === 'deleted' && e.ctrlKey) {
+      const norm = primaryTag ? primaryTag.trim().toLowerCase() : primaryTag;
+      if (norm === 'deleted' && e.ctrlKey) {
         if (armed.kind === 'permanent' && armed.category === primaryTag) {
           // Confirm permanent deletion of all notes in this category
           try {

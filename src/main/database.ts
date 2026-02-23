@@ -194,10 +194,17 @@ export function getNotesPage(page: number, perPage: number): { notes: Note[]; to
     FROM notes n
     LEFT JOIN note_tags nt0 ON n.id = nt0.noteId AND nt0.position = 0
     LEFT JOIN tags t0 ON nt0.tagId = t0.id
+    WHERE t0.name IS NULL OR LOWER(t0.name) NOT IN ('deleted', 'archived')
     ORDER BY n.updatedAt DESC
     LIMIT ? OFFSET ?
   `);
-  const countStmt = db.prepare('SELECT COUNT(*) as count FROM notes');
+  const countStmt = db.prepare(`
+    SELECT COUNT(*) as count
+    FROM notes n
+    LEFT JOIN note_tags nt0 ON n.id = nt0.noteId AND nt0.position = 0
+    LEFT JOIN tags t0 ON nt0.tagId = t0.id
+    WHERE t0.name IS NULL OR LOWER(t0.name) NOT IN ('deleted', 'archived')
+  `);
   const notes = notesStmt.all(perPage, offset) as Array<Note & { primaryTag?: string | null }>;
   const result = countStmt.get() as { count: number };
   return { notes, total: result.count };
@@ -287,7 +294,33 @@ export function removeTagFromNote(noteId: number, tagId: number): void {
 }
 
 export function reorderNoteTags(noteId: number, tagIds: number[]): void {
-  tagIds.forEach((tagId, index) => {
+  // Ensure protected tags (deleted/archived) remain at position 0 if present.
+  let newOrder = [...tagIds];
+  try {
+    const protNames = Array.from(PROTECTED_TAGS);
+    if (protNames.length > 0) {
+      const placeholders = protNames.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT id, name FROM tags WHERE LOWER(name) IN (${placeholders})`).all(...protNames) as Array<{ id: number; name: string }>;
+      const protIdSet = new Set(rows.map(r => r.id));
+      // Build a new order: any protected tag ids (in the order they appear in protNames/rows)
+      const protIdsInRequest: number[] = [];
+      for (const r of rows) {
+        if (newOrder.includes(r.id)) protIdsInRequest.push(r.id);
+      }
+      if (protIdsInRequest.length > 0) {
+        // Remove protected ids from their current positions
+        newOrder = newOrder.filter(id => !protIdSet.has(id));
+        // Insert protected ids at the front in the same order
+        newOrder = [...protIdsInRequest, ...newOrder];
+      }
+    }
+  } catch (err) {
+    // Non-fatal - if anything goes wrong, fall back to provided order
+    console.warn('[db] reorderNoteTags protected-tag reorder failed', err);
+    newOrder = [...tagIds];
+  }
+
+  newOrder.forEach((tagId, index) => {
     db.prepare('UPDATE note_tags SET position = ? WHERE noteId = ? AND tagId = ?').run(index, noteId, tagId);
   });
 }
@@ -322,7 +355,7 @@ export function getTopTags(limit: number): Tag[] {
     JOIN note_tags nt ON t.id = nt.tagId
     JOIN notes n ON nt.noteId = n.id
     WHERE (n.updatedAt >= ? OR n.createdAt >= ? OR (n.lastEdited IS NOT NULL AND n.lastEdited >= ?))
-      AND t.name NOT IN ('deleted', 'archived')
+      AND LOWER(t.name) NOT IN ('deleted', 'archived')
     GROUP BY t.id
     HAVING usage_count > 0
     ORDER BY usage_count DESC, t.name
@@ -760,6 +793,11 @@ export function getCategoryHierarchy(): { hierarchy: any; uncategorizedNotes: No
     LEFT JOIN tags t1 ON nt1.tagId = t1.id
     LEFT JOIN note_tags nt2 ON n.id = nt2.noteId AND nt2.position = 2
     LEFT JOIN tags t2 ON nt2.tagId = t2.id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM note_tags ntp
+      JOIN tags tp ON ntp.tagId = tp.id
+      WHERE ntp.noteId = n.id AND LOWER(tp.name) IN ('deleted', 'archived')
+    )
     ORDER BY t0.name, t1.name, t2.name, n.updatedAt DESC
   `);
   const rows = stmt.all() as Array<{
@@ -875,7 +913,7 @@ export function getNotesInTrash(): Note[] {
     FROM notes n
     JOIN note_tags nt ON n.id = nt.noteId
     JOIN tags t ON nt.tagId = t.id
-    WHERE t.name = 'deleted'
+    WHERE LOWER(t.name) = 'deleted'
     ORDER BY n.lastEdited DESC
   `);
   const rows = stmt.all() as Note[];
