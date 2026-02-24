@@ -615,6 +615,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
+  // Date indicator helpers for Latest/Trash views
+  const getWeekStartTimestamp = (date: Date) => {
+    // Normalize to local Monday 00:00:00. Use (getDay()+6)%7 to make Monday=0
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const dayIndex = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - dayIndex);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+
+  const getDateIndicatorClass = (note: Note) => {
+    if (!note || !note.updatedAt) return '';
+    const now = new Date();
+    const noteDate = new Date(note.updatedAt);
+
+    // Today
+    if (
+      now.getFullYear() === noteDate.getFullYear() &&
+      now.getMonth() === noteDate.getMonth() &&
+      now.getDate() === noteDate.getDate()
+    ) {
+      return 'date-today';
+    }
+
+    // This workweek: same calendar week (Monday-start). This avoids "last 7 days" semantics.
+    const nowWeekStart = getWeekStartTimestamp(now);
+    const noteWeekStart = getWeekStartTimestamp(noteDate);
+    if (nowWeekStart === noteWeekStart) {
+      return 'date-week';
+    }
+
+    // This month
+    if (
+      now.getFullYear() === noteDate.getFullYear() &&
+      now.getMonth() === noteDate.getMonth()
+    ) {
+      return 'date-month';
+    }
+
+    return '';
+  };
+
   const totalPages = Math.max(1, Math.ceil(totalNotes / itemsPerPage));
 
   // Detect whether the sidebar-content currently requires scrolling; show pagination
@@ -725,7 +767,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             displayedNotes.map(note => (
             <div
               key={note.id}
-              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
+              className={`note-item ${selectedNote?.id === note.id ? 'selected' : ''} ${getDateIndicatorClass(note)} ${armed.kind === 'delete' && armed.noteId === note.id ? 'armed-delete' : ''} ${armed.kind === 'archive' && armed.noteId === note.id ? 'armed-archive' : ''} ${armed.kind === 'permanent' && armed.noteId === note.id ? 'armed-permanent' : ''}`}
               onClick={() => { setArmed({ kind: 'none' }); onSelectNote(note); }}
               onContextMenu={(e) => handleNoteContextMenu(e, note)}
             >

@@ -310,3 +310,15 @@
   margin-left: 6px;
   opacity: 65%;
 }
+
+/* Date indicator defaults (can be customized by user) */
+/* Priority/day logic implemented in Sidebar.tsx ensures only one of these classes applies */
+.note-item.date-today {
+  border-radius: var(--border-radius-regular) var(--border-radius-regular) 48px var(--border-radius-regular);
+}
+.note-item.date-week {
+  border-radius: var(--border-radius-regular) var(--border-radius-regular) 24px var(--border-radius-regular);
+}
+.note-item.date-month {
+  border-radius: var(--border-radius-regular) var(--border-radius-regular) 12px var(--border-radius-regular);
+}
