@@ -704,7 +704,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {hasAnyNotes ? (
                 <div>No notes to show for the current filters.</div>
               ) : (
-                <div>{viewMode === 'trash' ? 'This is where you will find your deleted notes. Deleted notes can be restored with a right click or purged from the database permanently by holding the control key and right clicking.' : 'This view lists your latest notes in the order they were last edited. This is great way to keep track of your most recent work at a glance. Notes in this view can be right clicked to archive them or moved to the trash bin by holding the control key while right clicking.'}</div>
+                <div>
+                  {viewMode === 'trash' ? (
+                    <span>
+                      This is where you will find your deleted notes. (Notes can be deleted from other views by right clicking them while holding the control key.) <br /><br />
+                      Deleted notes in the trash bin can be restored with a right click or purged from the database permanently by holding the control key and right clicking once more.
+                    </span>
+                  ) : (
+                    <span>This view lists your notes in the order they were last edited. It's a great way to keep track of your most recent work at a glance.</span>
+                  )}
+                </div>
               )}
             </div>
           ) : (
@@ -746,7 +755,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {hasAnyNotes ? (
               <div>No categories to show. Assign tags to your notes to create categories.</div>
             ) : (
-              <div>{viewMode === 'archived' ? 'This is where notes go when you archive them. This moves them out of your active notes, allowing you to keep your workspace clean. Archived notes can be restored to your active notes with a right click.' : 'This view groups your active notes by their primary, secondary and tertiary tags. This allows you to keep your workspace organized and easily navigate through your notes.'}</div>
+              <div>
+                {viewMode === 'archived' ? (
+                  <span>
+                    This is where notes go when you archive them. (Notes in other views can be moved to the archive with a right click.)<br /><br />
+                    Archiving a note moves it out of your active notes, allowing you to keep your workspace clean.<br /><br />
+                    Archived notes can be restored to your active notes with a right click.
+                  </span>
+                ) : (
+                  <span>This view groups your active notes by their primary, secondary and tertiary tags. This allows you to keep your workspace organized and easily navigate through your notes.</span>
+                )}
+              </div>
             )}
           </div>
         ) : (
