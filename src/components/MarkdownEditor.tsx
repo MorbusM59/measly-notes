@@ -730,44 +730,45 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
       const listMatch = currentLine.match(/^[ \t]*([-])\s+/);
       let insert: string;
-      if (e.shiftKey) {
-        // Shift+Enter: add two trailing spaces to current line to create a Markdown hard break,
-        // then create a new line with same indentation but no list marker
+      // If Shift+Enter on a list item, create a hard break and place the caret aligned
+      // under the text after the bullet marker: add two trailing spaces, newline, and
+      // same leading indentation plus three extra spaces so the new line lines up.
+      if (e.shiftKey && listMatch) {
         const before = content.substring(0, start);
         const after = content.substring(end);
         const currentLineBeforeCursor = content.substring(lineStart, start);
         const needsSpaces = !currentLineBeforeCursor.endsWith('  ');
         const spaces = needsSpaces ? '  ' : '';
-        // We'll insert spaces before the newline so they remain on the previous line
-        insert = spaces + '\n' + leading;
-        // build newText using original before/after
-        const newText = before + insert + after;
-        const newCursorPos = start + spaces.length + 1 + leading.length;
+        const insertHard = spaces + '\n' + leading + '   ';
+        const newText = before + insertHard + after;
+        const newCursorPos = start + spaces.length + 1 + leading.length + 3;
         setContent(newText);
         handleContentChange(newText);
         scheduleTimeout(() => {
-            textarea.focus();
-            textarea.setSelectionRange(newCursorPos, newCursorPos);
-            ensureCaretVisible();
-          }, 0);
-        return;
-      } else if (listMatch) {
-        // Continue list: keep leading indent + '- '
-        insert = '\n' + leading + listMatch[1] + ' ';
-      } else {
-        // Default: preserve indentation
-        insert = '\n' + leading;
-      }
-
-      const newText = content.substring(0, start) + insert + content.substring(end);
-      const newCursorPos = start + insert.length;
-      setContent(newText);
-      handleContentChange(newText);
-      scheduleTimeout(() => {
           textarea.focus();
           textarea.setSelectionRange(newCursorPos, newCursorPos);
           ensureCaretVisible();
         }, 0);
+        return;
+      }
+
+      // Default: create a Markdown hard break (two trailing spaces + newline) and preserve indentation
+      const before = content.substring(0, start);
+      const after = content.substring(end);
+      const currentLineBeforeCursor = content.substring(lineStart, start);
+      const needsSpaces = !currentLineBeforeCursor.endsWith('  ');
+      const spaces = needsSpaces ? '  ' : '';
+      // Insert spaces before the newline so they remain on the previous line
+      const insertHard = spaces + '\n' + leading;
+      const newText = before + insertHard + after;
+      const newCursorPos = start + spaces.length + 1 + leading.length;
+      setContent(newText);
+      handleContentChange(newText);
+      scheduleTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        ensureCaretVisible();
+      }, 0);
       return;
     }
 
