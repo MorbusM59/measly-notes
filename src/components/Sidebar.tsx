@@ -210,7 +210,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setCollapsedPrimary(new Set(Object.keys(categoryHierarchy))); // collapse all primaries
       setCollapsedSecondary(new Set(allSecondaryKeys)); // collapse all secondaries
     }
-  }, [categoryHierarchy, selectedNote, refreshTrigger, viewMode, searchMode]);
+  // Note: intentionally do NOT include `selectedNote` as a dependency so that
+  // simply selecting a different note does NOT cause the menu to re-collapse
+  // or jump. We still want the auto-expand behavior when the hierarchy or
+  // refresh trigger updates (e.g. after tag changes or a reload), so those
+  // remain in the dependency list.
+  }, [categoryHierarchy, refreshTrigger, viewMode, searchMode]);
 
   // Filter notes by date
   const filterNotesByDate = (note: Note): boolean => {
