@@ -1087,7 +1087,7 @@ export async function reconcileNotesWithFs(opts?: { markMissingAsDeleted?: boole
     const base = path.basename(f, '.md');
     // Read file content early so we can attempt title-based matching to existing missing notes
     let content = '';
-    try { content = await fs.readFile(f, 'utf-8'); } catch { content = ''; }
+    try { const { normalizeFileEncoding } = await import('./fileSystem'); content = await normalizeFileEncoding(f); } catch { content = ''; }
     const derivedTitle = (() => {
       const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       if (lines.length > 0) {
