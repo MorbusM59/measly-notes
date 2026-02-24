@@ -125,4 +125,8 @@ export interface IElectronAPI {
   exportPdf: (folderPath: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
   // Tag management
   renameTag: (tagId: number, newName: string) => Promise<{ ok: boolean; error?: string }>;
+  // Data folder sync / import / purge
+  triggerSync: () => Promise<{ createdNoteIds: number[]; updatedPaths: Array<{ noteId: number; oldPath: string; newPath: string }>; markedDeletedNoteIds: number[] }>;
+  importFolder: () => Promise<{ imported: number; createdNoteIds: number[]; errors?: string[] }>;
+  purgeTrash: () => Promise<{ purgedNoteIds: number[]; errors?: string[] }>;
 }

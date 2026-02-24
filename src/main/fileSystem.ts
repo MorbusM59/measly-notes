@@ -11,11 +11,18 @@ export async function initFileSystem(): Promise<void> {
   }
 }
 
-export async function saveNoteContent(noteId: number, content: string): Promise<string> {
+export async function saveNoteContent(noteId: number, content: string, destFileName?: string): Promise<string> {
   const notesDir = getNotesDir();
-  const filePath = path.join(notesDir, `${noteId}.md`);
+  const filePath = destFileName ? path.join(notesDir, destFileName) : path.join(notesDir, `${noteId}.md`);
   await fs.writeFile(filePath, content, 'utf-8');
   return filePath;
+}
+
+export async function copyFileToNotes(srcPath: string, destFileName: string): Promise<string> {
+  const notesDir = getNotesDir();
+  const dest = path.join(notesDir, destFileName);
+  await fs.copyFile(srcPath, dest);
+  return dest;
 }
 
 export async function loadNoteContent(filePath: string): Promise<string> {

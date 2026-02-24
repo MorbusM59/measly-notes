@@ -1,0 +1,48 @@
+:root {
+  --btn-bg: #f0f0f0;
+  --btn-border: #ccc;
+  --btn-hover-bg: #e0e0e0;
+  --danger-bg: #fff5f5;
+  --danger-border: #f5c2c2;
+  --danger-color: #8b0000;
+  --danger-hover-bg: #ffecec;
+  --utility-btn-radius: 6px;
+}
+
+.utility-controls {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  padding: 4px;
+}
+
+.utility-controls .toolbar-btn {
+  width: 100%;
+  padding: 8px 10px;
+}
+
+.utility-controls .toolbar-btn.danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-color);
+}
+
+.utility-controls .toolbar-btn.danger:hover {
+  background: #ffecec;
+}
+
+.sync-btn {
+  border-radius: var(--utility-btn-radius) 0 0 0;
+}
+
+.import-btn {
+  border-radius: 0 var(--utility-btn-radius)0 0;
+}
+
+.pdf-btn {
+  border-radius: 0 0 0 var(--utility-btn-radius);
+}
+
+.trash-btn {
+  border-radius: 0 0 var(--utility-btn-radius) 0;
+}

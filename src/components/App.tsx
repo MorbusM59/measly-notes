@@ -14,6 +14,7 @@ import {
 import './Shared.scss';
 import './App.scss';
 import { SuggestedPanel } from './SuggestedPanel';
+import Utility from './Utility';
 
 export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -201,6 +202,88 @@ export const App: React.FC = () => {
       if (isMountedRef.current) setHasAnyNotes(Array.isArray(all) && all.length > 0);
     } catch (e) {
       // ignore
+    }
+  };
+
+  const handleExportPdf = async (chooseFolder = false) => {
+    try {
+      const reselect = chooseFolder;
+      const saved = localStorage.getItem('pdf-export-folder');
+      let folder = saved && !reselect ? saved : null;
+      if (!folder) {
+        folder = await (window as any).electronAPI.selectExportFolder();
+        if (!folder) return; // user cancelled
+        localStorage.setItem('pdf-export-folder', folder);
+      }
+
+      // Choose element to export: prefer preview when visible
+      const previewEl = document.querySelector('.markdown-preview') as HTMLElement | null;
+      const textareaEl = document.querySelector('.markdown-textarea') as HTMLTextAreaElement | null;
+      const container = showPreview ? (previewEl ?? textareaEl) : (textareaEl ?? previewEl);
+      if (!container) return;
+
+      // Create a printable clone. If it's a textarea, render its text into a div that preserves newlines.
+      const existingGhost = document.getElementById('pdf-export-ghost');
+      if (existingGhost) existingGhost.remove();
+      const ghost = document.createElement('div');
+      ghost.id = 'pdf-export-ghost';
+
+      const isTextarea = container.tagName === 'TEXTAREA' || container.classList.contains('markdown-textarea');
+      if (isTextarea) {
+        const ta = container as HTMLTextAreaElement;
+        const printable = document.createElement('div');
+        printable.className = 'pdf-export-textarea-clone';
+        printable.textContent = ta.value;
+        printable.style.whiteSpace = 'pre-wrap';
+        printable.style.wordBreak = 'break-word';
+        printable.style.fontFamily = 'inherit';
+        printable.style.fontSize = 'inherit';
+        printable.style.lineHeight = '1.4';
+        printable.style.color = 'black';
+        printable.style.background = 'white';
+        printable.style.padding = '16px';
+        ghost.appendChild(printable);
+      } else {
+        // clone the node to keep styles
+        const clone = (container as HTMLElement).cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+        ghost.appendChild(clone);
+      }
+
+      ghost.style.display = 'none';
+      document.body.appendChild(ghost);
+
+      // Insert minimal print CSS that shows only the ghost during printing
+      const css = `@media print { body > *:not(#pdf-export-ghost) { display: none !important; } #pdf-export-ghost { display: block !important; } }`;
+      const styleEl = document.createElement('style');
+      styleEl.id = 'pdf-export-style';
+      styleEl.appendChild(document.createTextNode(css));
+      document.head.appendChild(styleEl);
+
+      // Build filename: YY-MM-DD_<title truncated to 50>.pdf
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(-2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const datePart = `${yy}-${mm}-${dd}`;
+      const rawTitle = (selectedNote?.title ?? 'Untitled').trim() || 'Untitled';
+      const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
+      const truncated = sanitize(rawTitle).substring(0, 50);
+      const fileName = `${datePart}_${truncated}.pdf`;
+
+      const res = await (window as any).electronAPI.exportPdf(folder, fileName);
+
+      // cleanup
+      try { const ex = document.getElementById('pdf-export-style'); if (ex) ex.remove(); } catch { /* ignore */ }
+      try { const g = document.getElementById('pdf-export-ghost'); if (g) g.remove(); } catch { /* ignore */ }
+
+      if (!res || !res.ok) {
+        console.warn('PDF export failed', res?.error);
+      } else {
+        console.log('Exported PDF to', res.path);
+      }
+    } catch (err) {
+      console.warn('Export PDF error', err);
     }
   };
 
@@ -443,202 +526,7 @@ export const App: React.FC = () => {
       {/* Utility fixed */}
       <div className="utility-grid" style={{ gridArea: 'utility' }}>
         <div className="utility-area">
-          <button
-            className="toolbar-btn"
-            title="Export to PDF (Shift+click to choose folder)"
-            onClick={async (e) => {
-              const reselect = e.shiftKey;
-              try {
-                // Determine export folder (persist in localStorage)
-                const saved = localStorage.getItem('pdf-export-folder');
-                let folder = saved && !reselect ? saved : null;
-                if (!folder) {
-                  folder = await (window as any).electronAPI.selectExportFolder();
-                  if (!folder) return; // user cancelled
-                  localStorage.setItem('pdf-export-folder', folder);
-                }
-
-                // Export whatever is currently visible (edit or view) � do not switch modes.
-
-                // compute visible padding from the element we will export (preview or textarea)
-                const previewEl = document.querySelector('.markdown-preview') as HTMLElement | null;
-                const textareaEl = document.querySelector('.markdown-textarea') as HTMLTextAreaElement | null;
-                // choose element to export based on current mode (showPreview)
-                const origCandidate = showPreview ? (previewEl ?? textareaEl) : (textareaEl ?? previewEl);
-                const container = origCandidate ?? document.querySelector('.editor-content') as HTMLElement | null;
-                const style = container ? window.getComputedStyle(container) : null;
-                const padTop = style ? parseFloat(style.paddingTop || '0') : 0;
-                const padRight = style ? parseFloat(style.paddingRight || '0') : 0;
-                const padBottom = style ? parseFloat(style.paddingBottom || '0') : 0;
-                const padLeft = style ? parseFloat(style.paddingLeft || '0') : 0;
-
-                // Create a print-only ghost element that copies `.editor-content` and sits at top-left
-                // so printing produces a tightly-packed PDF without offsets. We inject print CSS
-                // that hides all other content and sizes the ghost to the A4 printable width.
-                // Use the selected preview or textarea element as the export source
-                const orig = origCandidate as HTMLElement | null;
-                if (!orig) return;
-
-                // Remove any existing ghost
-                const existingGhost = document.getElementById('pdf-export-ghost');
-                if (existingGhost) existingGhost.remove();
-
-                const ghost = document.createElement('div');
-                ghost.id = 'pdf-export-ghost';
-
-                // If the source is a textarea (edit mode), create a printable div that preserves
-                // the textarea's text styling but renders as normal flow content to avoid line splitting.
-                let clone: HTMLElement;
-                try {
-                  const isTextarea = orig.tagName === 'TEXTAREA' || orig.classList.contains('markdown-textarea');
-                  if (isTextarea) {
-                    const ta = orig as HTMLTextAreaElement;
-                    const computed = window.getComputedStyle(ta);
-                    const fontFamily = computed.fontFamily || 'monospace';
-                    const fontSize = computed.fontSize || '16px';
-                    // compute integer pixel line-height to avoid subpixel rounding issues
-                    const lineHeight = computed.lineHeight;
-                    let lhPx = 0;
-                    if (lineHeight && lineHeight !== 'normal') {
-                      lhPx = Math.round(parseFloat(lineHeight));
-                    } else {
-                      lhPx = Math.round(parseFloat(fontSize) * 1.2);
-                    }
-
-                    const printable = document.createElement('div');
-                    printable.className = 'pdf-export-textarea-clone';
-                    // Use textContent to preserve plaintext and newlines
-                    printable.textContent = ta.value;
-                    // Apply inline styles to mimic the textarea visual (but render as flow content)
-                    printable.style.whiteSpace = 'pre-wrap';
-                    printable.style.wordBreak = 'break-word';
-                    printable.style.fontFamily = fontFamily;
-                    printable.style.fontSize = fontSize;
-                    printable.style.lineHeight = `${lhPx}px`;
-                    printable.style.color = computed.color || '#000';
-                    printable.style.background = 'white';
-                    printable.style.padding = computed.padding || '0';
-                    printable.style.margin = '0';
-                    printable.style.overflow = 'visible';
-                    // prevent page breaks inside this block
-                    printable.style.pageBreakInside = 'avoid';
-                    printable.style.breakInside = 'avoid';
-                    ghost.appendChild(printable);
-                    clone = printable;
-                  } else {
-                    // clone the selected element (preview) normally
-                    clone = orig.cloneNode(true) as HTMLElement;
-                    clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
-                    // copy textarea values inside preview if any
-                    try {
-                      const origTextareas = Array.from(orig.querySelectorAll('textarea')) as HTMLTextAreaElement[];
-                      const cloneTextareas = Array.from(clone.querySelectorAll('textarea')) as HTMLTextAreaElement[];
-                      for (let i = 0; i < origTextareas.length; i++) {
-                        const ota = origTextareas[i];
-                        const cta = cloneTextareas[i];
-                        if (cta && ota) {
-                          cta.value = ota.value;
-                          cta.textContent = ota.value;
-                        }
-                      }
-                      } catch (err) {
-                        console.warn('App: failed copying textarea values into clone', err);
-                      }
-                    ghost.appendChild(clone);
-                  }
-                } catch (err) {
-                  // fallback to cloning orig
-                  clone = orig.cloneNode(true) as HTMLElement;
-                  clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
-                  ghost.appendChild(clone);
-                }
-                // keep hidden until print
-                ghost.style.display = 'none';
-                document.body.appendChild(ghost);
-
-                // compute CSS that makes only the ghost visible during print and sizes it to A4 printable width
-                const css = `
-                  /* PDF export temporary styles */
-                  @media print {
-                    @page { size: A4; margin: calc(1cm + ${padTop}px) calc(1cm + ${padRight}px) calc(1cm + ${padBottom}px) calc(1cm + ${padLeft}px); }
-                    html, body { margin: 0; background: white !important; }
-                    /* hide everything except our ghost */
-                    body > *:not(#pdf-export-ghost) { display: none !important; }
-                    /* show ghost and its contents */
-                    #pdf-export-ghost { display: block !important; position: relative !important; margin: 0 !important; background: white !important; }
-                    /* width: A4 page width minus left/right page margins (1cm + visible padding each) */
-                    #pdf-export-ghost { width: calc(210mm - ( (1cm + ${padLeft}px) + (1cm + ${padRight}px) )); }
-                    /* remove borders and shadows from the ghost container itself, but preserve styling of nested elements */
-                    #pdf-export-ghost { box-shadow: none !important; -webkit-box-shadow: none !important; border: none !important; outline: none !important; background: white !important; }
-
-                    /* Printing tweaks to avoid splitting lines across pages. Preserve nested element styling,
-                       but prevent page breaks inside block-level content where possible. Also ensure overflow
-                       is visible so lines aren't clipped. */
-                    #pdf-export-ghost, #pdf-export-ghost * { -webkit-print-color-adjust: exact !important; }
-                    #pdf-export-ghost p,
-                    #pdf-export-ghost pre,
-                    #pdf-export-ghost code,
-                    #pdf-export-ghost li,
-                    #pdf-export-ghost h1,
-                    #pdf-export-ghost h2,
-                    #pdf-export-ghost h3,
-                    #pdf-export-ghost h4,
-                    #pdf-export-ghost h5,
-                    #pdf-export-ghost h6,
-                    #pdf-export-ghost blockquote {
-                      page-break-inside: avoid !important;
-                      break-inside: avoid !important;
-                      -webkit-column-break-inside: avoid !important;
-                      overflow: visible !important;
-                    }
-                    /* Avoid orphaning single lines across pages */
-                    #pdf-export-ghost * { widows: 2; orphans: 2; }
-                  }
-                `;
-                const styleEl = document.createElement('style');
-                styleEl.id = 'pdf-export-style';
-                styleEl.appendChild(document.createTextNode(css));
-                document.head.appendChild(styleEl);
-
-                // build file name: YY-MM-DD_<title truncated to 50>.pdf
-                const now = new Date();
-                const yy = String(now.getFullYear()).slice(-2);
-                const mm = String(now.getMonth() + 1).padStart(2, '0');
-                const dd = String(now.getDate()).padStart(2, '0');
-                const datePart = `${yy}-${mm}-${dd}`;
-                const rawTitle = (selectedNote?.title ?? 'Untitled').trim() || 'Untitled';
-                const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
-                const truncated = sanitize(rawTitle).substring(0, 50);
-                const fileName = `${datePart}_${truncated}.pdf`;
-
-                const res = await (window as any).electronAPI.exportPdf(folder, fileName);
-
-                // clean up temporary styles and ghost element
-                try {
-                  const ex = document.getElementById('pdf-export-style'); if (ex) ex.remove();
-                    } catch (err) {
-                      console.warn('App: failed to create printable clone, falling back to node clone', err);
-                    }
-                try {
-                  const g = document.getElementById('pdf-export-ghost'); if (g) g.remove();
-                } catch (err) {
-                  console.warn('App: cleanup of temporary export elements failed', err);
-                }
-
-                if (!res || !res.ok) {
-                  console.warn('PDF export failed', res?.error);
-                } else {
-                  console.log('Exported PDF to', res.path);
-                }
-
-                // no temporary preview switching; nothing to restore here
-              } catch (err) {
-                console.warn('Export PDF error', err);
-              }
-            }}
-          >
-            Export PDF
-          </button>
+          <Utility onActionComplete={() => setSidebarRefreshTrigger(t => t + 1)} onExportPdf={handleExportPdf} />
         </div>
       </div>
 

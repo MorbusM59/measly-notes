@@ -199,6 +199,31 @@ const electronAPI: IElectronAPI & {
     }
   },
 
+  // Data folder sync/import/purge
+  triggerSync: async () => {
+    try {
+      return (await ipcRenderer.invoke('trigger-sync')) as { createdNoteIds: number[]; updatedPaths: Array<{ noteId: number; oldPath: string; newPath: string }>; markedDeletedNoteIds: number[] };
+    } catch (err) {
+      return { createdNoteIds: [], updatedPaths: [], markedDeletedNoteIds: [] };
+    }
+  },
+
+  importFolder: async () => {
+    try {
+      return (await ipcRenderer.invoke('import-folder')) as { imported: number; createdNoteIds: number[]; errors?: string[] };
+    } catch (err) {
+      return { imported: 0, createdNoteIds: [], errors: [(err as any)?.message ?? String(err)] };
+    }
+  },
+
+  purgeTrash: async () => {
+    try {
+      return (await ipcRenderer.invoke('purge-trash')) as { purgedNoteIds: number[]; errors?: string[] };
+    } catch (err) {
+      return { purgedNoteIds: [], errors: [(err as any)?.message ?? String(err)] };
+    }
+  },
+
   // Force-save flow: request is routed via main (so focused window receives do-force-save),
   // and renderer will respond with forceSaveComplete which main waits for.
   requestForceSave: async () => {

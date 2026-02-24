@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
 import * as fs from 'fs/promises';
+import * as path from 'path';
 import { Note, Tag, NoteTag, SearchResult, SnippetSegment } from '../shared/types';
-import { getDataDir, getDbPath } from './paths';
+import { getDataDir, getDbPath, getNotesDir } from './paths';
 
 let db: Database.Database;
 const PROTECTED_TAGS = new Set(['deleted', 'archived']);
@@ -70,6 +71,18 @@ export async function initDatabase(): Promise<void> {
     console.error('[db] Failed to create FTS table; FTS5 may be unavailable', err);
     throw err;
   }
+
+  // Ensure `fileToken` column exists and a unique index enforces uniqueness
+  try {
+    const cols2 = db.prepare("PRAGMA table_info(notes)").all() as Array<{ name: string }>;
+    const names2 = new Set(cols2.map(c => String(c.name)));
+    if (!names2.has('fileToken')) {
+      db.prepare('ALTER TABLE notes ADD COLUMN fileToken TEXT').run();
+    }
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_fileToken ON notes(fileToken);");
+  } catch (err) {
+    console.warn('[db] fileToken migration failed', err);
+  }
 }
 
 /* Utilities */
@@ -117,6 +130,34 @@ export function createNote(title: string, filePath: string): Note {
     updatedAt: now,
     lastEdited: now,
   };
+}
+
+export function getNoteByToken(token: string): Note | undefined {
+  const stmt = db.prepare('SELECT * FROM notes WHERE fileToken = ?');
+  return stmt.get(token) as Note | undefined;
+}
+
+export function setNoteFileToken(noteId: number, token: string): void {
+  db.prepare('UPDATE notes SET fileToken = ? WHERE id = ?').run(token, noteId);
+}
+
+export function generateUniqueFileToken(): string {
+  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  for (let attempt = 0; attempt < 10000; attempt++) {
+    let t = '';
+    for (let i = 0; i < 9; i++) t += alpha[Math.floor(Math.random() * alpha.length)];
+    const exists = db.prepare('SELECT 1 FROM notes WHERE fileToken = ?').get(t) as any;
+    if (!exists) return t;
+  }
+  throw new Error('Failed to generate unique file token after many attempts');
+}
+
+export function updateNoteCreatedAt(noteId: number, iso: string): void {
+  db.prepare('UPDATE notes SET createdAt = ? WHERE id = ?').run(iso, noteId);
+}
+
+export function updateNoteLastEdited(noteId: number, iso: string): void {
+  db.prepare('UPDATE notes SET lastEdited = ? WHERE id = ?').run(iso, noteId);
 }
 
 export function getAllNotes(): Note[] {
@@ -918,4 +959,350 @@ export function getNotesInTrash(): Note[] {
   `);
   const rows = stmt.all() as Note[];
   return rows;
+}
+
+/**
+ * Reconcile the database notes table with the on-disk `.md` files.
+ *
+ * Behavior (safe defaults):
+ * - For each `.md` file in the notes directory not referenced by any DB note,
+ *   create a new DB note. The note title is derived from the first non-empty
+ *   line (stripping leading `#`), or the filename if none.
+ * - For each DB note that references a path that no longer exists on disk,
+ *   add the protected `deleted` tag (position 0) if not already present.
+ * - If a file exists named `<id>.md` and a DB note with that id exists but
+ *   has a different `filePath`, update the DB `filePath` to the expected
+ *   location.
+ *
+ * Returns details about actions taken so the caller can present results.
+ */
+export async function reconcileNotesWithFs(opts?: { markMissingAsDeleted?: boolean }) : Promise<{
+  createdNoteIds: number[];
+  updatedPaths: Array<{ noteId: number; oldPath: string; newPath: string }>;
+  markedDeletedNoteIds: number[];
+}> {
+  const markMissingAsDeleted = opts?.markMissingAsDeleted ?? true;
+  const notesDir = getNotesDir();
+  const results = { createdNoteIds: [] as number[], updatedPaths: [] as Array<{ noteId: number; oldPath: string; newPath: string }> , markedDeletedNoteIds: [] as number[] };
+
+  let files: string[] = [];
+  try {
+    files = (await fs.readdir(notesDir)).filter(f => f.toLowerCase().endsWith('.md'));
+  } catch (err) {
+    // If notes dir inaccessible, nothing to do.
+    return results;
+  }
+
+  const absFiles = new Set(files.map(f => path.normalize(path.join(notesDir, f))));
+
+  const allNotes = getAllNotes();
+  const dbPathMap = new Map<string, Note>();
+  const dbIdMap = new Map<number, Note>();
+  for (const n of allNotes) {
+    try { dbPathMap.set(path.normalize(n.filePath), n); } catch { dbPathMap.set(String(n.filePath), n); }
+    dbIdMap.set(n.id, n);
+  }
+
+  // Build a quick lookup of notes whose files are currently missing on disk,
+  // keyed by lowercased title to allow associating orphan files created externally
+  // with their DB note when the content/title matches.
+  const missingNotesByTitle = new Map<string, Note[]>();
+  for (const n of allNotes) {
+    try {
+      const norm = path.normalize(n.filePath);
+      if (!absFiles.has(norm)) {
+        const key = String(n.title ?? '').trim().toLowerCase();
+        const arr = missingNotesByTitle.get(key) ?? [];
+        arr.push(n);
+        missingNotesByTitle.set(key, arr);
+      }
+    } catch {
+      // ignore normalization errors
+    }
+  }
+
+  // Ensure files referenced by DB use canonical filenames and tokens where possible.
+  // This pass renames files (in-place) that are referenced by DB but don't follow
+  // the YY-MM-DD_hh-mm_TOKEN.md pattern or where the DB lacks a token.
+  for (const f of Array.from(absFiles)) {
+    const note = dbPathMap.get(f);
+    if (!note) continue;
+    const base = path.basename(f, '.md');
+    const match = /^([0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2})_([A-Z0-9]{9})$/i.exec(base);
+    try {
+      const stat = await fs.stat(f);
+      const fileCreatedIso = (stat.birthtime && !isNaN(stat.birthtime.getTime())) ? stat.birthtime.toISOString() : stat.mtime.toISOString();
+      const fileEditedIso = stat.mtime.toISOString();
+
+      // Ensure DB has createdAt/lastEdited populated if missing
+      if (!note.createdAt) updateNoteCreatedAt(note.id, fileCreatedIso);
+      if (!note.lastEdited) updateNoteLastEdited(note.id, fileEditedIso);
+
+      // If filename already matches and token matches DB, nothing to do
+      if (match) {
+        const token = match[2].toUpperCase();
+        if ((note as any).fileToken && String((note as any).fileToken).toUpperCase() === token) continue;
+      }
+
+      // Need to ensure token exists
+      let token = (note as any).fileToken as string | undefined;
+      if (!token) {
+        token = generateUniqueFileToken();
+        try { setNoteFileToken(note.id, token); } catch (err) { /* non-fatal */ }
+      }
+
+      // Use DB createdAt if present (falls back to fileCreatedIso)
+      const createdSource = note.createdAt ?? fileCreatedIso;
+      const d = new Date(createdSource);
+      const yy = String(d.getFullYear()).slice(-2);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      const fname = `${yy}-${mm}-${dd}_${hh}-${min}_${token}.md`;
+      const dest = path.join(notesDir, fname);
+      if (path.normalize(dest) !== path.normalize(f)) {
+        try {
+          await fs.rename(f, dest);
+          updateNoteFilePath(note.id, dest);
+          // update maps so later logic skips this new path
+          dbPathMap.delete(f);
+          dbPathMap.set(path.normalize(dest), note);
+          absFiles.delete(f);
+          absFiles.add(path.normalize(dest));
+          results.updatedPaths.push({ noteId: note.id, oldPath: f, newPath: dest });
+        } catch (err) {
+          // non-fatal - leave file in place
+          console.warn('[db] failed to rename file to canonical name', f, err);
+        }
+      }
+    } catch (err) {
+      // ignore stat errors - will be handled later
+    }
+  }
+
+  // 1) Files on disk not referenced by DB -> create notes or update existing by id
+  for (const f of absFiles) {
+    if (dbPathMap.has(f)) continue; // already referenced
+    const base = path.basename(f, '.md');
+    // Read file content early so we can attempt title-based matching to existing missing notes
+    let content = '';
+    try { content = await fs.readFile(f, 'utf-8'); } catch { content = ''; }
+    const derivedTitle = (() => {
+      const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      if (lines.length > 0) {
+        const first = lines[0].replace(/^#+\s*/, '').trim();
+        return first || base;
+      }
+      return base;
+    })();
+
+    // If there's a DB note whose file is missing and whose title matches this file's derived title,
+    // associate the file to that note instead of creating a duplicate entry. This prevents newly
+    // added files from causing their DB counterpart to be marked deleted.
+    try {
+      const key = String(derivedTitle).trim().toLowerCase();
+      const bucket = missingNotesByTitle.get(key);
+      if (bucket && bucket.length > 0) {
+        const note = bucket.shift()!; // take first candidate
+        const old = note.filePath;
+        // derive timestamps from file stat
+        let createdIso = new Date().toISOString();
+        let editedIso = new Date().toISOString();
+        try {
+          const stat = await fs.stat(f);
+          createdIso = (stat.birthtime && !isNaN(stat.birthtime.getTime())) ? stat.birthtime.toISOString() : stat.mtime.toISOString();
+          editedIso = stat.mtime.toISOString();
+        } catch {}
+
+        // populate DB created/lastEdited if missing
+        try { if (!note.createdAt) updateNoteCreatedAt(note.id, createdIso); } catch {}
+        try { if (!note.lastEdited) updateNoteLastEdited(note.id, editedIso); } catch {}
+
+        // ensure token exists and rename to canonical filename
+        let token = (note as any).fileToken as string | undefined;
+        if (!token) {
+          token = generateUniqueFileToken();
+          try { setNoteFileToken(note.id, token); } catch {}
+        }
+        const createdSource = note.createdAt ?? createdIso;
+        const d = new Date(createdSource);
+        const yy = String(d.getFullYear()).slice(-2);
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        const fname = `${yy}-${mm}-${dd}_${hh}-${min}_${token}.md`;
+        const dest = path.join(notesDir, fname);
+        try {
+          await fs.rename(f, dest);
+          updateNoteFilePath(note.id, dest);
+          // update maps so later logic skips this new path
+          dbPathMap.set(path.normalize(dest), note);
+          absFiles.delete(f);
+          absFiles.add(path.normalize(dest));
+          results.updatedPaths.push({ noteId: note.id, oldPath: old, newPath: dest });
+        } catch (err) {
+          // fallback: point DB at the original path if rename failed
+          updateNoteFilePath(note.id, f);
+          dbPathMap.set(path.normalize(f), note);
+          results.updatedPaths.push({ noteId: note.id, oldPath: old, newPath: f });
+        }
+        try { upsertNoteFts(note.id, note.title ?? derivedTitle, content); } catch {}
+        continue;
+      }
+    } catch (err) {
+      // non-fatal - continue to other heuristics
+    }
+    // Expect format: YY-MM-DD_hh-mm_TOKEN (TOKEN = 9 uppercase alnum)
+    const m = /^([0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2})_([A-Z0-9]{9})$/i.exec(base);
+    if (m) {
+      const datePart = m[1];
+      const token = m[2].toUpperCase();
+      const existing = getNoteByToken(token);
+      if (existing) {
+        const old = existing.filePath;
+        if (path.normalize(old) !== f) {
+          updateNoteFilePath(existing.id, f);
+          results.updatedPaths.push({ noteId: existing.id, oldPath: old, newPath: f });
+        }
+        // Verify createdAt matches datePart (YY-MM-DD_hh-mm)
+        try {
+          const parts = /^([0-9]{2})-([0-9]{2})-([0-9]{2})_([0-9]{2})-([0-9]{2})$/.exec(datePart);
+          if (parts) {
+            const yy = Number(parts[1]);
+            const year = 2000 + yy;
+            const month = Number(parts[2]) - 1;
+            const day = Number(parts[3]);
+            const hour = Number(parts[4]);
+            const minute = Number(parts[5]);
+            const parsedIso = new Date(year, month, day, hour, minute).toISOString();
+            const noteCreated = new Date(existing.createdAt).toISOString();
+            const fmtNote = new Date(noteCreated);
+            if (Math.abs(new Date(parsedIso).getTime() - fmtNote.getTime()) > 60 * 1000) {
+              // If mismatch > 1 minute, update DB to match file timestamp
+              updateNoteCreatedAt(existing.id, parsedIso);
+            }
+          }
+        } catch (err) { /* non-fatal */ }
+        continue;
+      }
+      // No existing token -> create a new note and record token + createdAt
+      const title = (() => {
+        const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          const first = lines[0].replace(/^#+\s*/, '').trim();
+          return first || base;
+        }
+        return base;
+      })();
+      const createdNote = createNote(title, f);
+      try { setNoteFileToken(createdNote.id, token); } catch (err) { /* non-fatal */ }
+      try {
+        const parts = /^([0-9]{2})-([0-9]{2})-([0-9]{2})_([0-9]{2})-([0-9]{2})$/.exec(m[1]);
+        if (parts) {
+          const yy = Number(parts[1]);
+          const year = 2000 + yy;
+          const month = Number(parts[2]) - 1;
+          const day = Number(parts[3]);
+          const hour = Number(parts[4]);
+          const minute = Number(parts[5]);
+          const parsedIso = new Date(year, month, day, hour, minute).toISOString();
+          updateNoteCreatedAt(createdNote.id, parsedIso);
+        }
+      } catch (err) { /* non-fatal */ }
+      try { upsertNoteFts(createdNote.id, title, content); } catch { /* non-fatal */ }
+      results.createdNoteIds.push(createdNote.id);
+      continue;
+    }
+
+    // Fallback: previous behavior (numeric basename -> update by id, otherwise create)
+    const parsedId = Number(base);
+    if (!Number.isNaN(parsedId) && dbIdMap.has(parsedId)) {
+      // Note exists by id but path differs -> update filePath
+      const note = dbIdMap.get(parsedId)!;
+      const old = note.filePath;
+      if (path.normalize(old) !== f) {
+        updateNoteFilePath(parsedId, f);
+        results.updatedPaths.push({ noteId: parsedId, oldPath: old, newPath: f });
+      }
+      continue;
+    }
+
+    // Otherwise create a new note entry. Derive title from file contents,
+    // generate token, rename file to canonical name, and populate created/lastEdited from stat.
+    const title = (() => {
+      const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      if (lines.length > 0) {
+        const first = lines[0].replace(/^#+\s*/, '').trim();
+        return first || base;
+      }
+      return base;
+    })();
+
+    // derive timestamps from file stat
+    let createdIso = new Date().toISOString();
+    let editedIso = new Date().toISOString();
+    try {
+      const stat = await fs.stat(f);
+      createdIso = (stat.birthtime && !isNaN(stat.birthtime.getTime())) ? stat.birthtime.toISOString() : stat.mtime.toISOString();
+      editedIso = stat.mtime.toISOString();
+    } catch (err) {
+      // non-fatal
+    }
+
+    const token = generateUniqueFileToken();
+    // build canonical filename
+    try {
+      const d = new Date(createdIso);
+      const yy = String(d.getFullYear()).slice(-2);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      const fname = `${yy}-${mm}-${dd}_${hh}-${min}_${token}.md`;
+      const dest = path.join(notesDir, fname);
+      try {
+        await fs.rename(f, dest);
+      } catch (err) {
+        // if rename fails, fall back to leaving file in place and still create DB entry pointing to original path
+      }
+
+      const createdNote = createNote(title, path.normalize(path.join(notesDir, fname)));
+      try { setNoteFileToken(createdNote.id, token); } catch (err) { /* non-fatal */ }
+      try { updateNoteCreatedAt(createdNote.id, createdIso); } catch (err) { /* non-fatal */ }
+      try { updateNoteLastEdited(createdNote.id, editedIso); } catch (err) { /* non-fatal */ }
+      try { upsertNoteFts(createdNote.id, title, content); } catch { /* non-fatal */ }
+      results.createdNoteIds.push(createdNote.id);
+    } catch (err) {
+      // final fallback: create note pointing to original file
+      const createdNote = createNote(title, f);
+      try { upsertNoteFts(createdNote.id, title, content); } catch { /* non-fatal */ }
+      results.createdNoteIds.push(createdNote.id);
+    }
+  }
+
+  // 2) DB notes referencing missing files -> mark as deleted (safe, non-destructive)
+  if (markMissingAsDeleted) {
+    for (const note of allNotes) {
+      const fp = note.filePath;
+      if (!fp) continue;
+      const norm = path.normalize(fp);
+      if (absFiles.has(norm)) continue; // file present
+
+      // only mark if not already tagged 'deleted'
+      try {
+        const tags = getNoteTags(note.id);
+        const alreadyDeleted = tags.some(t => String(t.tag?.name ?? '').toLowerCase() === 'deleted');
+        if (!alreadyDeleted) {
+          addTagToNote(note.id, 'deleted', 0);
+          results.markedDeletedNoteIds.push(note.id);
+        }
+      } catch (err) {
+        // non-fatal, continue
+      }
+    }
+  }
+
+  return results;
 }
