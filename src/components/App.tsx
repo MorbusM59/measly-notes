@@ -139,6 +139,8 @@ export const App: React.FC = () => {
 
     if (!isMountedRef.current) return;
     setSelectedNote(note);
+    // Ensure the sidebar shows the latest view when creating a new note
+    setViewMode('latest');
     setRefreshKey(k => k + 1);
     setHasAnyNotes(true);
   };
@@ -159,22 +161,12 @@ export const App: React.FC = () => {
   };
 
   const handleSidebarRefresh = () => {
+    // Trigger a sidebar refresh without changing the current view.
+    // Previously this auto-switched to `archived`/`trash` when the selected
+    // note gained those primary tags; that behavior is intentionally removed
+    // so that the menu does not jump as a result of tag changes.
     (async () => {
       setSidebarRefreshTrigger(t => t + 1);
-      // If the selected note became 'deleted' or 'archived', switch to category view so it's visible
-      try {
-        if (!selectedNote) return;
-        const tags = await window.electronAPI.getNoteTags(selectedNote.id);
-        if (!tags || tags.length === 0) return;
-        const primary = tags[0].tag?.name?.trim().toLowerCase();
-        if (primary === 'deleted' || primary === 'archived') {
-          if (viewMode === 'latest') {
-            setViewMode(primary === 'deleted' ? 'trash' : 'archived');
-          }
-        }
-      } catch (err) {
-        // non-fatal
-      }
     })();
   };
 
