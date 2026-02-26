@@ -51,6 +51,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const selectionSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track all transient timeouts so they can be cleared on unmount
   const pendingTimeoutsRef = useRef<number[]>([]);
+  const programmaticInsertRef = useRef(false);
 
   const scheduleTimeout = (cb: () => void, ms: number) => {
     const id = window.setTimeout(cb, ms);
@@ -378,8 +379,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     if (!showPreview) {
       autosizeTextarea(ta);
-      // ensure caret visible only if needed
-      ensureCaretVisible();
+      // ensure caret visible only if needed; skip during programmatic inserts
+      if (!programmaticInsertRef.current) ensureCaretVisible();
     } else {
       // Clearing height when in preview so textarea doesn't force layout
       ta.style.height = '';
@@ -742,12 +743,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const insertHard = spaces + '\n' + leading + '   ';
         const newText = before + insertHard + after;
         const newCursorPos = start + spaces.length + 1 + leading.length + 3;
+        programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
         scheduleTimeout(() => {
           textarea.focus();
           textarea.setSelectionRange(newCursorPos, newCursorPos);
+          autosizeTextarea(textarea);
           ensureCaretVisible();
+          programmaticInsertRef.current = false;
         }, 0);
         return;
       }
@@ -762,12 +766,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const insertHard = spaces + '\n' + leading;
       const newText = before + insertHard + after;
       const newCursorPos = start + spaces.length + 1 + leading.length;
+      programmaticInsertRef.current = true;
       setContent(newText);
       handleContentChange(newText);
       scheduleTimeout(() => {
         textarea.focus();
         textarea.setSelectionRange(newCursorPos, newCursorPos);
+        autosizeTextarea(textarea);
         ensureCaretVisible();
+        programmaticInsertRef.current = false;
       }, 0);
       return;
     }
