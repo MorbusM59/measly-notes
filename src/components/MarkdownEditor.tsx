@@ -433,6 +433,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     lastSavedContentRef.current = content;
 
     const newTitle = extractTitle(content);
+    // Only notify parent about the saved note when the title actually
+    // changes. Avoiding an update for content-only saves prevents the
+    // menu/sidebar from refreshing while the user is actively editing.
     if (newTitle !== lastSavedTitleRef.current && newTitle !== 'Untitled') {
       await window.electronAPI.updateNoteTitle(note.id, newTitle);
       lastSavedTitleRef.current = newTitle;
@@ -441,8 +444,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         if (savedNote) onNoteUpdate(savedNote);
         else onNoteUpdate({ ...note, title: newTitle });
       }
-    } else {
-      if (onNoteUpdate && savedNote) onNoteUpdate(savedNote);
     }
   }, [note, content, extractTitle, onNoteUpdate]);
 
@@ -702,7 +703,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       clearTimeout(autoSaveTimeoutRef.current);
     }
 
-    if (!isOnFirstLine && note && !showPreview) {
+    // Do not trigger autosave for programmatic edits (tab/shift-tab inserts/etc.)
+    // since they do not change the note title and should not cause parent
+    // menu updates. Autosave still runs for normal user edits when not on
+    // the first line.
+    if (!programmaticInsertRef.current && !isOnFirstLine && note && !showPreview) {
       autoSaveTimeoutRef.current = scheduleTimeout(() => {
         void autoSave();
       }, 1000) as unknown as ReturnType<typeof setTimeout>;
