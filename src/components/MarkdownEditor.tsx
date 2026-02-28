@@ -582,12 +582,17 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     if (!textarea) return;
     const start = textarea.selectionStart;
     const newText = content.substring(0, start) + text + content.substring(start);
+    // mark this as a programmatic insert so autosize/ensureCaretVisible
+    // triggered by the content-change effect do not run and cause jumps
+    programmaticInsertRef.current = true;
     setContent(newText);
     handleContentChange(newText);
     scheduleTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(start + text.length, start + text.length);
+      autosizeTextarea(textarea);
       ensureCaretVisible();
+      programmaticInsertRef.current = false;
     }, 0);
   };
 
@@ -815,6 +820,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         });
 
         const newText = content.substring(0, lineStart) + newLines.join('\n') + content.substring(actualLineEnd);
+        // mark as programmatic change to avoid the autosize/ensureCaretVisible
+        // effect from running and jumping the scroll; run manual reflow instead
+        programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
 
@@ -823,7 +831,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           const newStart = Math.max(0, start - removedBeforeStart);
           const newEnd = Math.max(0, end - removedBeforeEnd);
           textarea.setSelectionRange(newStart, newEnd);
+          autosizeTextarea(textarea);
           checkFormatting();
+          programmaticInsertRef.current = false;
         }, 0);
       } else {
         // Insert three spaces at cursor (use helper to keep behavior consistent)
