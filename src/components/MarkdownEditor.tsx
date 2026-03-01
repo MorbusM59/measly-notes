@@ -83,12 +83,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const toEditMarkers = (text: string): string => {
     if (text == null) return '';
     return text.split('\n').map(line => {
-      // leading spaces -> markers
-      const leading = (line.match(/^ +/) || [''])[0];
-      const trailing = (line.match(/ +$/) || [''])[0];
-      const core = line.substring(leading.length, line.length - trailing.length);
-      const leadMarkers = leading ? SPACE_MARKER.repeat(leading.length) : '';
-      const trailMarkers = trailing ? SPACE_MARKER.repeat(trailing.length) : '';
+      // leading/trailing spaces -> markers
+      const leadingMatch = line.match(/^ +/) || [''];
+      const trailingMatch = line.match(/ +$/) || [''];
+      const leading = leadingMatch[0];
+      const trailing = trailingMatch[0];
+      // protect against overlap when the whole line is spaces
+      const coreStart = leading.length;
+      const coreEnd = line.length - trailing.length;
+      let core = coreEnd > coreStart ? line.substring(coreStart, coreEnd) : '';
+      let leadMarkers = leading ? SPACE_MARKER.repeat(leading.length) : '';
+      let trailMarkers = trailing ? SPACE_MARKER.repeat(trailing.length) : '';
+      if (!core && (leading.length > 0 || trailing.length > 0)) {
+        // Line is entirely spaces (or markers); represent them once to avoid doubling
+        const total = Math.min(line.length, leading.length + trailing.length);
+        leadMarkers = SPACE_MARKER.repeat(total);
+        trailMarkers = '';
+      }
       return leadMarkers + core + trailMarkers;
     }).join('\n');
   };
