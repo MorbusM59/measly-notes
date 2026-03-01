@@ -108,11 +108,62 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === 'Enter') {
+      const key = (e.key || '').toLowerCase();
+      // Ctrl+N: create a new note
+      if (e.ctrlKey && !e.shiftKey && key === 'n') {
         e.preventDefault();
         handleCreateNote();
         return;
       }
+      // Ctrl+Shift+N: create note using clipboard text as title and place cursor on second line
+      if (e.ctrlKey && e.shiftKey && key === 'n') {
+        e.preventDefault();
+        (async () => {
+          try {
+            try {
+              await (window as any).electronAPI.requestForceSave();
+            } catch (err) {
+              console.warn('requestForceSave failed', err);
+            }
+
+            if (!isMountedRef.current) return;
+            setShowPreview(false);
+            localStorage.setItem('markdown-show-preview', 'false');
+
+            // Read clipboard text (browser API in renderer). Fall back to 'Untitled'.
+            let title = 'Untitled';
+            try {
+              const clip = await navigator.clipboard.readText();
+              if (clip && clip.trim().length > 0) title = clip.trim();
+            } catch (err) {
+              // ignore clipboard failures
+            }
+
+            const note = await window.electronAPI.createNote(title);
+            // Build initial content with title on first line and an empty second line.
+            const initialContent = `# ${title}\n\n`;
+            await window.electronAPI.saveNote(note.id, initialContent);
+
+            // Save UI state so editor will place the cursor at the start of the second line
+            try {
+              const cursorPos = initialContent.indexOf('\n') + 1; // start of second line
+              await window.electronAPI.saveNoteUiState(note.id, { cursorPos, scrollTop: 0 });
+            } catch (err) {
+              // non-fatal
+            }
+
+            if (!isMountedRef.current) return;
+            setSelectedNote(note);
+            setViewMode('latest');
+            setRefreshKey(k => k + 1);
+            setHasAnyNotes(true);
+          } catch (err) {
+            console.warn('create note from clipboard failed', err);
+          }
+        })();
+        return;
+      }
+
       // Use Escape to toggle preview/edit mode instead of Shift+Enter
       if (e.key === 'Escape') {
         e.preventDefault();

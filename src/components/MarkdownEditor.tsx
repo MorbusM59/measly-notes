@@ -1227,7 +1227,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     return (
       <div className="markdown-editor empty">
         <div className="empty-state">
-          <p>{hasAnyNotes ? 'Select a note or create a new one with Ctrl+Enter' : 'Go ahead and create your first note with Ctrl+Enter.'}</p>
+          <p>{hasAnyNotes ? 'Select a note or create a new one with Ctrl+N' : 'Go ahead and create your first note with Ctrl+N.'}</p>
         </div>
       </div>
     );

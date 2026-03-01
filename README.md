@@ -37,7 +37,7 @@ A full-featured Markdown-based note-taking application built with Electron, Reac
 - Tag search prioritizes by tag position (primary → secondary → tertiary)
 
 ### ⌨️ Keyboard Shortcuts
-- **Ctrl+Enter**: Create a new note with `# ` pre-filled
+- **Ctrl+N**: Create a new note with `# ` pre-filled
 
 ## Technical Stack
 
@@ -120,7 +120,7 @@ npm run make
 ## How It Works
 
 ### Note Creation
-1. Press `Ctrl+Enter` to create a new note
+1. Press `Ctrl+N` to create a new note
 2. Editor opens with `# ` on the first line
 3. Type your title after the `#`
 4. Press Enter or move to the next line
