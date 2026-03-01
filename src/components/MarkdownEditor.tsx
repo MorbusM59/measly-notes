@@ -816,34 +816,34 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       }
     }
     if (e.key === 'Enter' && !showPreview) {
-      // Handle Enter: preserve leading indentation; if current line is a list item ('- '),
-      // continue the list on the next line. If Shift+Enter, create a new line without the list marker.
+      // New behaviour:
+      // - Enter: continue indentation and continue list (bullets keep '-'/'*'/'+', numbered lists increment).
+      // - Shift+Enter: insert a hard break (two trailing spaces) and continue indentation, but do NOT continue list markers.
+      // - Ctrl+Enter: insert a blank line and start next line with no indentation.
       e.preventDefault();
       const textarea = textareaRef.current;
       if (!textarea) return;
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
       const lineStart = content.lastIndexOf('\n', start - 1) + 1;
-      const currentLine = content.substring(lineStart, start);
-      const leadingLen = countLeadingSpaces(currentLine);
+      const currentLineBeforeCursor = content.substring(lineStart, start);
+      const currentLineFull = (() => {
+        const lineEnd = content.indexOf('\n', lineStart);
+        return lineEnd === -1 ? content.substring(lineStart) : content.substring(lineStart, lineEnd);
+      })();
+
+      const leadingLen = countLeadingSpaces(currentLineFull);
       const leadingMarkers = SPACE_MARKER.repeat(leadingLen);
 
-      const listMatch = currentLine.match(/^[ \t]*([-])\s+/);
-      let insert: string;
-      // If Shift+Enter on a list item, create a hard break and place the caret aligned
-      // under the text after the bullet marker: add two trailing spaces, newline, and
-      // same leading indentation plus three extra spaces so the new line lines up.
-      if (e.shiftKey && listMatch) {
-        const before = content.substring(0, start);
-        const after = content.substring(end);
-        const currentLineBeforeCursor = content.substring(lineStart, start);
-        // Replace any trailing whitespace/markers on the portion before the cursor with exactly two spaces
+      const normLine = normalizeForChecks(currentLineFull);
+      const bulletMatch = normLine.match(/^\s*([-*+])\s+(.*)$/);
+      const numberMatch = normLine.match(/^\s*(\d+)\.\s+(.*)$/);
+
+      // Ctrl+Enter: insert an extra blank line and start next line without indentation
+      if (e.ctrlKey || e.metaKey) {
         const trimmedBefore = stripTrailingMarkersAndSpaces(currentLineBeforeCursor);
-        const spaces = '  ';
-        const markerSpaces = SPACE_MARKER.repeat(spaces.length);
-        const insertHard = markerSpaces + '\n' + leadingMarkers + '   ';
-        const newText = content.substring(0, lineStart) + trimmedBefore + insertHard + after;
-        const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leadingLen + 3;
+        const newText = content.substring(0, lineStart) + trimmedBefore + '\n\n' + content.substring(end);
+        const newCursorPos = lineStart + trimmedBefore.length + 2; // after the two newlines
         programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
@@ -857,18 +857,41 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         return;
       }
 
-      // Default: create a Markdown hard break (two trailing spaces + newline) and preserve indentation
-      const before = content.substring(0, start);
-      const after = content.substring(end);
-      const currentLineBeforeCursor = content.substring(lineStart, start);
-      // Replace any trailing whitespace/markers on the portion before the cursor with exactly two spaces
+      // Shift+Enter: hard break (two trailing spaces) + continue indentation, but DO NOT continue list markers
+      if (e.shiftKey) {
+        const trimmedBefore = stripTrailingMarkersAndSpaces(currentLineBeforeCursor);
+        const spaces = '  ';
+        const markerSpaces = SPACE_MARKER.repeat(spaces.length);
+        const insert = markerSpaces + '\n' + leadingMarkers;
+        const newText = content.substring(0, lineStart) + trimmedBefore + insert + content.substring(end);
+        const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leadingLen;
+        programmaticInsertRef.current = true;
+        setContent(newText);
+        handleContentChange(newText);
+        scheduleTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(newCursorPos, newCursorPos);
+          autosizeTextarea(textarea);
+          ensureCaretVisible();
+          programmaticInsertRef.current = false;
+        }, 0);
+        return;
+      }
+
+      // Default Enter: continue list or just continue indentation
+      let markerText = '';
+      if (numberMatch) {
+        const num = parseInt(numberMatch[1], 10) || 0;
+        markerText = `${num + 1}. `;
+      } else if (bulletMatch) {
+        const ch = bulletMatch[1] || '-';
+        markerText = `${ch} `;
+      }
+
       const trimmedBefore = stripTrailingMarkersAndSpaces(currentLineBeforeCursor);
-      const spaces = '  ';
-      // Use marker characters for visible trailing spaces in edit mode
-      const markerSpaces = SPACE_MARKER.repeat(spaces.length);
-      const insertHard = markerSpaces + '\n' + leadingMarkers;
-      const newText = content.substring(0, lineStart) + trimmedBefore + insertHard + after;
-      const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leadingLen;
+      const insert = '\n' + leadingMarkers + markerText;
+      const newText = content.substring(0, lineStart) + trimmedBefore + insert + content.substring(end);
+      const newCursorPos = lineStart + trimmedBefore.length + 1 + leadingMarkers.length + markerText.length;
       programmaticInsertRef.current = true;
       setContent(newText);
       handleContentChange(newText);
