@@ -789,6 +789,74 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       return;
     }
 
+    // Shift+Backspace: if current line is only whitespace, delete the current line
+    // and move caret to end of previous line (also remove trailing spaces there).
+    if (e.key === 'Backspace' && e.shiftKey && !showPreview) {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      // Only handle when there's no selection — otherwise leave native behavior
+      if (textarea.selectionStart !== textarea.selectionEnd) return;
+      const pos = textarea.selectionStart;
+      const before = content.substring(0, pos);
+      const after = content.substring(pos);
+      const lines = content.split('\n');
+      const lineIndex = before.split('\n').length - 1;
+      const currentLine = lines[lineIndex] ?? '';
+
+      // Only trigger when current line is empty or only spaces/tabs
+      if (currentLine.trim() === '') {
+        e.preventDefault();
+        if (lineIndex === 0) {
+          // First line: remove it and place cursor at start
+          const newLines = lines.slice(1);
+          const newText = newLines.join('\n');
+          programmaticInsertRef.current = true;
+          setContent(newText);
+          handleContentChange(newText);
+          scheduleTimeout(() => {
+            textarea.focus();
+            textarea.setSelectionRange(0, 0);
+            autosizeTextarea(textarea);
+            ensureCaretVisible();
+            programmaticInsertRef.current = false;
+          }, 0);
+          return;
+        }
+
+        // Remove current empty line and trim trailing whitespace from previous line
+        const prevLine = lines[lineIndex - 1] ?? '';
+        const prevTrimmed = prevLine.replace(/\s+$/, '');
+
+        const newLines = [] as string[];
+        for (let i = 0; i < lines.length; i++) {
+          if (i === lineIndex - 1) newLines.push(prevTrimmed);
+          else if (i === lineIndex) continue; // skip current (empty) line
+          else newLines.push(lines[i]);
+        }
+
+        const newText = newLines.join('\n');
+
+        // compute new cursor position: end of the previous (trimmed) line
+        let newCursorPos = 0;
+        for (let i = 0; i < lineIndex - 1; i++) {
+          newCursorPos += newLines[i].length + 1; // include newline
+        }
+        newCursorPos += prevTrimmed.length;
+
+        programmaticInsertRef.current = true;
+        setContent(newText);
+        handleContentChange(newText);
+        scheduleTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(newCursorPos, newCursorPos);
+          autosizeTextarea(textarea);
+          ensureCaretVisible();
+          programmaticInsertRef.current = false;
+        }, 0);
+        return;
+      }
+    }
+
     if (e.key === 'Tab' && !showPreview) {
       e.preventDefault();
       if (e.shiftKey) {
