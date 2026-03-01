@@ -748,11 +748,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const before = content.substring(0, start);
         const after = content.substring(end);
         const currentLineBeforeCursor = content.substring(lineStart, start);
-        const needsSpaces = !currentLineBeforeCursor.endsWith('  ');
-        const spaces = needsSpaces ? '  ' : '';
+        // Replace any trailing whitespace on the portion before the cursor with exactly two spaces
+        const trimmedBefore = currentLineBeforeCursor.replace(/\s*$/, '');
+        const spaces = '  ';
         const insertHard = spaces + '\n' + leading + '   ';
-        const newText = before + insertHard + after;
-        const newCursorPos = start + spaces.length + 1 + leading.length + 3;
+        const newText = content.substring(0, lineStart) + trimmedBefore + insertHard + after;
+        const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leading.length + 3;
         programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
@@ -770,12 +771,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const before = content.substring(0, start);
       const after = content.substring(end);
       const currentLineBeforeCursor = content.substring(lineStart, start);
-      const needsSpaces = !currentLineBeforeCursor.endsWith('  ');
-      const spaces = needsSpaces ? '  ' : '';
-      // Insert spaces before the newline so they remain on the previous line
+      // Replace any trailing whitespace on the portion before the cursor with exactly two spaces
+      const trimmedBefore = currentLineBeforeCursor.replace(/\s*$/, '');
+      const spaces = '  ';
+      // Insert exactly two spaces before the newline so they remain on the previous line
       const insertHard = spaces + '\n' + leading;
-      const newText = before + insertHard + after;
-      const newCursorPos = start + spaces.length + 1 + leading.length;
+      const newText = content.substring(0, lineStart) + trimmedBefore + insertHard + after;
+      const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leading.length;
       programmaticInsertRef.current = true;
       setContent(newText);
       handleContentChange(newText);
