@@ -434,15 +434,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     const newTitle = extractTitle(content);
     // Only notify parent about the saved note when the title actually
-    // changes. Avoiding an update for content-only saves prevents the
-    // menu/sidebar from refreshing while the user is actively editing.
-    if (newTitle !== lastSavedTitleRef.current && newTitle !== 'Untitled') {
+    // changes. Avoid writing empty titles (e.g. when content is just "# ").
+    const newTitleNonEmpty = newTitle.trim();
+    if (newTitle !== lastSavedTitleRef.current && newTitleNonEmpty.length > 0) {
       await window.electronAPI.updateNoteTitle(note.id, newTitle);
       lastSavedTitleRef.current = newTitle;
 
       if (onNoteUpdate) {
-        if (savedNote) onNoteUpdate(savedNote);
-        else onNoteUpdate({ ...note, title: newTitle });
+        const payload = savedNote ? { ...savedNote, title: newTitle } : { ...note, title: newTitle };
+        onNoteUpdate(payload);
       }
     }
   }, [note, content, extractTitle, onNoteUpdate]);

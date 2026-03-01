@@ -10,6 +10,7 @@ interface SidebarProps {
   selectedNote: Note | null;
   onNotesUpdate?: () => void;
   refreshTrigger?: number;
+  noteUpdate?: Note | null;
   selectedMonths?: Set<number>;
   selectedYears?: Set<number | 'older'>;
   onMonthToggle?: (month: number, event: React.MouseEvent) => void;
@@ -29,6 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedNote, 
   onNotesUpdate,
   refreshTrigger,
+  noteUpdate,
   selectedMonths = new Set(),
   selectedYears = new Set(),
   onMonthToggle,
@@ -607,6 +609,94 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // No notes left
     return null;
   };
+
+  // Replace/update a single note object inside the category hierarchy
+  const replaceNoteInHierarchy = (updated: Note): boolean => {
+    let found = false;
+    setCategoryHierarchy(prev => {
+      const next: CategoryHierarchy = {};
+      Object.entries(prev).forEach(([primary, pData]) => {
+        const newSecondary: CategoryHierarchy[string]['secondary'] = {};
+
+        // update primary-level notes
+        const newPrimaryNotes = pData.notes.map(n => {
+          if (n.id === updated.id) {
+            found = true;
+            return { ...n, title: updated.title, updatedAt: updated.updatedAt ?? n.updatedAt, lastEdited: updated.lastEdited ?? n.lastEdited };
+          }
+          return n;
+        });
+
+        Object.entries(pData.secondary).forEach(([sec, secData]) => {
+          const newSecNotes = secData.notes.map(n => {
+            if (n.id === updated.id) {
+              found = true;
+              return { ...n, title: updated.title, updatedAt: updated.updatedAt ?? n.updatedAt, lastEdited: updated.lastEdited ?? n.lastEdited };
+            }
+            return n;
+          });
+          const newTertiary: CategoryHierarchy[string]['secondary'][string]['tertiary'] = {};
+          Object.entries(secData.tertiary).forEach(([ter, notes]) => {
+            newTertiary[ter] = notes.map(n => {
+              if (n.id === updated.id) {
+                found = true;
+                return { ...n, title: updated.title, updatedAt: updated.updatedAt ?? n.updatedAt, lastEdited: updated.lastEdited ?? n.lastEdited };
+              }
+              return n;
+            });
+          });
+          newSecondary[sec] = { notes: newSecNotes, tertiary: newTertiary } as any;
+        });
+
+        next[primary] = { notes: newPrimaryNotes, secondary: newSecondary } as any;
+      });
+      return next;
+    });
+    return found;
+  };
+
+  // Replace/update a single note across the sidebar state (date list, uncategorized, search results, hierarchy)
+  const replaceNoteInState = (updated: Note): boolean => {
+    let found = false;
+
+    setDateNotes(prev => prev.map(n => {
+      if (n.id === updated.id) {
+        found = true;
+        return { ...n, title: updated.title, updatedAt: updated.updatedAt ?? n.updatedAt, lastEdited: updated.lastEdited ?? n.lastEdited };
+      }
+      return n;
+    }));
+
+    setUncategorizedNotes(prev => prev.map(n => {
+      if (n.id === updated.id) {
+        found = true;
+        return { ...n, title: updated.title, updatedAt: updated.updatedAt ?? n.updatedAt, lastEdited: updated.lastEdited ?? n.lastEdited };
+      }
+      return n;
+    }));
+
+    setSearchResults(prev => prev.map(r => {
+      if (r.note.id === updated.id) {
+        found = true;
+        return { ...r, note: { ...r.note, title: updated.title, updatedAt: updated.updatedAt ?? r.note.updatedAt, lastEdited: updated.lastEdited ?? r.note.lastEdited } };
+      }
+      return r;
+    }));
+
+    // update hierarchy as well
+    const foundInHierarchy = replaceNoteInHierarchy(updated);
+    return found || foundInHierarchy;
+  };
+
+  // Apply targeted updates when parent supplies a single-note update
+  useEffect(() => {
+    if (!noteUpdate) return;
+    const didReplace = replaceNoteInState(noteUpdate);
+    if (!didReplace) {
+      // If the note wasn't found in local caches, trigger a full refresh
+      if (onNotesUpdate) onNotesUpdate();
+    }
+  }, [noteUpdate]);
 
   const formatLastEdited = (iso?: string | null) => {
     if (!iso) return '';

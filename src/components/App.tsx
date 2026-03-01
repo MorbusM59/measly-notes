@@ -20,6 +20,7 @@ export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
+  const [sidebarNoteUpdate, setSidebarNoteUpdate] = useState<Note | null>(null);
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [selectedYears, setSelectedYears] = useState<Set<number | 'older'>>(new Set());
   const [viewMode, setViewMode] = useState<'latest' | 'active' | 'archived' | 'trash'>('latest');
@@ -157,8 +158,13 @@ export const App: React.FC = () => {
 
   const handleNoteUpdate = (updatedNote: Note) => {
     setSelectedNote(updatedNote);
-    setRefreshKey(k => k + 1);
-    setSidebarRefreshTrigger(t => t + 1);
+    // Targeted update: notify sidebar of the single-note change so it can
+    // update its local state without a full remount/refresh.
+    setSidebarNoteUpdate(updatedNote);
+    // Give the Sidebar a short window to observe the update before clearing it
+    // so repeated title-saves for the same note still change the prop identity
+    // and trigger Sidebar's effect.
+    setTimeout(() => setSidebarNoteUpdate(null), 20);
   };
 
   const handleSidebarRefresh = () => {
@@ -460,6 +466,7 @@ export const App: React.FC = () => {
           selectedNote={selectedNote}
           onSelectNote={handleSelectNote}
           refreshTrigger={sidebarRefreshTrigger}
+          noteUpdate={sidebarNoteUpdate}
           selectedMonths={selectedMonths}
           selectedYears={selectedYears}
           onMonthToggle={handleMonthToggle}
