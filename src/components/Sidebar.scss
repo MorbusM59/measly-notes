@@ -55,8 +55,8 @@
 
 /* Armed indicator when Trash toggle is armed for permanent purge */
 .sidebar .view-toggle .icon-btn.btn-deleted.armed {
-  outline: 3px dashed #b71c1c;
-  box-shadow: 0 0 8px rgba(183,28,28,0.18);
+  border: 1px dashed #FF0000;
+  box-shadow: inset 0 0 6px #ff0000;
 }
 
 .sidebar-content {
@@ -132,17 +132,17 @@
 
 /* Note delete button */
 /* Armed outlines for context-menu delete/archive actions */
-.note-item.armed-delete {
-  outline: 3px solid #d32f2f;
-  box-shadow: 0 0 6px rgba(211,47,47,0.2);
+.note-item.armed-delete, .note-item.armed-delete:hover {
+  border: 1px solid #ff0000;
+  box-shadow: inset 0 0 6px #ff000088;
 }
-.note-item.armed-archive {
-  outline: 3px solid #1976d2;
-  box-shadow: 0 0 6px rgba(25,118,210,0.15);
+.note-item.armed-archive, .note-item.armed-archive:hover {
+  border: 1px solid #0099ff;
+  box-shadow: inset 0 0 6px #0099ff88;
 }
-.note-item.armed-permanent {
-  outline: 3px dashed #b71c1c;
-  box-shadow: 0 0 8px rgba(183,28,28,0.2);
+.note-item.armed-permanent, .note-item.armed-permanent:hover {
+  border: 1px dashed #ff0000;
+  box-shadow: inset 0 0 6px #ff0000;
 }
 
 /* Note title/date/snippet */
