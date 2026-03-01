@@ -22,6 +22,9 @@ const EDIT_STATE_KEY_PREFIX = 'md-edit-state-';
 
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview, hasAnyNotes }) => {
   const [content, setContent] = useState('');
+  // Marker for visible spaces
+  const SPACE_MARKER = '\u00B7'; // U+00B7 MIDDLE DOT '·'
+  const isComposingRef = useRef(false);
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
 
   // View (preview) settings
@@ -74,6 +77,39 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     if (!fontFamilyValue) return null;
     const first = fontFamilyValue.split(',')[0].trim();
     return first.replace(/^['"]|['"]$/g, '') || null;
+  };
+
+  // Convertations between on-disk (real spaces) and edit-mode (markers)
+  const toEditMarkers = (text: string): string => {
+    if (text == null) return '';
+    return text.split('\n').map(line => {
+      // leading spaces -> markers
+      const leading = (line.match(/^ +/) || [''])[0];
+      const trailing = (line.match(/ +$/) || [''])[0];
+      const core = line.substring(leading.length, line.length - trailing.length);
+      const leadMarkers = leading ? SPACE_MARKER.repeat(leading.length) : '';
+      const trailMarkers = trailing ? SPACE_MARKER.repeat(trailing.length) : '';
+      return leadMarkers + core + trailMarkers;
+    }).join('\n');
+  };
+
+  const fromEditMarkers = (text: string): string => {
+    if (text == null) return '';
+    return text.split('\n').map(line => line.replace(new RegExp(SPACE_MARKER, 'g'), ' ')).join('\n');
+  };
+
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const markerRegex = new RegExp(SPACE_MARKER, 'g');
+  const normalizeForChecks = (s: string) => (s || '').replace(markerRegex, ' ');
+  const countLeadingSpaces = (s: string) => {
+    const norm = normalizeForChecks(s);
+    const m = norm.match(/^ */);
+    return m ? m[0].length : 0;
+  };
+  const stripTrailingMarkersAndSpaces = (s: string) => {
+    if (!s) return s;
+    const esc = escapeRegex(SPACE_MARKER);
+    return s.replace(new RegExp(`(?:${esc}|[ \t])+$`), '');
   };
 
   // Helpers to persist per-note edit state
@@ -161,8 +197,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
       currentNoteIdRef.current = note.id;
       window.electronAPI.loadNote(note.id).then(noteContent => {
-        setContent(noteContent);
+        // Store on-disk content as lastSaved; show markers in editor when not previewing
         lastSavedContentRef.current = noteContent;
+        setContent(showPreview ? noteContent : toEditMarkers(noteContent));
         lastSavedTitleRef.current = note.title;
 
         // Focus & position cursor for edit mode
@@ -427,12 +464,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // autoSave (returns a promise)
   const autoSave = useCallback(async () => {
     if (!note || content == null) return;
-    if (content === lastSavedContentRef.current) return;
+    const diskContent = fromEditMarkers(content);
+    if (diskContent === lastSavedContentRef.current) return;
 
-    const savedNote = await window.electronAPI.saveNote(note.id, content);
-    lastSavedContentRef.current = content;
+    const savedNote = await window.electronAPI.saveNote(note.id, diskContent);
+    lastSavedContentRef.current = diskContent;
 
-    const newTitle = extractTitle(content);
+    const newTitle = extractTitle(diskContent);
     // Only notify parent about the saved note when the title actually
     // changes. Avoid writing empty titles (e.g. when content is just "# ").
     const newTitleNonEmpty = newTitle.trim();
@@ -521,21 +559,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     if (lineStart >= 4) {
       const prevLine = content.lastIndexOf('\n', lineStart - 2);
       const prevLineContent = content.substring(prevLine + 1, lineStart - 1);
-      if (prevLineContent.trim() === '```') {
+      const prevLineNorm = normalizeForChecks(prevLineContent).trim();
+      if (prevLineNorm === '```') {
         const nextLineStart = actualLineEnd + 1;
         const nextLineEnd = content.indexOf('\n', nextLineStart);
         const nextLineContent = content.substring(nextLineStart, nextLineEnd === -1 ? content.length : nextLineEnd);
-        if (nextLineContent.trim() === '```') active.add('codeblock');
+        if (normalizeForChecks(nextLineContent).trim() === '```') active.add('codeblock');
       }
     }
 
     const currentLineContent = content.substring(lineStart, actualLineEnd);
-    if (currentLineContent.startsWith('# ')) active.add('h1');
-    else if (currentLineContent.startsWith('## ')) active.add('h2');
-    else if (currentLineContent.startsWith('### ')) active.add('h3');
-    else if (currentLineContent.startsWith('> ')) active.add('blockquote');
-    else if (currentLineContent.match(/^- /)) active.add('bullet');
-    else if (currentLineContent.match(/^\d+\. /)) active.add('number');
+    const currentLineNorm = normalizeForChecks(currentLineContent);
+    if (currentLineNorm.startsWith('# ')) active.add('h1');
+    else if (currentLineNorm.startsWith('## ')) active.add('h2');
+    else if (currentLineNorm.startsWith('### ')) active.add('h3');
+    else if (currentLineNorm.startsWith('> ')) active.add('blockquote');
+    else if (currentLineNorm.match(/^- /)) active.add('bullet');
+    else if (currentLineNorm.match(/^\d+\. /)) active.add('number');
 
     setActiveFormats(active);
   }, [content]);
@@ -675,9 +715,24 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const sanitizePastedText = (text: string): string => {
     if (!text) return '';
     let out = text.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');
-    out = out.replace(/\r\n/g, '\n').replace(/\s+$/g, '').trim();
+    out = out.replace(/\r\n/g, '\n');
     out = out.replace(/<\/?[^>]+(>|$)/g, '');
     return out;
+  };
+
+  const handleCopy = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const selected = ta.value.substring(start, end);
+    const cleaned = fromEditMarkers(selected || '');
+    try {
+      e.clipboardData.setData('text/plain', cleaned);
+      e.preventDefault();
+    } catch (err) {
+      // fallback: allow normal copy
+    }
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -692,7 +747,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       }
     }
     const sanitized = sanitizePastedText(plain);
-    if (sanitized) insertAtCursor(sanitized);
+    if (sanitized) {
+      // Convert leading/trailing spaces in pasted content into markers
+      const converted = toEditMarkers(sanitized);
+      insertAtCursor(converted);
+    }
   };
 
   // content change handler with debounced save
@@ -716,7 +775,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
   const handleTextareaKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
-      if (!isOnFirstLine && note && content !== lastSavedContentRef.current) {
+      if (!isOnFirstLine && note && fromEditMarkers(content) !== lastSavedContentRef.current) {
         if (autoSaveTimeoutRef.current) {
           clearTimeout(autoSaveTimeoutRef.current);
           autoSaveTimeoutRef.current = null;
@@ -727,6 +786,24 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   };
 
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Intercept Space in leading indentation to insert visible marker instead
+    if (!showPreview && (e.key === ' ' || e.code === 'Space') && !isComposingRef.current) {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+        const lineEnd = content.indexOf('\n', start);
+        const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
+        const currentLine = content.substring(lineStart, actualLineEnd);
+        const leadingLen = countLeadingSpaces(currentLine);
+        // only when selection is collapsed and caret is within leading whitespace region
+        if (textarea.selectionStart === textarea.selectionEnd && start - lineStart <= leadingLen) {
+          e.preventDefault();
+          insertAtCursor(SPACE_MARKER);
+          return;
+        }
+      }
+    }
     if (e.key === 'Enter' && !showPreview) {
       // Handle Enter: preserve leading indentation; if current line is a list item ('- '),
       // continue the list on the next line. If Shift+Enter, create a new line without the list marker.
@@ -737,7 +814,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const end = textarea.selectionEnd;
       const lineStart = content.lastIndexOf('\n', start - 1) + 1;
       const currentLine = content.substring(lineStart, start);
-      const leading = (currentLine.match(/^[ \t]*/)?.[0]) || '';
+      const leadingLen = countLeadingSpaces(currentLine);
+      const leadingMarkers = SPACE_MARKER.repeat(leadingLen);
 
       const listMatch = currentLine.match(/^[ \t]*([-])\s+/);
       let insert: string;
@@ -748,12 +826,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const before = content.substring(0, start);
         const after = content.substring(end);
         const currentLineBeforeCursor = content.substring(lineStart, start);
-        // Replace any trailing whitespace on the portion before the cursor with exactly two spaces
-        const trimmedBefore = currentLineBeforeCursor.replace(/\s*$/, '');
+        // Replace any trailing whitespace/markers on the portion before the cursor with exactly two spaces
+        const trimmedBefore = stripTrailingMarkersAndSpaces(currentLineBeforeCursor);
         const spaces = '  ';
-        const insertHard = spaces + '\n' + leading + '   ';
+        const markerSpaces = SPACE_MARKER.repeat(spaces.length);
+        const insertHard = markerSpaces + '\n' + leadingMarkers + '   ';
         const newText = content.substring(0, lineStart) + trimmedBefore + insertHard + after;
-        const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leading.length + 3;
+        const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leadingLen + 3;
         programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
@@ -771,13 +850,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const before = content.substring(0, start);
       const after = content.substring(end);
       const currentLineBeforeCursor = content.substring(lineStart, start);
-      // Replace any trailing whitespace on the portion before the cursor with exactly two spaces
-      const trimmedBefore = currentLineBeforeCursor.replace(/\s*$/, '');
+      // Replace any trailing whitespace/markers on the portion before the cursor with exactly two spaces
+      const trimmedBefore = stripTrailingMarkersAndSpaces(currentLineBeforeCursor);
       const spaces = '  ';
-      // Insert exactly two spaces before the newline so they remain on the previous line
-      const insertHard = spaces + '\n' + leading;
+      // Use marker characters for visible trailing spaces in edit mode
+      const markerSpaces = SPACE_MARKER.repeat(spaces.length);
+      const insertHard = markerSpaces + '\n' + leadingMarkers;
       const newText = content.substring(0, lineStart) + trimmedBefore + insertHard + after;
-      const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leading.length;
+      const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leadingLen;
       programmaticInsertRef.current = true;
       setContent(newText);
       handleContentChange(newText);
@@ -805,8 +885,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const lineIndex = before.split('\n').length - 1;
       const currentLine = lines[lineIndex] ?? '';
 
-      // Only trigger when current line is empty or only spaces/tabs
-      if (currentLine.trim() === '') {
+      // Only trigger when current line is empty or only spaces/tabs/markers
+      if (normalizeForChecks(currentLine).trim() === '') {
         e.preventDefault();
         if (lineIndex === 0) {
           // First line: remove it and place cursor at start
@@ -827,7 +907,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
         // Remove current empty line and trim trailing whitespace from previous line
         const prevLine = lines[lineIndex - 1] ?? '';
-        const prevTrimmed = prevLine.replace(/\s+$/, '');
+        const prevTrimmed = stripTrailingMarkersAndSpaces(prevLine);
 
         const newLines = [] as string[];
         for (let i = 0; i < lines.length; i++) {
@@ -877,8 +957,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         let removedBeforeStart = 0;
         let removedBeforeEnd = 0;
         const newLines = lines.map((ln, idx) => {
-          const lead = ln.match(/^\s*/)?.[0] ?? '';
-          const toRemove = Math.min(3, lead.length);
+          const leadLen = countLeadingSpaces(ln);
+          const toRemove = Math.min(3, leadLen);
           // update removed counters relative to selection bounds
           const origLen = ln.length;
           if (start > pos) {
@@ -911,8 +991,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           programmaticInsertRef.current = false;
         }, 0);
       } else {
-        // Insert three spaces at cursor (use helper to keep behavior consistent)
-        insertAtCursor('   ');
+        // Insert three spaces at cursor (use markers if we're in leading indentation)
+        const textarea = textareaRef.current;
+        if (textarea) {
+          const start = textarea.selectionStart;
+          const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+          const lineEnd = content.indexOf('\n', start);
+          const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
+          const currentLine = content.substring(lineStart, actualLineEnd);
+          const leadingLen = countLeadingSpaces(currentLine);
+          if (start - lineStart <= leadingLen) {
+            insertAtCursor(SPACE_MARKER.repeat(3));
+          } else {
+            insertAtCursor('   ');
+          }
+        } else {
+          insertAtCursor('   ');
+        }
       }
     }
   };
@@ -949,7 +1044,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
   // trigger auto-save when moving off first line
   useEffect(() => {
-    if (!isOnFirstLine && note && content !== lastSavedContentRef.current) {
+    if (!isOnFirstLine && note && fromEditMarkers(content) !== lastSavedContentRef.current) {
       if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
       autoSaveTimeoutRef.current = scheduleTimeout(() => {
         void autoSave();
@@ -1260,6 +1355,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             className={`markdown-textarea editor-style-${editorStyle} size-${editorFontSize} spacing-${editorSpacing}`}
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
+            onCompositionStart={() => { isComposingRef.current = true; }}
+            onCompositionEnd={() => { isComposingRef.current = false; }}
+            onCopy={(e) => handleCopy(e)}
             onKeyUp={handleTextareaKeyUp}
             onKeyDown={handleTextareaKeyDown}
             onPaste={handlePaste}
@@ -1301,7 +1399,7 @@ Start typing your note here...`}
                 }
               }}
             >
-              {content}
+              {fromEditMarkers(content)}
             </ReactMarkdown>
           </div>
         )}
