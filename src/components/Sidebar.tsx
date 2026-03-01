@@ -873,7 +873,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="notes-list">
           {displayedNotes.length === 0 ? (
             <div className="empty-state" style={{ padding: 16, textAlign: 'center' }}>
-              {hasAnyNotes ? (
+              {viewMode === 'trash' && totalNotes === 0 ? (
+                <div>The trash bin is currently empty.</div>
+              ) : hasAnyNotes ? (
                 <div>No notes to show for the current filters.</div>
               ) : (
                 <div>
