@@ -28,7 +28,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
 
   // View (preview) settings
-  const [viewStyle, setViewStyle] = useState<string>('clean');
+  const [viewStyle, setViewStyle] = useState<string>('modern');
   const [viewFontSize, setViewFontSize] = useState<string>('m');
   const [viewSpacing, setViewSpacing] = useState<string>('cozy');
 
@@ -1315,13 +1315,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               <div className="style-selector">
                 <label className="selector-label">Style:</label>
                 <select value={viewStyle} onChange={(e) => handleViewStyleChange(e.target.value)}>
-                  <option value="clean">Clean</option>
-                  <option value="narrow">Narrow</option>
-                  <option value="print">Print</option>
                   <option value="modern">Modern</option>
+                  <option value="narrow">Narrow</option>
                   <option value="cute">Cute</option>
-                  <option value="hand">Hand</option>
-                  <option value="script">Script</option>
+                  <option value="print">Print</option>
                 </select>
               </div>
 
