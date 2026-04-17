@@ -32,7 +32,7 @@ export function computeMetrics(
   spacingPreset: SpacingPreset
 ): ComputedMetrics {
   const preset = PRESET_METRICS[spacingPreset];
-  const lineHeightPx = fontSizePx * (preset.lineHeightPercent / 100);
+  const lineHeightPx = Math.round(fontSizePx * (preset.lineHeightPercent / 100));
   const rowHeightPx = lineHeightPx + preset.rowGapPx;
 
   return {

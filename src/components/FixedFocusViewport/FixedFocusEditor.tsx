@@ -342,6 +342,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     layout.centerHeightPx,
     wrappedLines.length * metrics.rowHeightPx
   );
+  const dividerOffsetPx = metrics.rowGapPx > 0 ? Math.floor(metrics.rowGapPx / 2) : 0;
+  const topDividerTopPx = Math.max(0, Math.round(layout.topHeightPx - dividerOffsetPx));
+  const bottomDividerTopPx = Math.max(0, Math.round(layout.topHeightPx + layout.centerHeightPx - dividerOffsetPx));
 
   return (
     <div
@@ -366,7 +369,17 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             overflow: 'hidden',
           }}
         >
-          <ZoneContent rows={topRows} metrics={metrics} text={text} alignBottom horizontalPaddingPx={horizontalPaddingPx} />
+          <MirroredTextLayer
+            text={text}
+            metrics={metrics}
+            totalWrappedRowCount={wrappedLines.length}
+            visibleHeightPx={layout.topHeightPx}
+            startRow={Math.max(0, effectiveCenterStartRow - topRows.length)}
+            insetTopPx={Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx))}
+            horizontalPaddingPx={horizontalPaddingPx}
+            textareaClassName={textareaClassName}
+            textareaStyle={textareaStyle}
+          />
         </div>
       )}
 
@@ -425,19 +438,29 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             overflow: 'hidden',
           }}
         >
-          <ZoneContent rows={bottomRows} metrics={metrics} text={text} horizontalPaddingPx={horizontalPaddingPx} />
+          <MirroredTextLayer
+            text={text}
+            metrics={metrics}
+            totalWrappedRowCount={wrappedLines.length}
+            visibleHeightPx={layout.bottomHeightPx}
+            startRow={effectiveCenterStartRow + viewport.centerRowCount}
+            insetTopPx={0}
+            horizontalPaddingPx={horizontalPaddingPx}
+            textareaClassName={textareaClassName}
+            textareaStyle={textareaStyle}
+          />
         </div>
       )}
 
       <div
         className={`zone-divider zone-divider-top${activeResizeHandle === 'top' ? ' is-active' : ''}`}
-        style={{ top: `${layout.topHeightPx}px` }}
+        style={{ top: `${topDividerTopPx}px` }}
         onPointerDown={startResize('top')}
       />
 
       <div
         className={`zone-divider zone-divider-bottom${activeResizeHandle === 'bottom' ? ' is-active' : ''}`}
-        style={{ top: `${layout.topHeightPx + layout.centerHeightPx}px` }}
+        style={{ top: `${bottomDividerTopPx}px` }}
         onPointerDown={startResize('bottom')}
       />
     </div>
@@ -446,46 +469,66 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface ZoneContentProps {
-  rows: WrappedLine[];
-  metrics: ComputedMetrics;
+interface MirroredTextLayerProps {
   text: string;
-  alignBottom?: boolean;
+  metrics: ComputedMetrics;
+  totalWrappedRowCount: number;
+  visibleHeightPx: number;
+  startRow: number;
+  insetTopPx?: number;
   horizontalPaddingPx?: number;
+  textareaClassName?: string;
+  textareaStyle?: React.CSSProperties;
 }
 
-const ZoneContent: React.FC<ZoneContentProps> = ({
-  rows,
-  metrics,
+const MirroredTextLayer: React.FC<MirroredTextLayerProps> = ({
   text,
-  alignBottom = false,
+  metrics,
+  totalWrappedRowCount,
+  visibleHeightPx,
+  startRow,
+  insetTopPx = 0,
   horizontalPaddingPx = 20,
+  textareaClassName,
+  textareaStyle,
 }) => (
   <div
     style={{
-      padding: `0 ${horizontalPaddingPx}px`,
-      fontFamily: 'inherit',
-      fontSize: 'inherit',
       height: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: alignBottom ? 'flex-end' : 'flex-start',
+      position: 'relative',
+      overflow: 'hidden',
       boxSizing: 'border-box',
     }}
   >
-    {rows.map((row, idx) => (
-      <div
-        key={idx}
-        style={{
-          height: `${metrics.rowHeightPx}px`,
-          lineHeight: `${metrics.rowHeightPx}px`,
-          whiteSpace: 'pre',
-          overflow: 'hidden',
-        }}
-      >
-        {text.substring(row.startCharIndex, row.endCharIndex)}
-      </div>
-    ))}
+    <textarea
+      aria-hidden
+      readOnly
+      tabIndex={-1}
+      className={textareaClassName ? `zone-textarea ${textareaClassName}` : 'zone-textarea'}
+      value={text}
+      style={{
+        position: 'absolute',
+        top: `${insetTopPx - (startRow * metrics.rowHeightPx)}px`,
+        left: 0,
+        width: '100%',
+        height: `${Math.max(visibleHeightPx, totalWrappedRowCount * metrics.rowHeightPx)}px`,
+        fontSize: 'inherit',
+        lineHeight: `${metrics.rowHeightPx}px`,
+        padding: `0 ${horizontalPaddingPx}px`,
+        margin: 0,
+        border: 'none',
+        resize: 'none',
+        outline: 'none',
+        fontFamily: 'inherit',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        whiteSpace: 'pre-wrap',
+        wordWrap: 'break-word',
+        pointerEvents: 'none',
+        userSelect: 'none',
+        ...textareaStyle,
+      }}
+    />
   </div>
 );
 

@@ -76,24 +76,14 @@
       left: 0;
       right: 0;
       top: 50%;
-      height: 1px;
+      height: 0;
       transform: translateY(-50%);
-      background-image: repeating-linear-gradient(
-        to right,
-        rgba(90, 90, 90, 0.38) 0 4px,
-        transparent 4px 8px
-      );
-      background-repeat: repeat-x;
+      border-top: 1px dotted rgba(90, 90, 90, 0.38);
     }
 
     &.is-active::before,
     &:hover::before {
-      background-image: repeating-linear-gradient(
-        to right,
-        rgba(70, 70, 70, 0.52) 0 4px,
-        transparent 4px 8px
-      );
-      height: 1px;
+      border-top-color: rgba(70, 70, 70, 0.52);
     }
   }
 
