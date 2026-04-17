@@ -91,6 +91,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
   const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
   const contentWidthPx = Math.max(1, containerWidthPx - (horizontalPaddingPx * 2));
+  const topInsetPx = Math.max(0, computeTopInsetPx(spacingPreset));
+  const drawableHeightPx = Math.max(1, containerHeightPx - topInsetPx);
 
   const setViewportStartRow = (nextViewportStartRow: number | ((prev: number) => number)) => {
     const resolvedNextRow = typeof nextViewportStartRow === 'function'
@@ -130,7 +132,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       fontSizePx,
       spacingPreset,
       contentWidthPx,
-      containerHeightPx,
+      drawableHeightPx,
       fontFamily,
       resolvedTopRowCount,
       resolvedBottomRowCount
@@ -142,7 +144,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     fontSizePx,
     spacingPreset,
     contentWidthPx,
-    containerHeightPx,
+    drawableHeightPx,
     centerStartRow,
     fontFamily,
     resolvedTopRowCount,
@@ -343,15 +345,14 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     wrappedLines.length * metrics.rowHeightPx
   );
   const dividerOffsetPx = metrics.rowGapPx > 0 ? Math.floor(metrics.rowGapPx / 2) : 0;
-  const topDividerTopPx = Math.max(0, Math.round(layout.topHeightPx - dividerOffsetPx));
-  const bottomDividerTopPx = Math.max(0, Math.round(layout.topHeightPx + layout.centerHeightPx - dividerOffsetPx));
+  const topDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx - dividerOffsetPx));
+  const bottomDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx + layout.centerHeightPx - dividerOffsetPx));
 
   return (
     <div
       className="fixed-focus-editor"
       style={{
         display: 'flex',
-        flexDirection: 'column',
         position: 'relative',
         height: `${containerHeightPx}px`,
         width: `${containerWidthPx}px`,
@@ -360,97 +361,107 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         overflow: 'hidden',
       }}
     >
-      {/* Top Zone (display-only) */}
-      {layout.topHeightPx > 0 && (
-        <div
-          className="zone zone-top"
-          style={{
-            height: `${layout.topHeightPx}px`,
-            overflow: 'hidden',
-          }}
-        >
-          <MirroredTextLayer
-            text={text}
-            metrics={metrics}
-            totalWrappedRowCount={wrappedLines.length}
-            visibleHeightPx={layout.topHeightPx}
-            startRow={Math.max(0, effectiveCenterStartRow - topRows.length)}
-            insetTopPx={Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx))}
-            horizontalPaddingPx={horizontalPaddingPx}
-            textareaClassName={textareaClassName}
-            textareaStyle={textareaStyle}
-          />
-        </div>
-      )}
-
-      {/* Center Zone (editable textarea, no scroll) */}
       <div
-        className="zone zone-center"
+        className="fixed-focus-editor-content"
         style={{
-          flex: '0 0 auto',
-          height: `${layout.centerHeightPx}px`,
-          position: 'relative',
-          overflow: 'hidden',
+          position: 'absolute',
+          top: `${topInsetPx}px`,
+          left: 0,
+          right: 0,
+          height: `${drawableHeightPx}px`,
         }}
       >
-        <textarea
-          ref={centerInputRef}
-          className={textareaClassName ? `zone-textarea ${textareaClassName}` : 'zone-textarea'}
-          value={text}
-          onChange={handleInput}
-          onSelect={handleSelect}
-          onKeyDown={handleKeyDown}
-          onKeyUp={onKeyUp}
-          onCopy={onCopy}
-          onPaste={onPaste}
-          onCompositionStart={onCompositionStart}
-          onCompositionEnd={onCompositionEnd}
-          placeholder={placeholder}
-          style={{
-            position: 'absolute',
-            top: `${textareaTopPx}px`,
-            left: 0,
-            width: '100%',
-            height: `${textareaHeightPx}px`,
-            fontSize: `${fontSizePx}px`,
-            lineHeight: `${metrics.rowHeightPx}px`,
-            padding: `0 ${horizontalPaddingPx}px`,
-            margin: 0,
-            border: 'none',
-            resize: 'none',
-            outline: 'none',
-            fontFamily: 'inherit',
-            boxSizing: 'border-box',
-            overflow: 'hidden',
-            whiteSpace: 'pre-wrap',
-            wordWrap: 'break-word',
-            ...textareaStyle,
-          }}
-        />
-      </div>
+        {/* Top Zone (display-only) */}
+        {layout.topHeightPx > 0 && (
+          <div
+            className="zone zone-top"
+            style={{
+              height: `${layout.topHeightPx}px`,
+              overflow: 'hidden',
+            }}
+          >
+            <MirroredTextLayer
+              text={text}
+              metrics={metrics}
+              totalWrappedRowCount={wrappedLines.length}
+              visibleHeightPx={layout.topHeightPx}
+              startRow={Math.max(0, effectiveCenterStartRow - topRows.length)}
+              insetTopPx={Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx))}
+              horizontalPaddingPx={horizontalPaddingPx}
+              textareaClassName={textareaClassName}
+              textareaStyle={textareaStyle}
+            />
+          </div>
+        )}
 
-      {/* Bottom Zone (display-only) */}
-      {layout.bottomHeightPx > 0 && (
+        {/* Center Zone (editable textarea, no scroll) */}
         <div
-          className="zone zone-bottom"
+          className="zone zone-center"
           style={{
-            height: `${layout.bottomHeightPx}px`,
+            height: `${layout.centerHeightPx}px`,
+            position: 'relative',
             overflow: 'hidden',
           }}
         >
-          <MirroredTextLayer
-            text={text}
-            metrics={metrics}
-            totalWrappedRowCount={wrappedLines.length}
-            visibleHeightPx={layout.bottomHeightPx}
-            startRow={effectiveCenterStartRow + viewport.centerRowCount}
-            insetTopPx={0}
-            horizontalPaddingPx={horizontalPaddingPx}
-            textareaClassName={textareaClassName}
-            textareaStyle={textareaStyle}
+          <textarea
+            ref={centerInputRef}
+            className={textareaClassName ? `zone-textarea ${textareaClassName}` : 'zone-textarea'}
+            value={text}
+            onChange={handleInput}
+            onSelect={handleSelect}
+            onKeyDown={handleKeyDown}
+            onKeyUp={onKeyUp}
+            onCopy={onCopy}
+            onPaste={onPaste}
+            onCompositionStart={onCompositionStart}
+            onCompositionEnd={onCompositionEnd}
+            placeholder={placeholder}
+            style={{
+              position: 'absolute',
+              top: `${textareaTopPx}px`,
+              left: 0,
+              width: '100%',
+              height: `${textareaHeightPx}px`,
+              fontSize: `${fontSizePx}px`,
+              lineHeight: `${metrics.rowHeightPx}px`,
+              padding: `0 ${horizontalPaddingPx}px`,
+              margin: 0,
+              border: 'none',
+              resize: 'none',
+              outline: 'none',
+              fontFamily: 'inherit',
+              boxSizing: 'border-box',
+              overflow: 'hidden',
+              whiteSpace: 'pre-wrap',
+              wordWrap: 'break-word',
+              ...textareaStyle,
+            }}
           />
         </div>
-      )}
+
+        {/* Bottom Zone (display-only) */}
+        {layout.bottomHeightPx > 0 && (
+          <div
+            className="zone zone-bottom"
+            style={{
+              height: `${layout.bottomHeightPx}px`,
+              overflow: 'hidden',
+            }}
+          >
+            <MirroredTextLayer
+              text={text}
+              metrics={metrics}
+              totalWrappedRowCount={wrappedLines.length}
+              visibleHeightPx={layout.bottomHeightPx}
+              startRow={effectiveCenterStartRow + viewport.centerRowCount}
+              insetTopPx={0}
+              horizontalPaddingPx={horizontalPaddingPx}
+              textareaClassName={textareaClassName}
+              textareaStyle={textareaStyle}
+            />
+          </div>
+        )}
+      </div>
 
       <div
         className={`zone-divider zone-divider-top${activeResizeHandle === 'top' ? ' is-active' : ''}`}
@@ -533,4 +544,8 @@ const MirroredTextLayer: React.FC<MirroredTextLayerProps> = ({
 );
 
 export default FixedFocusEditor;
+
+function computeTopInsetPx(spacingPreset: string): number {
+  return 15;
+}
 
