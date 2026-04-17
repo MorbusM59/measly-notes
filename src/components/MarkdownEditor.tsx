@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Note } from '../shared/types';
+import { FixedFocusEditor } from './FixedFocusViewport';
 import './MarkdownEditor.scss';
 import './MarkdownThemes.scss';
 
@@ -16,12 +17,17 @@ interface MarkdownEditorProps {
 type EditState = {
   selectionStart: number;
   scrollTop: number;
+  viewportStartRow?: number;
 };
 
 const EDIT_STATE_KEY_PREFIX = 'md-edit-state-';
 
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview, hasAnyNotes }) => {
   const [content, setContent] = useState('');
+  const [caretPos, setCaretPos] = useState(0);
+  const [editViewportStartRow, setEditViewportStartRow] = useState(0);
+  const [editorViewportSize, setEditorViewportSize] = useState({ width: 0, height: 0 });
+  const [layoutRevision, setLayoutRevision] = useState(0);
   // Marker for visible spaces
   const SPACE_MARKER = '\u00B7'; // U+00B7 MIDDLE DOT '·'
   const isComposingRef = useRef(false);
@@ -62,6 +68,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     return id;
   };
 
+  const setTextareaSelection = useCallback((start: number, end = start) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.setSelectionRange(start, end);
+    setCaretPos(start);
+  }, []);
+
   // Editor style options — Syne and Red Hat (display labels simplified).
   const editorStyleOptions: { key: string; label: string; family: string }[] = [
     { key: 'syne', label: 'Syne', family: "'Syne Mono', 'Menlo', 'Monaco', monospace" },
@@ -91,7 +104,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       // protect against overlap when the whole line is spaces
       const coreStart = leading.length;
       const coreEnd = line.length - trailing.length;
-      let core = coreEnd > coreStart ? line.substring(coreStart, coreEnd) : '';
+      const core = coreEnd > coreStart ? line.substring(coreStart, coreEnd) : '';
       let leadMarkers = leading ? SPACE_MARKER.repeat(leading.length) : '';
       let trailMarkers = trailing ? SPACE_MARKER.repeat(trailing.length) : '';
       if (!core && (leading.length > 0 || trailing.length > 0)) {
@@ -130,13 +143,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const ta = textareaRef.current;
     const editorContent = editorContentRef.current;
     if (!ta || !editorContent) return;
+    const persistedViewportStartRow = showPreview ? 0 : editViewportStartRow;
     const state: EditState = {
       selectionStart: ta.selectionStart,
-      scrollTop: editorContent.scrollTop,
+      scrollTop: showPreview ? editorContent.scrollTop : persistedViewportStartRow,
+      viewportStartRow: persistedViewportStartRow,
     };
     try {
       // persist to DB via preload API (best-effort)
-      try { await window.electronAPI.saveNoteUiState(noteId, { cursorPos: state.selectionStart, scrollTop: state.scrollTop, progressEdit: (editorContent.scrollHeight > editorContent.clientHeight ? editorContent.scrollTop / (editorContent.scrollHeight - editorContent.clientHeight) : 0) }); } catch (err) { console.warn('saveNoteUiState failed', err); }
+      try {
+        await window.electronAPI.saveNoteUiState(noteId, {
+          cursorPos: state.selectionStart,
+          scrollTop: state.scrollTop,
+          progressEdit: showPreview
+            ? (editorContent.scrollHeight > editorContent.clientHeight ? editorContent.scrollTop / (editorContent.scrollHeight - editorContent.clientHeight) : 0)
+            : 0,
+        });
+      } catch (err) { console.warn('saveNoteUiState failed', err); }
     } catch {
       // ignore
     }
@@ -153,7 +176,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       try {
         const st = await window.electronAPI.getNoteUiState(noteId);
         if (st && (st.cursorPos != null || st.scrollTop != null)) {
-          return { selectionStart: (st.cursorPos ?? 0), scrollTop: (st.scrollTop ?? 0) };
+          return {
+            selectionStart: (st.cursorPos ?? 0),
+            scrollTop: (st.scrollTop ?? 0),
+            viewportStartRow: (st.scrollTop ?? 0),
+          };
         }
       } catch (err) { console.warn('loadNote failed to provide content', err); }
 
@@ -187,8 +214,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         if (!ta || !editorContent || !note) return;
         const st = await loadEditState(note.id);
         if (st) {
-          ta.selectionStart = ta.selectionEnd = st.selectionStart;
-          editorContent.scrollTop = st.scrollTop;
+          setTextareaSelection(st.selectionStart, st.selectionStart);
+          setEditViewportStartRow(st.viewportStartRow ?? st.scrollTop ?? 0);
+          if (showPreview) editorContent.scrollTop = st.scrollTop;
         }
         // ensure proper sizing and visibility
         autosizeTextarea(ta);
@@ -212,6 +240,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         lastSavedContentRef.current = noteContent;
         setContent(showPreview ? noteContent : toEditMarkers(noteContent));
         lastSavedTitleRef.current = note.title;
+        setEditViewportStartRow(0);
+        setCaretPos(0);
 
         // Focus & position cursor for edit mode
         if (!showPreview) {
@@ -227,17 +257,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               const st = await loadEditState(note.id);
               if (st) {
                 textarea.focus();
-                textarea.setSelectionRange(st.selectionStart, st.selectionStart);
-                if (editorContent) {
+                setTextareaSelection(st.selectionStart, st.selectionStart);
+                setEditViewportStartRow(st.viewportStartRow ?? st.scrollTop ?? 0);
+                if (editorContent && showPreview) {
                   editorContent.scrollTop = st.scrollTop;
                 }
               } else {
                 // default behavior: put cursor at end or after '# '
                 textarea.focus();
                 if (noteContent === '# ') {
-                  textarea.setSelectionRange(2, 2);
+                  setTextareaSelection(2, 2);
                 } else {
-                  textarea.setSelectionRange((noteContent || '').length, (noteContent || '').length);
+                  setTextareaSelection((noteContent || '').length, (noteContent || '').length);
                 }
               }
               autosizeTextarea(textarea);
@@ -332,6 +363,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
   // Autosize helper: set textarea height to its content height.
   const autosizeTextarea = useCallback((ta?: HTMLTextAreaElement | null) => {
+    if (!showPreview) return;
     const el = ta ?? textareaRef.current;
     const editorContent = editorContentRef.current;
     if (!el) return;
@@ -353,13 +385,16 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
   // Compute approximate caret Y (relative to editorContent's scrollTop)
   const getCaretApproxY = (): number | null => {
+    if (!showPreview) return null;
     const ta = textareaRef.current;
     const editorContent = editorContentRef.current;
     if (!ta || !editorContent) return null;
 
     // Determine caret line number
     const pos = ta.selectionStart ?? 0;
-    const textUpToCursor = content.substring(0, pos);
+    // Use ta.value (live DOM) not the React state `content`, which may be stale
+    // inside programmatic-insert timeouts (old closure).
+    const textUpToCursor = ta.value.substring(0, pos);
     const lineIndex = textUpToCursor.split('\n').length - 1;
 
     const cs = window.getComputedStyle(ta);
@@ -387,13 +422,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
   // Ensure caret is visible in editorContent. Only scroll if caret is below visible area.
   const ensureCaretVisible = () => {
+    if (!showPreview) return;
     const editorContent = editorContentRef.current;
     if (!editorContent) return;
     const caretY = getCaretApproxY();
     if (caretY === null) return;
 
-    const visibleTop = editorContent.scrollTop;
-    const visibleBottom = visibleTop + editorContent.clientHeight;
     // estimate single line height (approx)
     const ta = textareaRef.current;
     if (!ta) return;
@@ -403,6 +437,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const fontSize = parseFloat(cs.fontSize || '16');
       lineHeight = fontSize * 1.2;
     }
+
+    const visibleTop = editorContent.scrollTop;
+    const visibleBottom = visibleTop + editorContent.clientHeight - (lineHeight / 2);
 
     // If caret is above visible top -> scroll up to keep it visible at top (rare)
     if (caretY < visibleTop) {
@@ -415,15 +452,20 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       return;
     }
 
-    // If caret is below visible area, scroll so caret is one line above bottom
-    const target = Math.max(0, Math.round(caretY - (editorContent.clientHeight - Math.round(lineHeight) - 8)));
-    editorContent.scrollTop = target;
+    // If caret is below visible area, scroll down by three lines (or to end)
+    // This prevents the caret from being pushed right to the very bottom
+    // where it's hard to see when typing new lines.
+    const maxScroll = editorContent.scrollHeight - editorContent.clientHeight;
+    const desired = editorContent.scrollTop + (lineHeight * 3);
+    // Ensure we don't scroll past the max; also don't overshoot so caret becomes invisible again
+    editorContent.scrollTop = Math.max(0, Math.min(desired, maxScroll));
   };
 
   // Run autosize when content changes or when switching to edit mode.
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
+    if (!showPreview) return;
 
     if (!showPreview) {
       autosizeTextarea(ta);
@@ -440,6 +482,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
+    if (!showPreview) return;
     const onInput = () => {
       autosizeTextarea(ta);
       ensureCaretVisible();
@@ -624,7 +667,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     scheduleTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(newSelectionStart, newSelectionEnd);
+      setTextareaSelection(newSelectionStart, newSelectionEnd);
       checkFormatting();
     }, 0);
   };
@@ -641,7 +684,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     handleContentChange(newText);
     scheduleTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(start + text.length, start + text.length);
+      setTextareaSelection(start + text.length, start + text.length);
       autosizeTextarea(textarea);
       ensureCaretVisible();
       programmaticInsertRef.current = false;
@@ -717,7 +760,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
     scheduleTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      setTextareaSelection(newCursorPos, newCursorPos);
       checkFormatting();
     }, 0);
   };
@@ -849,7 +892,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         handleContentChange(newText);
         scheduleTimeout(() => {
           textarea.focus();
-          textarea.setSelectionRange(newCursorPos, newCursorPos);
+          setTextareaSelection(newCursorPos, newCursorPos);
           autosizeTextarea(textarea);
           ensureCaretVisible();
           programmaticInsertRef.current = false;
@@ -870,7 +913,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         handleContentChange(newText);
         scheduleTimeout(() => {
           textarea.focus();
-          textarea.setSelectionRange(newCursorPos, newCursorPos);
+          setTextareaSelection(newCursorPos, newCursorPos);
           autosizeTextarea(textarea);
           ensureCaretVisible();
           programmaticInsertRef.current = false;
@@ -897,7 +940,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       handleContentChange(newText);
       scheduleTimeout(() => {
         textarea.focus();
-        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        setTextareaSelection(newCursorPos, newCursorPos);
         autosizeTextarea(textarea);
         ensureCaretVisible();
         programmaticInsertRef.current = false;
@@ -931,7 +974,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           handleContentChange(newText);
           scheduleTimeout(() => {
             textarea.focus();
-            textarea.setSelectionRange(0, 0);
+            setTextareaSelection(0, 0);
             autosizeTextarea(textarea);
             ensureCaretVisible();
             programmaticInsertRef.current = false;
@@ -964,7 +1007,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         handleContentChange(newText);
         scheduleTimeout(() => {
           textarea.focus();
-          textarea.setSelectionRange(newCursorPos, newCursorPos);
+          setTextareaSelection(newCursorPos, newCursorPos);
           autosizeTextarea(textarea);
           ensureCaretVisible();
           programmaticInsertRef.current = false;
@@ -1019,7 +1062,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           textarea.focus();
           const newStart = Math.max(0, start - removedBeforeStart);
           const newEnd = Math.max(0, end - removedBeforeEnd);
-          textarea.setSelectionRange(newStart, newEnd);
+          setTextareaSelection(newStart, newEnd);
           autosizeTextarea(textarea);
           checkFormatting();
           programmaticInsertRef.current = false;
@@ -1053,6 +1096,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const handleSelectionChange = () => {
       checkCursorPosition();
       checkFormatting();
+      setCaretPos(textarea.selectionStart ?? 0);
 
       // debounce save edit state for current note
       if (note?.id != null) {
@@ -1089,16 +1133,39 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
   // reflow after fonts arrive (helps initial wrapping)
   useEffect(() => {
+    const container = editorContentRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      setEditorViewportSize({
+        width: container.clientWidth,
+        height: container.clientHeight,
+      });
+    };
+
+    updateSize();
+    const frameId = requestAnimationFrame(updateSize);
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    return () => {
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [showPreview, note?.id]);
+
+  useEffect(() => {
     const reflowTextarea = () => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.style.display = 'none';
-      // force reflow
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-      ta.offsetHeight;
-      ta.style.display = '';
-      // ensure correct sizing after reflow
-      autosizeTextarea(ta);
+      if (showPreview) {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.style.display = 'none';
+        ta.offsetHeight;
+        ta.style.display = '';
+        autosizeTextarea(ta);
+        return;
+      }
+
+      setLayoutRevision((version) => version + 1);
     };
 
     if ((document as any).fonts && (document as any).fonts.ready) {
@@ -1167,7 +1234,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const editorInlineStyle: React.CSSProperties = {
     fontFamily: getEditorFamily(editorStyle),
     fontSize: `${sizeToPx(editorFontSize)}px`,
-    lineHeight: `${spacingToLineHeight(editorSpacing)}`,
   };
 
   // cleanup
@@ -1220,6 +1286,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Persist scrolling/progress in both preview and edit modes.
   useEffect(() => {
     if (!note?.id) return;
+    if (!showPreview) return;
     const id = note.id;
     let timer: NodeJS.Timeout | null = null;
     const handler = () => {
@@ -1379,13 +1446,41 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         </div>
       </div>
 
-      <div className="editor-content" ref={editorContentRef}>
+      <div className="editor-content" ref={editorContentRef} style={!showPreview ? { overflow: 'hidden' } : undefined}>
         {!showPreview ? (
-          <textarea
-            ref={textareaRef}
-            className={`markdown-textarea editor-style-${editorStyle} size-${editorFontSize} spacing-${editorSpacing}`}
-            value={content}
-            onChange={(e) => handleContentChange(e.target.value)}
+          <FixedFocusEditor
+            key={`${editorStyle}-${editorFontSize}-${editorSpacing}-${layoutRevision}`}
+            text={content}
+            caretPos={caretPos}
+            fontFamily={getEditorFamily(editorStyle)}
+            fontSizePx={sizeToPx(editorFontSize)}
+            spacingPreset={editorSpacing}
+            horizontalPaddingPx={20}
+            containerWidthPx={Math.max(1, editorViewportSize.width)}
+            containerHeightPx={Math.max(1, editorViewportSize.height)}
+            viewportStartRow={editViewportStartRow}
+            onViewportStartRowChange={setEditViewportStartRow}
+            onTextChange={(newText, newCaretPos) => {
+              handleContentChange(newText);
+              setCaretPos(newCaretPos);
+              checkCursorPosition();
+              scheduleTimeout(() => {
+                const textarea = textareaRef.current;
+                if (!textarea) return;
+                textarea.focus();
+                setTextareaSelection(newCaretPos, newCaretPos);
+              }, 0);
+            }}
+            onCaretChange={(newCaretPos) => {
+              const textarea = textareaRef.current;
+              if (!textarea) return;
+              setTextareaSelection(newCaretPos, newCaretPos);
+              checkCursorPosition();
+              checkFormatting();
+            }}
+            textareaRef={textareaRef}
+            textareaClassName={`markdown-textarea editor-style-${editorStyle}`}
+            textareaStyle={editorInlineStyle}
             onCompositionStart={() => { isComposingRef.current = true; }}
             onCompositionEnd={() => { isComposingRef.current = false; }}
             onCopy={(e) => handleCopy(e)}
@@ -1395,7 +1490,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             placeholder={`# Note Title
 
 Start typing your note here...`}
-            style={editorInlineStyle}
           />
         ) : (
           <div className={`markdown-preview style-${viewStyle} size-${viewFontSize} spacing-${viewSpacing}`}>

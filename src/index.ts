@@ -528,8 +528,8 @@ app.whenReady().then(async () => {
           const token = generateUniqueFileToken();
           try { setNoteFileToken(note.id, token); } catch (err) { console.warn('[main] setNoteFileToken failed for report', err); }
           const nowIso = new Date().toISOString();
-          try { updateNoteCreatedAt(note.id, nowIso); } catch {}
-          try { updateNoteLastEdited(note.id, nowIso); } catch {}
+          try { updateNoteCreatedAt(note.id, nowIso); } catch { void 0; }
+          try { updateNoteLastEdited(note.id, nowIso); } catch { void 0; }
 
           const parts: string[] = [];
           parts.push(`# ${title}`);
@@ -565,8 +565,8 @@ app.whenReady().then(async () => {
           const fname = `${yy}-${mm}-${dd}_${hh}-${min}_${token}.md`;
           const pathSaved = await saveNoteContent(note.id, content, fname);
           updateNoteFilePath(note.id, pathSaved);
-          try { upsertNoteFts(note.id, title, content); } catch {}
-          try { addTagToNote(note.id, 'report', 0); } catch {}
+          try { upsertNoteFts(note.id, title, content); } catch { void 0; }
+          try { addTagToNote(note.id, 'report', 0); } catch { void 0; }
         } catch (err) {
           console.warn('[main] failed to create sync report', err);
         }
@@ -598,7 +598,7 @@ app.whenReady().then(async () => {
                 const raw = fs.readFileSync(src, 'utf8');
                 const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
                 if (lines.length > 0) return lines[0].replace(/^#+\s*/, '') || e.replace(/\.md$/i, '');
-              } catch { }
+              } catch { void 0; }
               return e.replace(/\.md$/i, '');
             })();
             const note = createNote(titleGuess, '');
@@ -633,8 +633,8 @@ app.whenReady().then(async () => {
           const token = generateUniqueFileToken();
           try { setNoteFileToken(note.id, token); } catch (err) { console.warn('[main] setNoteFileToken failed for import report', err); }
           const nowIso = new Date().toISOString();
-          try { updateNoteCreatedAt(note.id, nowIso); } catch {}
-          try { updateNoteLastEdited(note.id, nowIso); } catch {}
+          try { updateNoteCreatedAt(note.id, nowIso); } catch { void 0; }
+          try { updateNoteLastEdited(note.id, nowIso); } catch { void 0; }
 
           const parts: string[] = [];
           parts.push(`# ${title}`);
@@ -662,8 +662,8 @@ app.whenReady().then(async () => {
           const fname = `${yy}-${mm}-${dd}_${hh}-${min}_${token}.md`;
           const pathSaved = await saveNoteContent(note.id, content, fname);
           updateNoteFilePath(note.id, pathSaved);
-          try { upsertNoteFts(note.id, title, content); } catch {}
-          try { addTagToNote(note.id, 'report', 0); } catch {}
+          try { upsertNoteFts(note.id, title, content); } catch { void 0; }
+          try { addTagToNote(note.id, 'report', 0); } catch { void 0; }
         } catch (err) {
           console.warn('[main] failed to create import report', err);
         }
@@ -701,8 +701,8 @@ app.whenReady().then(async () => {
         const token = generateUniqueFileToken();
         try { setNoteFileToken(note.id, token); } catch (err) { console.warn('[main] setNoteFileToken failed for purge report', err); }
         const nowIso = new Date().toISOString();
-        try { updateNoteCreatedAt(note.id, nowIso); } catch {}
-        try { updateNoteLastEdited(note.id, nowIso); } catch {}
+        try { updateNoteCreatedAt(note.id, nowIso); } catch { void 0; }
+        try { updateNoteLastEdited(note.id, nowIso); } catch { void 0; }
 
         const parts: string[] = [];
         parts.push(`# ${title}`);
@@ -730,8 +730,8 @@ app.whenReady().then(async () => {
         const fname = `${yy}-${mm}-${dd}_${hh}-${min}_${token}.md`;
         const pathSaved = await saveNoteContent(note.id, content, fname);
         updateNoteFilePath(note.id, pathSaved);
-        try { upsertNoteFts(note.id, title, content); } catch {}
-        try { addTagToNote(note.id, 'report', 0); } catch {}
+        try { upsertNoteFts(note.id, title, content); } catch { void 0; }
+        try { addTagToNote(note.id, 'report', 0); } catch { void 0; }
       } catch (err) {
         console.warn('[main] failed to create purge report', err);
       }

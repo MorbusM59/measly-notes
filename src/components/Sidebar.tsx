@@ -885,7 +885,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       Deleted notes in the trash bin can be restored with a right click or purged from the database permanently by holding the control key and right clicking once more.
                     </span>
                   ) : (
-                    <span>This view lists your notes in the order they were last edited. It's a great way to keep track of your most recent work at a glance.</span>
+                    <span>This view lists your notes in the order they were last edited. It&apos;s a great way to keep track of your most recent work at a glance.</span>
                   )}
                 </div>
               )}

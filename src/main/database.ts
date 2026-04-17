@@ -1113,17 +1113,17 @@ export async function reconcileNotesWithFs(opts?: { markMissingAsDeleted?: boole
           const stat = await fs.stat(f);
           createdIso = (stat.birthtime && !isNaN(stat.birthtime.getTime())) ? stat.birthtime.toISOString() : stat.mtime.toISOString();
           editedIso = stat.mtime.toISOString();
-        } catch {}
+        } catch { void 0; }
 
         // populate DB created/lastEdited if missing
-        try { if (!note.createdAt) updateNoteCreatedAt(note.id, createdIso); } catch {}
-        try { if (!note.lastEdited) updateNoteLastEdited(note.id, editedIso); } catch {}
+        try { if (!note.createdAt) updateNoteCreatedAt(note.id, createdIso); } catch { void 0; }
+        try { if (!note.lastEdited) updateNoteLastEdited(note.id, editedIso); } catch { void 0; }
 
         // ensure token exists and rename to canonical filename
         let token = (note as any).fileToken as string | undefined;
         if (!token) {
           token = generateUniqueFileToken();
-          try { setNoteFileToken(note.id, token); } catch {}
+          try { setNoteFileToken(note.id, token); } catch { void 0; }
         }
         const createdSource = note.createdAt ?? createdIso;
         const d = new Date(createdSource);
@@ -1148,7 +1148,7 @@ export async function reconcileNotesWithFs(opts?: { markMissingAsDeleted?: boole
           dbPathMap.set(path.normalize(f), note);
           results.updatedPaths.push({ noteId: note.id, oldPath: old, newPath: f });
         }
-        try { upsertNoteFts(note.id, note.title ?? derivedTitle, content); } catch {}
+        try { upsertNoteFts(note.id, note.title ?? derivedTitle, content); } catch { void 0; }
         continue;
       }
     } catch (err) {
