@@ -355,7 +355,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         fontFamily,
         fontSize: `${fontSizePx}px`,
         overflow: 'hidden',
-        backgroundColor: '#f5f5f5',
       }}
     >
       {/* Top Zone (display-only) */}
@@ -365,7 +364,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           style={{
             height: `${layout.topHeightPx}px`,
             overflow: 'hidden',
-            backgroundColor: '#f5f5f5',
           }}
         >
           <ZoneContent rows={topRows} metrics={metrics} text={text} alignBottom horizontalPaddingPx={horizontalPaddingPx} />
@@ -409,8 +407,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             resize: 'none',
             outline: 'none',
             fontFamily: 'inherit',
-            backgroundColor: 'white',
-            color: 'black',
             boxSizing: 'border-box',
             overflow: 'hidden',
             whiteSpace: 'pre-wrap',
@@ -427,7 +423,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           style={{
             height: `${layout.bottomHeightPx}px`,
             overflow: 'hidden',
-            backgroundColor: '#f5f5f5',
           }}
         >
           <ZoneContent rows={bottomRows} metrics={metrics} text={text} horizontalPaddingPx={horizontalPaddingPx} />

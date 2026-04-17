@@ -9,16 +9,16 @@
   background: transparent;
   border: none;
   border-radius: 0;
+  color: inherit;
 
   .zone {
     flex-shrink: 0;
     overflow: hidden;
     box-sizing: border-box;
+    background: transparent;
+    color: inherit;
 
     &.zone-top {
-      background-color: #fafafa;
-      color: #666;
-
       .zone-content {
         background: inherit;
       }
@@ -27,7 +27,7 @@
     &.zone-center {
       flex: 0 0 auto;
       position: relative;
-      background: white;
+      background: transparent;
 
       .zone-textarea {
         all: unset;
@@ -38,8 +38,8 @@
         font-family: inherit;
         font-size: inherit;
         line-height: inherit;
-        color: #000;
-        background: white;
+        color: inherit;
+        background: transparent;
         resize: none;
         outline: none;
         box-sizing: border-box;
@@ -54,9 +54,6 @@
     }
 
     &.zone-bottom {
-      background-color: #fafafa;
-      color: #666;
-
       .zone-content {
         background: inherit;
       }
@@ -81,13 +78,22 @@
       top: 50%;
       height: 1px;
       transform: translateY(-50%);
-      background: #d7d7d7;
+      background-image: repeating-linear-gradient(
+        to right,
+        rgba(90, 90, 90, 0.38) 0 4px,
+        transparent 4px 8px
+      );
+      background-repeat: repeat-x;
     }
 
     &.is-active::before,
     &:hover::before {
-      background: #7c6f63;
-      height: 2px;
+      background-image: repeating-linear-gradient(
+        to right,
+        rgba(70, 70, 70, 0.52) 0 4px,
+        transparent 4px 8px
+      );
+      height: 1px;
     }
   }
 
