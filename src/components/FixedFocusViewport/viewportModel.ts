@@ -281,29 +281,35 @@ export class FixedFocusViewportModel {
   }
 
   private recalculateLayout(containerWidthPx: number): void {
-    // For v1: divide height into three sections
-    // We'll use a simple heuristic: allocate based on requested row counts
-    // (This will be enhanced when resizable borders are added in phase 2)
+    const totalVisibleRows = Math.max(1, rowsInHeight(this.layout.totalHeightPx, this.metrics));
+    const minCenterRowCount = 1;
+    const availableSideRows = Math.max(0, totalVisibleRows - minCenterRowCount);
 
-    const defaultTopRowCount = this.topRowCount;
-    const defaultBottomRowCount = this.bottomRowCount;
-    const reservedHeightPx = (defaultTopRowCount + defaultBottomRowCount) * this.metrics.rowHeightPx;
-    const remainingCenterHeightPx = Math.max(
-      this.metrics.rowHeightPx,
-      this.layout.totalHeightPx - reservedHeightPx
+    let resolvedTopRowCount = Math.max(0, Math.floor(this.topRowCount));
+    let resolvedBottomRowCount = Math.max(0, Math.floor(this.bottomRowCount));
+    let overflow = Math.max(0, (resolvedTopRowCount + resolvedBottomRowCount) - availableSideRows);
+
+    while (overflow > 0 && (resolvedTopRowCount > 0 || resolvedBottomRowCount > 0)) {
+      if (resolvedTopRowCount >= resolvedBottomRowCount && resolvedTopRowCount > 0) {
+        resolvedTopRowCount -= 1;
+      } else if (resolvedBottomRowCount > 0) {
+        resolvedBottomRowCount -= 1;
+      }
+      overflow -= 1;
+    }
+
+    const resolvedCenterRowCount = Math.max(
+      minCenterRowCount,
+      totalVisibleRows - resolvedTopRowCount - resolvedBottomRowCount
     );
-    const defaultCenterRowCount = Math.max(
-      1,
-      rowsInHeight(remainingCenterHeightPx, this.metrics)
-    );
 
-    this.layout.topHeightPx = defaultTopRowCount * this.metrics.rowHeightPx;
-    this.layout.centerHeightPx = defaultCenterRowCount * this.metrics.rowHeightPx;
-    this.layout.bottomHeightPx = defaultBottomRowCount * this.metrics.rowHeightPx;
+    this.layout.topHeightPx = resolvedTopRowCount * this.metrics.rowHeightPx;
+    this.layout.centerHeightPx = resolvedCenterRowCount * this.metrics.rowHeightPx;
+    this.layout.bottomHeightPx = resolvedBottomRowCount * this.metrics.rowHeightPx;
 
-    this.viewport.topRowCount = defaultTopRowCount;
-    this.viewport.centerRowCount = defaultCenterRowCount;
-    this.viewport.bottomRowCount = defaultBottomRowCount;
+    this.viewport.topRowCount = resolvedTopRowCount;
+    this.viewport.centerRowCount = resolvedCenterRowCount;
+    this.viewport.bottomRowCount = resolvedBottomRowCount;
   }
 
   /**

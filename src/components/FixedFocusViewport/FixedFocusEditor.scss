@@ -1,6 +1,7 @@
 .fixed-focus-editor {
   display: flex;
   flex-direction: column;
+  position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -16,7 +17,6 @@
 
     &.zone-top {
       background-color: #fafafa;
-      border-bottom: 1px solid #e0e0e0;
       color: #666;
 
       .zone-content {
@@ -28,7 +28,6 @@
       flex: 0 0 auto;
       position: relative;
       background: white;
-      border-bottom: 1px solid #e0e0e0;
 
       .zone-textarea {
         all: unset;
@@ -56,12 +55,39 @@
 
     &.zone-bottom {
       background-color: #fafafa;
-      border-top: 1px solid #e0e0e0;
       color: #666;
 
       .zone-content {
         background: inherit;
       }
+    }
+  }
+
+  .zone-divider {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 12px;
+    transform: translateY(-50%);
+    cursor: row-resize;
+    z-index: 3;
+    touch-action: none;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 1px;
+      transform: translateY(-50%);
+      background: #d7d7d7;
+    }
+
+    &.is-active::before,
+    &:hover::before {
+      background: #7c6f63;
+      height: 2px;
     }
   }
 

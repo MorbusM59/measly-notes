@@ -28,6 +28,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [editViewportStartRow, setEditViewportStartRow] = useState(0);
   const [editorViewportSize, setEditorViewportSize] = useState({ width: 0, height: 0 });
   const [layoutRevision, setLayoutRevision] = useState(0);
+  const [fixedFocusTopRowCount, setFixedFocusTopRowCount] = useState(3);
+  const [fixedFocusBottomRowCount, setFixedFocusBottomRowCount] = useState(3);
   // Marker for visible spaces
   const SPACE_MARKER = '\u00B7'; // U+00B7 MIDDLE DOT '·'
   const isComposingRef = useRef(false);
@@ -308,6 +310,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const savedEditorStyle = localStorage.getItem('markdown-editor-style');
     const savedEditorFontSize = localStorage.getItem('markdown-editor-font-size');
     const savedEditorSpacing = localStorage.getItem('markdown-editor-spacing');
+    const savedFixedFocusTopRowCount = localStorage.getItem('markdown-editor-fixed-focus-top-rows');
+    const savedFixedFocusBottomRowCount = localStorage.getItem('markdown-editor-fixed-focus-bottom-rows');
 
     if (savedViewStyle) setViewStyle(savedViewStyle);
     if (savedViewFontSize) setViewFontSize(savedViewFontSize);
@@ -316,6 +320,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     if (savedEditorStyle) setEditorStyle(savedEditorStyle);
     if (savedEditorFontSize) setEditorFontSize(savedEditorFontSize);
     if (savedEditorSpacing) setEditorSpacing(savedEditorSpacing);
+    if (savedFixedFocusTopRowCount) {
+      const parsedTopRowCount = Number(savedFixedFocusTopRowCount);
+      if (Number.isFinite(parsedTopRowCount) && parsedTopRowCount >= 0) {
+        setFixedFocusTopRowCount(Math.floor(parsedTopRowCount));
+      }
+    }
+    if (savedFixedFocusBottomRowCount) {
+      const parsedBottomRowCount = Number(savedFixedFocusBottomRowCount);
+      if (Number.isFinite(parsedBottomRowCount) && parsedBottomRowCount >= 0) {
+        setFixedFocusBottomRowCount(Math.floor(parsedBottomRowCount));
+      }
+    }
   }, []);
 
   // View handlers
@@ -344,6 +360,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const handleEditorSpacingChange = (spacingValue: string) => {
     setEditorSpacing(spacingValue);
     localStorage.setItem('markdown-editor-spacing', spacingValue);
+  };
+  const handleFixedFocusTopRowCountChange = (rowCount: number) => {
+    setFixedFocusTopRowCount(rowCount);
+    localStorage.setItem('markdown-editor-fixed-focus-top-rows', String(rowCount));
+  };
+  const handleFixedFocusBottomRowCountChange = (rowCount: number) => {
+    setFixedFocusBottomRowCount(rowCount);
+    localStorage.setItem('markdown-editor-fixed-focus-bottom-rows', String(rowCount));
   };
 
   // Preload the selected editor font so switching between edit/view is immediate.
@@ -888,7 +912,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const newText = content.substring(0, lineStart) + trimmedBefore + '\n\n' + content.substring(end);
         const newCursorPos = lineStart + trimmedBefore.length + 2; // after the two newlines
         programmaticInsertRef.current = true;
-        setContent(newText);
+        setCaretPos(newCursorPos);
         handleContentChange(newText);
         scheduleTimeout(() => {
           textarea.focus();
@@ -909,7 +933,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const newText = content.substring(0, lineStart) + trimmedBefore + insert + content.substring(end);
         const newCursorPos = lineStart + trimmedBefore.length + spaces.length + 1 + leadingLen;
         programmaticInsertRef.current = true;
-        setContent(newText);
+        setCaretPos(newCursorPos);
         handleContentChange(newText);
         scheduleTimeout(() => {
           textarea.focus();
@@ -936,7 +960,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const newText = content.substring(0, lineStart) + trimmedBefore + insert + content.substring(end);
       const newCursorPos = lineStart + trimmedBefore.length + 1 + leadingMarkers.length + markerText.length;
       programmaticInsertRef.current = true;
-      setContent(newText);
+      setCaretPos(newCursorPos);
       handleContentChange(newText);
       scheduleTimeout(() => {
         textarea.focus();
@@ -1456,10 +1480,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             fontSizePx={sizeToPx(editorFontSize)}
             spacingPreset={editorSpacing}
             horizontalPaddingPx={20}
+            topRowCount={fixedFocusTopRowCount}
+            bottomRowCount={fixedFocusBottomRowCount}
             containerWidthPx={Math.max(1, editorViewportSize.width)}
             containerHeightPx={Math.max(1, editorViewportSize.height)}
             viewportStartRow={editViewportStartRow}
             onViewportStartRowChange={setEditViewportStartRow}
+            onTopRowCountChange={handleFixedFocusTopRowCountChange}
+            onBottomRowCountChange={handleFixedFocusBottomRowCountChange}
             onTextChange={(newText, newCaretPos) => {
               handleContentChange(newText);
               setCaretPos(newCaretPos);

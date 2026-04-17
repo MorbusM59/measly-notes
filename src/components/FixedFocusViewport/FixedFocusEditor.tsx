@@ -8,7 +8,7 @@
  * - Top/bottom are display-only divs
  */
 
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { FixedFocusViewportModel } from './viewportModel';
 import { WrappedLine, findRowForCharIndex } from './textWrapping';
 import { ComputedMetrics } from './lineMetrics';
@@ -23,10 +23,13 @@ interface FixedFocusEditorProps {
   horizontalPaddingPx?: number;
   topRowCount?: number;
   bottomRowCount?: number;
+  minCenterRowCount?: number;
   containerWidthPx?: number;
   containerHeightPx?: number;
   viewportStartRow?: number;
   onViewportStartRowChange?: (nextViewportStartRow: number) => void;
+  onTopRowCountChange?: (nextTopRowCount: number) => void;
+  onBottomRowCountChange?: (nextBottomRowCount: number) => void;
   onTextChange: (newText: string, newCaretPos: number) => void;
   onCaretChange?: (newCaretPos: number) => void;
   textareaRef?: React.MutableRefObject<HTMLTextAreaElement | null>;
@@ -50,12 +53,15 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   spacingPreset,
   fontFamily = '"Syne Mono", Menlo, Monaco, monospace',
   horizontalPaddingPx = 20,
-  topRowCount = 3,
-  bottomRowCount = 3,
+  topRowCount,
+  bottomRowCount,
+  minCenterRowCount = 1,
   containerWidthPx = 500,
   containerHeightPx = 400,
   viewportStartRow,
   onViewportStartRowChange,
+  onTopRowCountChange,
+  onBottomRowCountChange,
   onTextChange,
   onCaretChange,
   textareaRef,
@@ -70,8 +76,20 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   onCompositionEnd,
 }) => {
   const [uncontrolledViewportStartRow, setUncontrolledViewportStartRow] = useState(0);
+  const [uncontrolledTopRowCount, setUncontrolledTopRowCount] = useState(topRowCount ?? 3);
+  const [uncontrolledBottomRowCount, setUncontrolledBottomRowCount] = useState(bottomRowCount ?? 3);
+  const [activeResizeHandle, setActiveResizeHandle] = useState<'top' | 'bottom' | null>(null);
   const centerInputRef = useRef<HTMLTextAreaElement>(null);
+  const resizeStateRef = useRef<{
+    handle: 'top' | 'bottom';
+    startY: number;
+    startTopRowCount: number;
+    startBottomRowCount: number;
+    totalVisibleRows: number;
+  } | null>(null);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
+  const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
+  const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
   const contentWidthPx = Math.max(1, containerWidthPx - (horizontalPaddingPx * 2));
 
   const setViewportStartRow = (nextViewportStartRow: number | ((prev: number) => number)) => {
@@ -84,6 +102,22 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     }
     onViewportStartRowChange?.(clampedNextRow);
   };
+
+  const setTopZoneRowCount = useCallback((nextTopRowCount: number) => {
+    const clampedTopRowCount = Math.max(0, Math.floor(nextTopRowCount));
+    if (topRowCount === undefined) {
+      setUncontrolledTopRowCount(clampedTopRowCount);
+    }
+    onTopRowCountChange?.(clampedTopRowCount);
+  }, [onTopRowCountChange, topRowCount]);
+
+  const setBottomZoneRowCount = useCallback((nextBottomRowCount: number) => {
+    const clampedBottomRowCount = Math.max(0, Math.floor(nextBottomRowCount));
+    if (bottomRowCount === undefined) {
+      setUncontrolledBottomRowCount(clampedBottomRowCount);
+    }
+    onBottomRowCountChange?.(clampedBottomRowCount);
+  }, [bottomRowCount, onBottomRowCountChange]);
 
   useEffect(() => {
     if (!textareaRef) return;
@@ -98,8 +132,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       contentWidthPx,
       containerHeightPx,
       fontFamily,
-      topRowCount,
-      bottomRowCount
+      resolvedTopRowCount,
+      resolvedBottomRowCount
     );
     m.setText(text, contentWidthPx);
     return m;
@@ -111,8 +145,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     containerHeightPx,
     centerStartRow,
     fontFamily,
-    topRowCount,
-    bottomRowCount,
+    resolvedTopRowCount,
+    resolvedBottomRowCount,
   ]);
 
   const wrappedLines = model.getWrappedLines();
@@ -138,6 +172,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const viewport = model.getViewport();
   const topRows = model.getTopZoneRows();
   const bottomRows = model.getBottomZoneRows();
+  const totalVisibleRows = viewport.topRowCount + viewport.centerRowCount + viewport.bottomRowCount;
 
   // Keep maxStart fresh for use inside the stable wheel listener
   const maxStartRef = useRef(maxStart);
@@ -145,6 +180,43 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   useEffect(() => {
     maxStartRef.current = maxStart;
   }, [maxStart]);
+
+  const finishResize = useCallback(() => {
+    resizeStateRef.current = null;
+    setActiveResizeHandle(null);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+  }, []);
+
+  const handleResizeMove = useCallback((event: PointerEvent) => {
+    const resizeState = resizeStateRef.current;
+    if (!resizeState) return;
+
+    const deltaRows = Math.round((event.clientY - resizeState.startY) / metrics.rowHeightPx);
+    if (resizeState.handle === 'top') {
+      const maxTopRowCount = Math.max(0, resizeState.totalVisibleRows - minCenterRowCount - resizeState.startBottomRowCount);
+      setTopZoneRowCount(Math.max(0, Math.min(maxTopRowCount, resizeState.startTopRowCount + deltaRows)));
+      return;
+    }
+
+    const maxBottomRowCount = Math.max(0, resizeState.totalVisibleRows - minCenterRowCount - resizeState.startTopRowCount);
+    setBottomZoneRowCount(Math.max(0, Math.min(maxBottomRowCount, resizeState.startBottomRowCount - deltaRows)));
+  }, [metrics.rowHeightPx, minCenterRowCount, setBottomZoneRowCount, setTopZoneRowCount]);
+
+  useEffect(() => {
+    if (!activeResizeHandle) return;
+
+    const handlePointerUp = () => finishResize();
+    window.addEventListener('pointermove', handleResizeMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleResizeMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [activeResizeHandle, finishResize, handleResizeMove]);
 
   // Keep the browser's own textarea scrolling disabled and sync viewport to the caret
   // when edits like Enter move it outside the visible center zone.
@@ -249,9 +321,23 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     onKeyDown?.(e);
   };
 
+  const startResize = (handle: 'top' | 'bottom') => (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    resizeStateRef.current = {
+      handle,
+      startY: event.clientY,
+      startTopRowCount: viewport.topRowCount,
+      startBottomRowCount: viewport.bottomRowCount,
+      totalVisibleRows,
+    };
+    setActiveResizeHandle(handle);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+  };
+
   // Translate the textarea vertically so that row `centerStartRow` aligns with
   // the top of the center zone. The parent div clips via overflow:hidden.
-  const textareaTopPx = -(centerStartRow * metrics.rowHeightPx);
+  const textareaTopPx = -(effectiveCenterStartRow * metrics.rowHeightPx);
   const textareaHeightPx = Math.max(
     layout.centerHeightPx,
     wrappedLines.length * metrics.rowHeightPx
@@ -263,6 +349,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       style={{
         display: 'flex',
         flexDirection: 'column',
+        position: 'relative',
         height: `${containerHeightPx}px`,
         width: `${containerWidthPx}px`,
         fontFamily,
@@ -279,7 +366,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             height: `${layout.topHeightPx}px`,
             overflow: 'hidden',
             backgroundColor: '#f5f5f5',
-            borderBottom: '1px solid #ddd',
           }}
         >
           <ZoneContent rows={topRows} metrics={metrics} text={text} alignBottom horizontalPaddingPx={horizontalPaddingPx} />
@@ -294,7 +380,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           height: `${layout.centerHeightPx}px`,
           position: 'relative',
           overflow: 'hidden',
-          ...(layout.bottomHeightPx > 0 ? { borderBottom: '1px solid #ddd' } : {}),
         }}
       >
         <textarea
@@ -348,6 +433,18 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           <ZoneContent rows={bottomRows} metrics={metrics} text={text} horizontalPaddingPx={horizontalPaddingPx} />
         </div>
       )}
+
+      <div
+        className={`zone-divider zone-divider-top${activeResizeHandle === 'top' ? ' is-active' : ''}`}
+        style={{ top: `${layout.topHeightPx}px` }}
+        onPointerDown={startResize('top')}
+      />
+
+      <div
+        className={`zone-divider zone-divider-bottom${activeResizeHandle === 'bottom' ? ' is-active' : ''}`}
+        style={{ top: `${layout.topHeightPx + layout.centerHeightPx}px` }}
+        onPointerDown={startResize('bottom')}
+      />
     </div>
   );
 };
