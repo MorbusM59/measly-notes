@@ -25,6 +25,8 @@
     pointer-events: none;
     z-index: 1;
     --grid-line-color: rgba(90, 90, 90, 0.12);
+    --grid-box-background: rgba(255, 255, 255, 0);
+    background-color: var(--grid-box-background);
     background-image:
       repeating-linear-gradient(
         to bottom,

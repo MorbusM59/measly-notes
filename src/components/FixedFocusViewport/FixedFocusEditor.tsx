@@ -31,6 +31,7 @@ interface HighlightColors {
   leading: string;
   trailing: string;
   grid: string;
+  background: string;
 }
 
 interface FixedFocusEditorProps {
@@ -487,6 +488,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             '--grid-quantized-width': `${quantizedGridWidthPx}px`,
             '--grid-quantized-height': `${quantizedGridHeightPx}px`,
             '--grid-line-color': highlightColors?.grid,
+            '--grid-box-background': highlightColors?.background,
           } as React.CSSProperties}
         />
 
