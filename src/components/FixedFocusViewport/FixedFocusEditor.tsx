@@ -21,6 +21,14 @@ interface IndentHighlight {
   topPx: number;
   leftPx: number;
   widthPx: number;
+  heightPx: number;
+}
+
+interface CaretCellHighlight {
+  topPx: number;
+  leftPx: number;
+  widthPx: number;
+  heightPx: number;
 }
 
 interface FixedFocusEditorProps {
@@ -374,9 +382,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     wrappedLines.length * metrics.rowHeightPx
   );
   const topRowsInsetPx = Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx));
-  const dividerOffsetPx = metrics.rowGapPx > 0 ? Math.floor(metrics.rowGapPx / 2) : 0;
-  const topDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx - dividerOffsetPx));
-  const bottomDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx + layout.centerHeightPx - dividerOffsetPx));
+  const topDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx));
+  const bottomDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx + layout.centerHeightPx));
   const indentHighlights = useMemo(() => {
     const highlights: IndentHighlight[] = [];
     const appendZoneHighlights = (rows: WrappedLine[], zoneTopPx: number, insetTopPx = 0) => {
@@ -391,6 +398,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               topPx,
               leftPx: horizontalPaddingPx,
               widthPx: indentCellCount * charCellWidthPx,
+              heightPx: metrics.rowHeightPx,
             });
           }
         }
@@ -399,10 +407,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           const trailingCellCount = countTrailingWhitespaceCells(rowText);
           if (trailingCellCount > 0) {
             const rowCellCount = countVisualCells(rowText);
+            const leftPx = horizontalPaddingPx + ((rowCellCount - trailingCellCount) * charCellWidthPx);
+            const widthPx = trailingCellCount * charCellWidthPx;
             highlights.push({
               topPx,
-              leftPx: horizontalPaddingPx + ((rowCellCount - trailingCellCount) * charCellWidthPx),
-              widthPx: trailingCellCount * charCellWidthPx,
+              leftPx,
+              widthPx,
+              heightPx: metrics.rowHeightPx,
             });
           }
         }
@@ -425,6 +436,54 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     text,
     topRows,
     topRowsInsetPx,
+  ]);
+
+  const caretCellHighlight = useMemo<CaretCellHighlight | null>(() => {
+    const caretLine = wrappedLines[caretRow];
+    if (!caretLine) return null;
+
+    const topZoneStartRow = Math.max(0, effectiveCenterStartRow - topRows.length);
+    const centerZoneStartRow = effectiveCenterStartRow;
+    const bottomZoneStartRow = effectiveCenterStartRow + viewport.centerRowCount;
+    let topPx: number | null = null;
+
+    if (caretRow >= topZoneStartRow && caretRow < topZoneStartRow + topRows.length) {
+      topPx = topRowsInsetPx + ((caretRow - topZoneStartRow) * metrics.rowHeightPx);
+    } else if (caretRow >= centerZoneStartRow && caretRow < centerZoneStartRow + centerRows.length) {
+      topPx = layout.topHeightPx + ((caretRow - centerZoneStartRow) * metrics.rowHeightPx);
+    } else if (caretRow >= bottomZoneStartRow && caretRow < bottomZoneStartRow + bottomRows.length) {
+      topPx = layout.topHeightPx + layout.centerHeightPx + ((caretRow - bottomZoneStartRow) * metrics.rowHeightPx);
+    }
+
+    if (topPx == null) return null;
+
+    const clampedCaretPos = Math.max(caretLine.startCharIndex, Math.min(caretPos, caretLine.endCharIndex));
+    const rowPrefix = text.slice(caretLine.startCharIndex, clampedCaretPos);
+    const cellOffset = countVisualCells(rowPrefix);
+    const leftPx = horizontalPaddingPx + (cellOffset * charCellWidthPx);
+
+    return {
+      topPx,
+      leftPx,
+      widthPx: charCellWidthPx,
+      heightPx: metrics.rowHeightPx,
+    };
+  }, [
+    bottomRows.length,
+    caretPos,
+    caretRow,
+    centerRows.length,
+    charCellWidthPx,
+    effectiveCenterStartRow,
+    horizontalPaddingPx,
+    layout.centerHeightPx,
+    layout.topHeightPx,
+    metrics.rowHeightPx,
+    text,
+    topRows.length,
+    topRowsInsetPx,
+    viewport.centerRowCount,
+    wrappedLines,
   ]);
 
   return (
@@ -463,17 +522,31 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         <div className="fixed-focus-indent-overlay" aria-hidden>
           {indentHighlights.map((highlight, index) => (
             <div
-              key={`${highlight.topPx}-${highlight.widthPx}-${index}`}
+              key={`${highlight.topPx}-${highlight.leftPx}-${highlight.widthPx}-${index}`}
               className="indent-highlight"
               style={{
                 top: `${highlight.topPx}px`,
                 left: `${highlight.leftPx}px`,
                 width: `${highlight.widthPx}px`,
-                height: `${metrics.rowHeightPx}px`,
+                height: `${highlight.heightPx}px`,
               }}
             />
           ))}
         </div>
+
+        {caretCellHighlight && (
+          <div className="fixed-focus-caret-overlay" aria-hidden>
+            <div
+              className="caret-cell-highlight"
+              style={{
+                top: `${caretCellHighlight.topPx}px`,
+                left: `${caretCellHighlight.leftPx}px`,
+                width: `${caretCellHighlight.widthPx}px`,
+                height: `${caretCellHighlight.heightPx}px`,
+              }}
+            />
+          </div>
+        )}
 
         {/* Top Zone (display-only) */}
         {layout.topHeightPx > 0 && (
@@ -538,6 +611,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               overflow: 'hidden',
               whiteSpace: 'pre-wrap',
               wordWrap: 'break-word',
+              caretColor: 'transparent',
               ...textareaStyle,
             }}
           />
