@@ -79,6 +79,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [uncontrolledTopRowCount, setUncontrolledTopRowCount] = useState(topRowCount ?? 3);
   const [uncontrolledBottomRowCount, setUncontrolledBottomRowCount] = useState(bottomRowCount ?? 3);
   const [activeResizeHandle, setActiveResizeHandle] = useState<'top' | 'bottom' | null>(null);
+  const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
   const centerInputRef = useRef<HTMLTextAreaElement>(null);
   const resizeStateRef = useRef<{
     handle: 'top' | 'bottom';
@@ -87,6 +88,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     startBottomRowCount: number;
     totalVisibleRows: number;
   } | null>(null);
+  const latestEffectiveViewportStartRowRef = useRef(0);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
   const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
@@ -94,7 +96,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const topInsetPx = Math.max(0, computeTopInsetPx(spacingPreset));
   const drawableHeightPx = Math.max(1, containerHeightPx - topInsetPx);
 
-  const setViewportStartRow = (nextViewportStartRow: number | ((prev: number) => number)) => {
+  const setViewportStartRow = useCallback((nextViewportStartRow: number | ((prev: number) => number)) => {
     const resolvedNextRow = typeof nextViewportStartRow === 'function'
       ? nextViewportStartRow(centerStartRow)
       : nextViewportStartRow;
@@ -103,7 +105,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       setUncontrolledViewportStartRow(clampedNextRow);
     }
     onViewportStartRowChange?.(clampedNextRow);
-  };
+  }, [centerStartRow, onViewportStartRowChange, viewportStartRow]);
 
   const setTopZoneRowCount = useCallback((nextTopRowCount: number) => {
     const clampedTopRowCount = Math.max(0, Math.floor(nextTopRowCount));
@@ -156,15 +158,20 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const caretRow = findRowForCharIndex(caretPos, wrappedLines);
 
   const maxStart = Math.max(0, wrappedLines.length - provisionalViewport.centerRowCount);
-  const clampedCenterStartRow = Math.max(0, Math.min(centerStartRow, maxStart));
-  let effectiveCenterStartRow = clampedCenterStartRow;
-  if (caretRow < effectiveCenterStartRow) {
-    effectiveCenterStartRow = caretRow;
-  } else if (caretRow >= effectiveCenterStartRow + provisionalViewport.centerRowCount) {
-    effectiveCenterStartRow = Math.min(
-      maxStart,
-      caretRow - provisionalViewport.centerRowCount + 1
-    );
+  const maxViewportStartRow = Math.max(0, wrappedLines.length - 1);
+  const clampedCenterStartRow = Math.max(0, Math.min(centerStartRow, maxViewportStartRow));
+  let effectiveCenterStartRow = activeResizeHandle && resizeAnchorViewportStartRow != null
+    ? Math.max(0, Math.min(resizeAnchorViewportStartRow, maxViewportStartRow))
+    : clampedCenterStartRow;
+  if (!activeResizeHandle) {
+    if (caretRow < effectiveCenterStartRow) {
+      effectiveCenterStartRow = caretRow;
+    } else if (caretRow >= effectiveCenterStartRow + provisionalViewport.centerRowCount) {
+      effectiveCenterStartRow = Math.min(
+        maxViewportStartRow,
+        caretRow - provisionalViewport.centerRowCount + 1
+      );
+    }
   }
 
   model.setViewportStartRow(effectiveCenterStartRow);
@@ -183,12 +190,18 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     maxStartRef.current = maxStart;
   }, [maxStart]);
 
+  useEffect(() => {
+    latestEffectiveViewportStartRowRef.current = effectiveCenterStartRow;
+  }, [effectiveCenterStartRow]);
+
   const finishResize = useCallback(() => {
+    setViewportStartRow(latestEffectiveViewportStartRowRef.current);
     resizeStateRef.current = null;
+    setResizeAnchorViewportStartRow(null);
     setActiveResizeHandle(null);
     document.body.style.userSelect = '';
     document.body.style.cursor = '';
-  }, []);
+  }, [setViewportStartRow]);
 
   const handleResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = resizeStateRef.current;
@@ -268,7 +281,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const dir = e.deltaY > 0 ? 1 : -1;
-      const nextViewportStartRow = Math.max(0, Math.min(maxStartRef.current, effectiveCenterStartRow + dir));
+      const scrollCeiling = Math.max(maxStartRef.current, effectiveCenterStartRow);
+      const nextViewportStartRow = Math.max(0, Math.min(scrollCeiling, effectiveCenterStartRow + dir));
       if (nextViewportStartRow === effectiveCenterStartRow) return;
 
       setViewportStartRow(nextViewportStartRow);
@@ -312,8 +326,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           const nextRowLen = wrappedLines[nextRow].endCharIndex - wrappedLines[nextRow].startCharIndex;
           const newCaretPos = wrappedLines[nextRow].startCharIndex + Math.min(caretCol, nextRowLen);
           onCaretChange?.(newCaretPos);
-          if (nextRow >= centerStartRow + viewport.centerRowCount) {
-            setViewportStartRow(row => Math.min(maxStartRef.current, row + 1));
+          if (nextRow >= effectiveCenterStartRow + viewport.centerRowCount) {
+            setViewportStartRow(row => Math.min(Math.max(maxStartRef.current, row), row + 1));
           }
         }
         return;
@@ -332,6 +346,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       startBottomRowCount: viewport.bottomRowCount,
       totalVisibleRows,
     };
+    setResizeAnchorViewportStartRow(effectiveCenterStartRow);
     setActiveResizeHandle(handle);
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'row-resize';

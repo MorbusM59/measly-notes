@@ -205,7 +205,7 @@ export class FixedFocusViewportModel {
    * Does not adjust the caret. Use this to set viewport from external state.
    */
   setViewportStartRow(row: number): void {
-    const maxStart = Math.max(0, this.wrappedLines.length - this.viewport.centerRowCount);
+    const maxStart = Math.max(0, this.wrappedLines.length - 1);
     this.viewport.centerStartRow = Math.max(0, Math.min(row, maxStart));
   }
 
