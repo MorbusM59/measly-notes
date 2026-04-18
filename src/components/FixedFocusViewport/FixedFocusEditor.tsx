@@ -32,6 +32,8 @@ interface HighlightColors {
   trailing: string;
   grid: string;
   background: string;
+  topBackground: string;
+  bottomBackground: string;
 }
 
 interface FixedFocusEditorProps {
@@ -479,6 +481,27 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         }}
       >
         <div
+          className="fixed-focus-box-background-overlay"
+          aria-hidden
+          style={{
+            '--grid-horizontal-padding': `${horizontalPaddingPx}px`,
+            '--grid-quantized-width': `${quantizedGridWidthPx}px`,
+            '--grid-top-height': `${layout.topHeightPx}px`,
+            '--grid-center-top': `${layout.topHeightPx}px`,
+            '--grid-center-height': `${layout.centerHeightPx}px`,
+            '--grid-bottom-top': `${layout.topHeightPx + layout.centerHeightPx}px`,
+            '--grid-bottom-height': `${layout.bottomHeightPx}px`,
+            '--grid-center-background': highlightColors?.background,
+            '--grid-top-background': highlightColors?.topBackground,
+            '--grid-bottom-background': highlightColors?.bottomBackground,
+          } as React.CSSProperties}
+        >
+          {layout.topHeightPx > 0 && <div className="box-background box-background--top" />}
+          {layout.centerHeightPx > 0 && <div className="box-background box-background--center" />}
+          {layout.bottomHeightPx > 0 && <div className="box-background box-background--bottom" />}
+        </div>
+
+        <div
           className="fixed-focus-grid-overlay"
           aria-hidden
           style={{
@@ -488,7 +511,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             '--grid-quantized-width': `${quantizedGridWidthPx}px`,
             '--grid-quantized-height': `${quantizedGridHeightPx}px`,
             '--grid-line-color': highlightColors?.grid,
-            '--grid-box-background': highlightColors?.background,
           } as React.CSSProperties}
         />
 
