@@ -16,10 +16,10 @@ import './FixedFocusEditor.scss';
 
 let gridMeasurementContext: CanvasRenderingContext2D | null = null;
 const charWidthCache = new Map<string, number>();
-const SPACE_MARKER = '\u00B7';
 
 interface IndentHighlight {
   topPx: number;
+  leftPx: number;
   widthPx: number;
 }
 
@@ -381,15 +381,31 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const highlights: IndentHighlight[] = [];
     const appendZoneHighlights = (rows: WrappedLine[], zoneTopPx: number, insetTopPx = 0) => {
       rows.forEach((row, rowIndex) => {
-        if (!row.isLineStart) return;
         const rowText = text.slice(row.startCharIndex, row.endCharIndex);
-        const indentCellCount = countLeadingIndentCells(rowText);
-        if (indentCellCount <= 0) return;
+        const topPx = zoneTopPx + insetTopPx + (rowIndex * metrics.rowHeightPx);
 
-        highlights.push({
-          topPx: zoneTopPx + insetTopPx + (rowIndex * metrics.rowHeightPx),
-          widthPx: indentCellCount * charCellWidthPx,
-        });
+        if (row.isLineStart) {
+          const indentCellCount = countLeadingWhitespaceCells(rowText);
+          if (indentCellCount > 0) {
+            highlights.push({
+              topPx,
+              leftPx: horizontalPaddingPx,
+              widthPx: indentCellCount * charCellWidthPx,
+            });
+          }
+        }
+
+        if (row.isLineEnd) {
+          const trailingCellCount = countTrailingWhitespaceCells(rowText);
+          if (trailingCellCount > 0) {
+            const rowCellCount = countVisualCells(rowText);
+            highlights.push({
+              topPx,
+              leftPx: horizontalPaddingPx + ((rowCellCount - trailingCellCount) * charCellWidthPx),
+              widthPx: trailingCellCount * charCellWidthPx,
+            });
+          }
+        }
       });
     };
 
@@ -402,6 +418,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     bottomRows,
     centerRows,
     charCellWidthPx,
+    horizontalPaddingPx,
     layout.centerHeightPx,
     layout.topHeightPx,
     metrics.rowHeightPx,
@@ -450,7 +467,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               className="indent-highlight"
               style={{
                 top: `${highlight.topPx}px`,
-                left: `${horizontalPaddingPx}px`,
+                left: `${highlight.leftPx}px`,
                 width: `${highlight.widthPx}px`,
                 height: `${metrics.rowHeightPx}px`,
               }}
@@ -664,10 +681,10 @@ function measureMonospaceCellWidthPx(fontSizePx: number, fontFamily: string): nu
   return measured;
 }
 
-function countLeadingIndentCells(text: string): number {
+function countLeadingWhitespaceCells(text: string): number {
   let indentCellCount = 0;
   for (const char of text) {
-    if (char === SPACE_MARKER || char === ' ') {
+    if (char === ' ') {
       indentCellCount += 1;
       continue;
     }
@@ -678,5 +695,34 @@ function countLeadingIndentCells(text: string): number {
     break;
   }
   return indentCellCount;
+}
+
+function countTrailingWhitespaceCells(text: string): number {
+  let trailingCellCount = 0;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    const char = text[index];
+    if (char === ' ') {
+      trailingCellCount += 1;
+      continue;
+    }
+    if (char === '\t') {
+      trailingCellCount += 3;
+      continue;
+    }
+    break;
+  }
+  return trailingCellCount;
+}
+
+function countVisualCells(text: string): number {
+  let cellCount = 0;
+  for (const char of text) {
+    if (char === '\t') {
+      cellCount += 3;
+    } else {
+      cellCount += 1;
+    }
+  }
+  return cellCount;
 }
 
