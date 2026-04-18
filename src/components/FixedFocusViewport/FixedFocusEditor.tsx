@@ -295,6 +295,56 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     }
   };
 
+  const getCharIndexForVisualCell = (row: WrappedLine, targetCell: number) => {
+    const rowText = text.slice(row.startCharIndex, row.endCharIndex);
+    const clampedTargetCell = Math.max(0, targetCell);
+    let traversedCellCount = 0;
+
+    for (let charIndex = 0; charIndex < rowText.length; charIndex += 1) {
+      if (traversedCellCount >= clampedTargetCell) {
+        return row.startCharIndex + charIndex;
+      }
+
+      const char = rowText[charIndex];
+      traversedCellCount += char === '\t' ? 3 : 1;
+    }
+
+    return row.endCharIndex;
+  };
+
+  const handlePassiveZonePointerDown = (
+    zone: 'top' | 'bottom',
+    zoneRows: WrappedLine[],
+    zoneStartRow: number,
+    insetTopPx = 0
+  ) => (event: React.PointerEvent<HTMLDivElement>) => {
+    if (zoneRows.length === 0) return;
+
+    const zoneBounds = event.currentTarget.getBoundingClientRect();
+    const relativeY = event.clientY - zoneBounds.top - insetTopPx;
+    const rawRowIndex = Math.floor(relativeY / metrics.rowHeightPx);
+    const rowIndex = Math.max(0, Math.min(zoneRows.length - 1, rawRowIndex));
+    const targetRowIndex = zoneStartRow + rowIndex;
+    const targetRow = wrappedLines[targetRowIndex];
+    if (!targetRow) return;
+
+    const relativeX = event.clientX - zoneBounds.left - horizontalPaddingPx;
+    const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
+    const nextCaretPos = getCharIndexForVisualCell(targetRow, targetCell);
+
+    if (zone === 'top') {
+      setViewportStartRow(targetRowIndex);
+    } else {
+      const nextViewportStartRow = Math.max(0, targetRowIndex - viewport.centerRowCount + 1);
+      setViewportStartRow(nextViewportStartRow);
+    }
+
+    onCaretChange?.(nextCaretPos);
+    window.requestAnimationFrame(() => {
+      centerInputRef.current?.focus();
+    });
+  };
+
   const getRowAlignedCaretPos = (targetRow: number) => {
     const safeSourceRowIndex = Math.max(0, Math.min(caretRow, wrappedLines.length - 1));
     const safeTargetRowIndex = Math.max(0, Math.min(targetRow, wrappedLines.length - 1));
@@ -549,6 +599,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               height: `${layout.topHeightPx}px`,
               overflow: 'hidden',
             }}
+            onPointerDown={handlePassiveZonePointerDown(
+              'top',
+              topRows,
+              Math.max(0, effectiveCenterStartRow - topRows.length),
+              topRowsInsetPx
+            )}
           >
             <MirroredTextLayer
               text={text}
@@ -622,6 +678,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               height: `${layout.bottomHeightPx}px`,
               overflow: 'hidden',
             }}
+            onPointerDown={handlePassiveZonePointerDown(
+              'bottom',
+              bottomRows,
+              effectiveCenterStartRow + viewport.centerRowCount,
+              0
+            )}
           >
             <MirroredTextLayer
               text={text}
