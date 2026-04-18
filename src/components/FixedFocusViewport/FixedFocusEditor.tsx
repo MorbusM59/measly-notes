@@ -104,6 +104,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [uncontrolledBottomRowCount, setUncontrolledBottomRowCount] = useState(bottomRowCount ?? 3);
   const [activeResizeHandle, setActiveResizeHandle] = useState<'top' | 'bottom' | null>(null);
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
+  const editorRootRef = useRef<HTMLDivElement>(null);
   const centerInputRef = useRef<HTMLTextAreaElement>(null);
   const resizeStateRef = useRef<{
     handle: 'top' | 'bottom';
@@ -309,8 +310,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   // Register non-passive wheel listener once so we can call preventDefault.
   // (React's synthetic onWheel cannot preventDefault on passive listeners.)
   useEffect(() => {
-    const ta = centerInputRef.current;
-    if (!ta) return;
+    const editorRoot = editorRootRef.current;
+    if (!editorRoot) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const dir = e.deltaY > 0 ? 1 : -1;
@@ -328,8 +329,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         onCaretChange?.(getRowAlignedCaretPos(nextVisibleEnd));
       }
     };
-    ta.addEventListener('wheel', onWheel, { passive: false });
-    return () => ta.removeEventListener('wheel', onWheel);
+    editorRoot.addEventListener('wheel', onWheel, { passive: false });
+    return () => editorRoot.removeEventListener('wheel', onWheel);
   }, [effectiveCenterStartRow, viewport.centerRowCount, caretRow, onCaretChange, wrappedLines, caretPos]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -462,6 +463,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
   return (
     <div
+      ref={editorRootRef}
       className="fixed-focus-editor"
       style={{
         position: 'relative',
