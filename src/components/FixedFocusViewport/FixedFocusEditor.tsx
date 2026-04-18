@@ -14,7 +14,6 @@ import { WrappedLine, findRowForCharIndex } from './textWrapping';
 import { ComputedMetrics } from './lineMetrics';
 import './FixedFocusEditor.scss';
 
-let gridMeasurementContext: CanvasRenderingContext2D | null = null;
 const charWidthCache = new Map<string, number>();
 
 interface IndentHighlight {
@@ -31,6 +30,7 @@ interface HighlightColors {
   caret: string;
   leading: string;
   trailing: string;
+  grid: string;
 }
 
 interface FixedFocusEditorProps {
@@ -430,46 +430,21 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         }
 
         const orderedCells = [...occupiedCells.entries()].sort((left, right) => left[0] - right[0]);
-        let spanStartCell: number | null = null;
-        let previousCellIndex: number | null = null;
-        let currentKind: CellHighlightKind | null = null;
-
-        const pushSpan = () => {
-          if (spanStartCell == null || previousCellIndex == null || currentKind == null) return;
+        orderedCells.forEach(([cellIndex, kind]) => {
           highlights.push({
-            kind: currentKind,
+            kind,
             topPx,
-            leftPx: horizontalPaddingPx + (spanStartCell * charCellWidthPx),
-            widthPx: ((previousCellIndex - spanStartCell) + 1) * charCellWidthPx,
+            leftPx: horizontalPaddingPx + (cellIndex * charCellWidthPx),
+            widthPx: charCellWidthPx,
             heightPx: metrics.rowHeightPx,
           });
-        };
-
-        orderedCells.forEach(([cellIndex, kind]) => {
-          if (
-            spanStartCell == null ||
-            previousCellIndex == null ||
-            currentKind == null ||
-            kind !== currentKind ||
-            cellIndex !== previousCellIndex + 1
-          ) {
-            pushSpan();
-            spanStartCell = cellIndex;
-            previousCellIndex = cellIndex;
-            currentKind = kind;
-            return;
-          }
-
-          previousCellIndex = cellIndex;
         });
-
-        pushSpan();
       });
     };
 
-    appendZoneHighlights(topRows, 0, Math.max(0, effectiveCenterStartRow - topRows.length), topRowsInsetPx);
-    appendZoneHighlights(centerRows, layout.topHeightPx, effectiveCenterStartRow);
-    appendZoneHighlights(bottomRows, layout.topHeightPx + layout.centerHeightPx, effectiveCenterStartRow + viewport.centerRowCount);
+    appendZoneHighlights(topRows, 0, centerStartRow - topRows.length, topRowsInsetPx);
+    appendZoneHighlights(centerRows, layout.topHeightPx, centerStartRow);
+    appendZoneHighlights(bottomRows, layout.topHeightPx + layout.centerHeightPx, centerStartRow + centerRows.length);
 
     return highlights;
   }, [
@@ -477,8 +452,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     caretPos,
     caretRow,
     centerRows,
+    centerStartRow,
     charCellWidthPx,
-    effectiveCenterStartRow,
     horizontalPaddingPx,
     layout.centerHeightPx,
     layout.topHeightPx,
@@ -486,17 +461,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     text,
     topRows,
     topRowsInsetPx,
-    viewport.centerRowCount,
   ]);
 
   return (
     <div
       className="fixed-focus-editor"
       style={{
-        display: 'flex',
         position: 'relative',
-        height: `${containerHeightPx}px`,
-        width: `${containerWidthPx}px`,
         fontFamily,
         fontSize: `${fontSizePx}px`,
         overflow: 'hidden',
@@ -519,6 +490,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             '--grid-row-height': `${metrics.rowHeightPx}px`,
             '--grid-column-width': `${charCellWidthPx}px`,
             '--grid-horizontal-offset': `${horizontalPaddingPx}px`,
+            '--grid-line-color': highlightColors?.grid,
           } as React.CSSProperties}
         />
 
@@ -526,6 +498,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           className="fixed-focus-cell-overlay"
           aria-hidden
           style={{
+            '--grid-row-height': `${metrics.rowHeightPx}px`,
+            '--grid-column-width': `${charCellWidthPx}px`,
             '--highlight-caret-bg': highlightColors?.caret,
             '--highlight-leading-bg': highlightColors?.leading,
             '--highlight-trailing-bg': highlightColors?.trailing,
@@ -604,6 +578,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               resize: 'none',
               outline: 'none',
               fontFamily: 'inherit',
+              fontKerning: 'none',
+              fontVariantLigatures: 'none',
+              fontFeatureSettings: '"liga" 0, "calt" 0',
+              letterSpacing: '0',
               boxSizing: 'border-box',
               overflow: 'hidden',
               whiteSpace: 'pre-wrap',
@@ -706,6 +684,10 @@ const MirroredTextLayer: React.FC<MirroredTextLayerProps> = ({
         resize: 'none',
         outline: 'none',
         fontFamily: 'inherit',
+        fontKerning: 'none',
+        fontVariantLigatures: 'none',
+        fontFeatureSettings: '"liga" 0, "calt" 0',
+        letterSpacing: '0',
         boxSizing: 'border-box',
         overflow: 'hidden',
         whiteSpace: 'pre-wrap',
@@ -724,29 +706,39 @@ function computeTopInsetPx(spacingPreset: string): number {
   return 15;
 }
 
-function getGridMeasurementContext(): CanvasRenderingContext2D | null {
-  if (gridMeasurementContext) return gridMeasurementContext;
-  if (typeof document === 'undefined') return null;
-
-  const canvas = document.createElement('canvas');
-  gridMeasurementContext = canvas.getContext('2d');
-  return gridMeasurementContext;
-}
-
 function measureMonospaceCellWidthPx(fontSizePx: number, fontFamily: string): number {
   const cacheKey = `${fontSizePx}px|${fontFamily}`;
   const cached = charWidthCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const ctx = getGridMeasurementContext();
-  if (!ctx) {
+  if (typeof document === 'undefined') {
     const fallback = Math.max(1, Math.round(fontSizePx * 0.6));
     charWidthCache.set(cacheKey, fallback);
     return fallback;
   }
 
-  ctx.font = `${fontSizePx}px ${fontFamily}`;
-  const width = ctx.measureText('M').width;
+  const measurementElement = document.createElement('span');
+  const sampleText = '0'.repeat(256);
+  measurementElement.textContent = sampleText;
+  measurementElement.style.position = 'absolute';
+  measurementElement.style.visibility = 'hidden';
+  measurementElement.style.pointerEvents = 'none';
+  measurementElement.style.whiteSpace = 'pre';
+  measurementElement.style.fontFamily = fontFamily;
+  measurementElement.style.fontSize = `${fontSizePx}px`;
+  measurementElement.style.fontKerning = 'none';
+  measurementElement.style.fontVariantLigatures = 'none';
+  measurementElement.style.fontFeatureSettings = '"liga" 0, "calt" 0';
+  measurementElement.style.letterSpacing = '0';
+  measurementElement.style.padding = '0';
+  measurementElement.style.margin = '0';
+  measurementElement.style.border = '0';
+  measurementElement.style.top = '-9999px';
+  measurementElement.style.left = '0';
+  document.body.appendChild(measurementElement);
+  const width = measurementElement.getBoundingClientRect().width / sampleText.length;
+  measurementElement.remove();
+
   const measured = Math.max(1, Math.round(width * 1000) / 1000);
   charWidthCache.set(cacheKey, measured);
   return measured;

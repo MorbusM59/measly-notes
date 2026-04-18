@@ -20,16 +20,17 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    z-index: 0;
+    z-index: 1;
+    --grid-line-color: rgba(90, 90, 90, 0.12);
     background-image:
       repeating-linear-gradient(
         to bottom,
-        rgba(90, 90, 90, 0.15) 0 1px,
+        var(--grid-line-color) 0 1px,
         transparent 1px var(--grid-row-height)
       ),
       repeating-linear-gradient(
         to right,
-        rgba(90, 90, 90, 0.1) 0 1px,
+        var(--grid-line-color) 0 1px,
         transparent 1px var(--grid-column-width)
       );
     background-position:
@@ -53,6 +54,8 @@
     .cell-highlight {
       position: absolute;
       box-sizing: border-box;
+      background-clip: content-box;
+      padding: 1px;
 
       &.cell-highlight--caret {
         background: var(--highlight-caret-bg);

@@ -6,7 +6,7 @@ import { FixedFocusEditor } from './FixedFocusViewport';
 import './MarkdownEditor.scss';
 import './MarkdownThemes.scss';
 
-type HighlightColorKey = 'caret' | 'leading' | 'trailing';
+type HighlightColorKey = 'caret' | 'leading' | 'trailing' | 'grid';
 
 type HighlightColors = Record<HighlightColorKey, string>;
 
@@ -14,24 +14,28 @@ const DEFAULT_HIGHLIGHT_COLORS: HighlightColors = {
   caret: 'rgba(255, 221, 85, 0.2)',
   leading: 'rgba(120, 120, 120, 0.12)',
   trailing: 'rgba(245, 184, 85, 0.16)',
+  grid: 'rgba(90, 90, 90, 0.12)',
 };
 
 const HIGHLIGHT_COLOR_STORAGE_KEYS: Record<HighlightColorKey, string> = {
   caret: 'markdown-editor-highlight-caret',
   leading: 'markdown-editor-highlight-leading',
   trailing: 'markdown-editor-highlight-trailing',
+  grid: 'markdown-editor-highlight-grid',
 };
 
 const HIGHLIGHT_COLOR_LABELS: Record<HighlightColorKey, string> = {
   caret: 'C',
   leading: 'L',
   trailing: 'T',
+  grid: 'G',
 };
 
 const HIGHLIGHT_COLOR_TITLES: Record<HighlightColorKey, string> = {
   caret: 'Caret box color',
   leading: 'Leading space box color',
   trailing: 'Trailing space box color',
+  grid: 'Grid line color',
 };
 
 function normalizeHighlightColorInput(input: string): string | null {
@@ -376,6 +380,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       caret: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.caret) || DEFAULT_HIGHLIGHT_COLORS.caret,
       leading: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.leading) || DEFAULT_HIGHLIGHT_COLORS.leading,
       trailing: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.trailing) || DEFAULT_HIGHLIGHT_COLORS.trailing,
+      grid: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.grid) || DEFAULT_HIGHLIGHT_COLORS.grid,
     };
 
     if (savedViewStyle) setViewStyle(savedViewStyle);
@@ -1503,7 +1508,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           ) : (
             <>
               <div className="highlight-color-controls">
-                {(['caret', 'leading', 'trailing'] as HighlightColorKey[]).map((key) => (
+                {(['caret', 'leading', 'trailing', 'grid'] as HighlightColorKey[]).map((key) => (
                   <button
                     key={key}
                     className={`toolbar-btn-icon color-swatch-btn${activeHighlightColorKey === key ? ' is-open' : ''}`}
