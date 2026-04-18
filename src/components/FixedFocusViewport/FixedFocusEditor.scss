@@ -11,12 +11,56 @@
   border-radius: 0;
   color: inherit;
 
+  .fixed-focus-editor-content {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .fixed-focus-grid-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      repeating-linear-gradient(
+        to bottom,
+        rgba(90, 90, 90, 0.15) 0 1px,
+        transparent 1px var(--grid-row-height)
+      ),
+      repeating-linear-gradient(
+        to right,
+        rgba(90, 90, 90, 0.1) 0 1px,
+        transparent 1px var(--grid-column-width)
+      );
+    background-position:
+      0 0,
+      var(--grid-horizontal-offset) 0;
+    background-size:
+      100% var(--grid-row-height),
+      var(--grid-column-width) 100%;
+  }
+
+  .fixed-focus-indent-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+
+    .indent-highlight {
+      position: absolute;
+      background: rgba(120, 120, 120, 0.12);
+      box-sizing: border-box;
+    }
+  }
+
   .zone {
     flex-shrink: 0;
     overflow: hidden;
     box-sizing: border-box;
     background: transparent;
     color: inherit;
+    position: relative;
+    z-index: 1;
 
     &.zone-top {
       opacity: 0.8;

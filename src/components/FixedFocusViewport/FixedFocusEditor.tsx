@@ -14,6 +14,15 @@ import { WrappedLine, findRowForCharIndex } from './textWrapping';
 import { ComputedMetrics } from './lineMetrics';
 import './FixedFocusEditor.scss';
 
+let gridMeasurementContext: CanvasRenderingContext2D | null = null;
+const charWidthCache = new Map<string, number>();
+const SPACE_MARKER = '\u00B7';
+
+interface IndentHighlight {
+  topPx: number;
+  widthPx: number;
+}
+
 interface FixedFocusEditorProps {
   text: string;
   caretPos: number;
@@ -95,6 +104,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const contentWidthPx = Math.max(1, containerWidthPx - (horizontalPaddingPx * 2));
   const topInsetPx = Math.max(0, computeTopInsetPx(spacingPreset));
   const drawableHeightPx = Math.max(1, containerHeightPx - topInsetPx);
+  const charCellWidthPx = useMemo(
+    () => measureMonospaceCellWidthPx(fontSizePx, fontFamily),
+    [fontFamily, fontSizePx]
+  );
 
   const setViewportStartRow = useCallback((nextViewportStartRow: number | ((prev: number) => number)) => {
     const resolvedNextRow = typeof nextViewportStartRow === 'function'
@@ -180,6 +193,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const layout = model.getLayout();
   const viewport = model.getViewport();
   const topRows = model.getTopZoneRows();
+  const centerRows = model.getCenterZoneRows();
   const bottomRows = model.getBottomZoneRows();
   const totalVisibleRows = viewport.topRowCount + viewport.centerRowCount + viewport.bottomRowCount;
 
@@ -359,9 +373,42 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     layout.centerHeightPx,
     wrappedLines.length * metrics.rowHeightPx
   );
+  const topRowsInsetPx = Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx));
   const dividerOffsetPx = metrics.rowGapPx > 0 ? Math.floor(metrics.rowGapPx / 2) : 0;
   const topDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx - dividerOffsetPx));
   const bottomDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx + layout.centerHeightPx - dividerOffsetPx));
+  const indentHighlights = useMemo(() => {
+    const highlights: IndentHighlight[] = [];
+    const appendZoneHighlights = (rows: WrappedLine[], zoneTopPx: number, insetTopPx = 0) => {
+      rows.forEach((row, rowIndex) => {
+        if (!row.isLineStart) return;
+        const rowText = text.slice(row.startCharIndex, row.endCharIndex);
+        const indentCellCount = countLeadingIndentCells(rowText);
+        if (indentCellCount <= 0) return;
+
+        highlights.push({
+          topPx: zoneTopPx + insetTopPx + (rowIndex * metrics.rowHeightPx),
+          widthPx: indentCellCount * charCellWidthPx,
+        });
+      });
+    };
+
+    appendZoneHighlights(topRows, 0, topRowsInsetPx);
+    appendZoneHighlights(centerRows, layout.topHeightPx);
+    appendZoneHighlights(bottomRows, layout.topHeightPx + layout.centerHeightPx);
+
+    return highlights;
+  }, [
+    bottomRows,
+    centerRows,
+    charCellWidthPx,
+    layout.centerHeightPx,
+    layout.topHeightPx,
+    metrics.rowHeightPx,
+    text,
+    topRows,
+    topRowsInsetPx,
+  ]);
 
   return (
     <div
@@ -386,6 +433,31 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           height: `${drawableHeightPx}px`,
         }}
       >
+        <div
+          className="fixed-focus-grid-overlay"
+          aria-hidden
+          style={{
+            '--grid-row-height': `${metrics.rowHeightPx}px`,
+            '--grid-column-width': `${charCellWidthPx}px`,
+            '--grid-horizontal-offset': `${horizontalPaddingPx}px`,
+          } as React.CSSProperties}
+        />
+
+        <div className="fixed-focus-indent-overlay" aria-hidden>
+          {indentHighlights.map((highlight, index) => (
+            <div
+              key={`${highlight.topPx}-${highlight.widthPx}-${index}`}
+              className="indent-highlight"
+              style={{
+                top: `${highlight.topPx}px`,
+                left: `${horizontalPaddingPx}px`,
+                width: `${highlight.widthPx}px`,
+                height: `${metrics.rowHeightPx}px`,
+              }}
+            />
+          ))}
+        </div>
+
         {/* Top Zone (display-only) */}
         {layout.topHeightPx > 0 && (
           <div
@@ -562,5 +634,49 @@ export default FixedFocusEditor;
 
 function computeTopInsetPx(spacingPreset: string): number {
   return 15;
+}
+
+function getGridMeasurementContext(): CanvasRenderingContext2D | null {
+  if (gridMeasurementContext) return gridMeasurementContext;
+  if (typeof document === 'undefined') return null;
+
+  const canvas = document.createElement('canvas');
+  gridMeasurementContext = canvas.getContext('2d');
+  return gridMeasurementContext;
+}
+
+function measureMonospaceCellWidthPx(fontSizePx: number, fontFamily: string): number {
+  const cacheKey = `${fontSizePx}px|${fontFamily}`;
+  const cached = charWidthCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const ctx = getGridMeasurementContext();
+  if (!ctx) {
+    const fallback = Math.max(1, Math.round(fontSizePx * 0.6));
+    charWidthCache.set(cacheKey, fallback);
+    return fallback;
+  }
+
+  ctx.font = `${fontSizePx}px ${fontFamily}`;
+  const width = ctx.measureText('M').width;
+  const measured = Math.max(1, Math.round(width * 1000) / 1000);
+  charWidthCache.set(cacheKey, measured);
+  return measured;
+}
+
+function countLeadingIndentCells(text: string): number {
+  let indentCellCount = 0;
+  for (const char of text) {
+    if (char === SPACE_MARKER || char === ' ') {
+      indentCellCount += 1;
+      continue;
+    }
+    if (char === '\t') {
+      indentCellCount += 3;
+      continue;
+    }
+    break;
+  }
+  return indentCellCount;
 }
 
