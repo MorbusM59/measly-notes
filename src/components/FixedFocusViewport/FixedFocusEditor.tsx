@@ -207,6 +207,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const topRows = model.getTopZoneRows();
   const centerRows = model.getCenterZoneRows();
   const bottomRows = model.getBottomZoneRows();
+  const gridColumnCount = Math.max(0, Math.floor(contentWidthPx / charCellWidthPx));
+  const gridRowCount = Math.max(0, Math.floor(drawableHeightPx / metrics.rowHeightPx));
+  const quantizedGridWidthPx = gridColumnCount * charCellWidthPx;
+  const quantizedGridHeightPx = gridRowCount * metrics.rowHeightPx;
   const totalVisibleRows = viewport.topRowCount + viewport.centerRowCount + viewport.bottomRowCount;
 
   // Keep maxStart fresh for use inside the stable wheel listener
@@ -479,7 +483,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           style={{
             '--grid-row-height': `${metrics.rowHeightPx}px`,
             '--grid-column-width': `${charCellWidthPx}px`,
-            '--grid-horizontal-offset': `${horizontalPaddingPx}px`,
+            '--grid-horizontal-padding': `${horizontalPaddingPx}px`,
+            '--grid-quantized-width': `${quantizedGridWidthPx}px`,
+            '--grid-quantized-height': `${quantizedGridHeightPx}px`,
             '--grid-line-color': highlightColors?.grid,
           } as React.CSSProperties}
         />

@@ -18,7 +18,10 @@
 
   .fixed-focus-grid-overlay {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: var(--grid-horizontal-padding);
+    width: var(--grid-quantized-width);
+    height: var(--grid-quantized-height);
     pointer-events: none;
     z-index: 1;
     --grid-line-color: rgba(90, 90, 90, 0.12);
@@ -35,7 +38,7 @@
       );
     background-position:
       0 0,
-      var(--grid-horizontal-offset) 0;
+      0 0;
     background-size:
       100% var(--grid-row-height),
       var(--grid-column-width) 100%;
