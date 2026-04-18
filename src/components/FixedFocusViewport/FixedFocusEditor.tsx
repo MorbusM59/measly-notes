@@ -18,17 +18,19 @@ let gridMeasurementContext: CanvasRenderingContext2D | null = null;
 const charWidthCache = new Map<string, number>();
 
 interface IndentHighlight {
+  kind: CellHighlightKind;
   topPx: number;
   leftPx: number;
   widthPx: number;
   heightPx: number;
 }
 
-interface CaretCellHighlight {
-  topPx: number;
-  leftPx: number;
-  widthPx: number;
-  heightPx: number;
+type CellHighlightKind = 'caret' | 'leading' | 'trailing';
+
+interface HighlightColors {
+  caret: string;
+  leading: string;
+  trailing: string;
 }
 
 interface FixedFocusEditorProps {
@@ -36,6 +38,7 @@ interface FixedFocusEditorProps {
   caretPos: number;
   fontSizePx: number;
   spacingPreset: string;
+  highlightColors?: HighlightColors;
   fontFamily?: string;
   horizontalPaddingPx?: number;
   topRowCount?: number;
@@ -68,6 +71,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   caretPos,
   fontSizePx,
   spacingPreset,
+  highlightColors,
   fontFamily = '"Syne Mono", Menlo, Monaco, monospace',
   horizontalPaddingPx = 20,
   topRowCount,
@@ -384,95 +388,95 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const topRowsInsetPx = Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx));
   const topDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx));
   const bottomDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx + layout.centerHeightPx));
-  const indentHighlights = useMemo(() => {
+  const highlightSpans = useMemo(() => {
     const highlights: IndentHighlight[] = [];
-    const appendZoneHighlights = (rows: WrappedLine[], zoneTopPx: number, insetTopPx = 0) => {
+    const appendZoneHighlights = (
+      rows: WrappedLine[],
+      zoneTopPx: number,
+      zoneStartRow: number,
+      insetTopPx = 0
+    ) => {
       rows.forEach((row, rowIndex) => {
         const rowText = text.slice(row.startCharIndex, row.endCharIndex);
         const topPx = zoneTopPx + insetTopPx + (rowIndex * metrics.rowHeightPx);
+        const occupiedCells = new Map<number, CellHighlightKind>();
+        const rowCellCount = countVisualCells(rowText);
+        const visibleRowIndex = zoneStartRow + rowIndex;
+
+        if (visibleRowIndex === caretRow) {
+          const clampedCaretPos = Math.max(row.startCharIndex, Math.min(caretPos, row.endCharIndex));
+          const rowPrefix = text.slice(row.startCharIndex, clampedCaretPos);
+          const caretColumn = countVisualCells(rowPrefix);
+          occupiedCells.set(caretColumn, 'caret');
+        }
 
         if (row.isLineStart) {
-          const indentCellCount = countLeadingWhitespaceCells(rowText);
-          if (indentCellCount > 0) {
-            highlights.push({
-              topPx,
-              leftPx: horizontalPaddingPx,
-              widthPx: indentCellCount * charCellWidthPx,
-              heightPx: metrics.rowHeightPx,
-            });
+          const leadingCellCount = countLeadingWhitespaceCells(rowText);
+          for (let cellIndex = 0; cellIndex < leadingCellCount; cellIndex += 1) {
+            if (!occupiedCells.has(cellIndex)) {
+              occupiedCells.set(cellIndex, 'leading');
+            }
           }
         }
 
         if (row.isLineEnd) {
           const trailingCellCount = countTrailingWhitespaceCells(rowText);
-          if (trailingCellCount > 0) {
-            const rowCellCount = countVisualCells(rowText);
-            const leftPx = horizontalPaddingPx + ((rowCellCount - trailingCellCount) * charCellWidthPx);
-            const widthPx = trailingCellCount * charCellWidthPx;
-            highlights.push({
-              topPx,
-              leftPx,
-              widthPx,
-              heightPx: metrics.rowHeightPx,
-            });
+          const trailingStartCell = Math.max(0, rowCellCount - trailingCellCount);
+          for (let cellIndex = trailingStartCell; cellIndex < rowCellCount; cellIndex += 1) {
+            if (!occupiedCells.has(cellIndex)) {
+              occupiedCells.set(cellIndex, 'trailing');
+            }
           }
         }
+
+        const orderedCells = [...occupiedCells.entries()].sort((left, right) => left[0] - right[0]);
+        let spanStartCell: number | null = null;
+        let previousCellIndex: number | null = null;
+        let currentKind: CellHighlightKind | null = null;
+
+        const pushSpan = () => {
+          if (spanStartCell == null || previousCellIndex == null || currentKind == null) return;
+          highlights.push({
+            kind: currentKind,
+            topPx,
+            leftPx: horizontalPaddingPx + (spanStartCell * charCellWidthPx),
+            widthPx: ((previousCellIndex - spanStartCell) + 1) * charCellWidthPx,
+            heightPx: metrics.rowHeightPx,
+          });
+        };
+
+        orderedCells.forEach(([cellIndex, kind]) => {
+          if (
+            spanStartCell == null ||
+            previousCellIndex == null ||
+            currentKind == null ||
+            kind !== currentKind ||
+            cellIndex !== previousCellIndex + 1
+          ) {
+            pushSpan();
+            spanStartCell = cellIndex;
+            previousCellIndex = cellIndex;
+            currentKind = kind;
+            return;
+          }
+
+          previousCellIndex = cellIndex;
+        });
+
+        pushSpan();
       });
     };
 
-    appendZoneHighlights(topRows, 0, topRowsInsetPx);
-    appendZoneHighlights(centerRows, layout.topHeightPx);
-    appendZoneHighlights(bottomRows, layout.topHeightPx + layout.centerHeightPx);
+    appendZoneHighlights(topRows, 0, Math.max(0, effectiveCenterStartRow - topRows.length), topRowsInsetPx);
+    appendZoneHighlights(centerRows, layout.topHeightPx, effectiveCenterStartRow);
+    appendZoneHighlights(bottomRows, layout.topHeightPx + layout.centerHeightPx, effectiveCenterStartRow + viewport.centerRowCount);
 
     return highlights;
   }, [
     bottomRows,
-    centerRows,
-    charCellWidthPx,
-    horizontalPaddingPx,
-    layout.centerHeightPx,
-    layout.topHeightPx,
-    metrics.rowHeightPx,
-    text,
-    topRows,
-    topRowsInsetPx,
-  ]);
-
-  const caretCellHighlight = useMemo<CaretCellHighlight | null>(() => {
-    const caretLine = wrappedLines[caretRow];
-    if (!caretLine) return null;
-
-    const topZoneStartRow = Math.max(0, effectiveCenterStartRow - topRows.length);
-    const centerZoneStartRow = effectiveCenterStartRow;
-    const bottomZoneStartRow = effectiveCenterStartRow + viewport.centerRowCount;
-    let topPx: number | null = null;
-
-    if (caretRow >= topZoneStartRow && caretRow < topZoneStartRow + topRows.length) {
-      topPx = topRowsInsetPx + ((caretRow - topZoneStartRow) * metrics.rowHeightPx);
-    } else if (caretRow >= centerZoneStartRow && caretRow < centerZoneStartRow + centerRows.length) {
-      topPx = layout.topHeightPx + ((caretRow - centerZoneStartRow) * metrics.rowHeightPx);
-    } else if (caretRow >= bottomZoneStartRow && caretRow < bottomZoneStartRow + bottomRows.length) {
-      topPx = layout.topHeightPx + layout.centerHeightPx + ((caretRow - bottomZoneStartRow) * metrics.rowHeightPx);
-    }
-
-    if (topPx == null) return null;
-
-    const clampedCaretPos = Math.max(caretLine.startCharIndex, Math.min(caretPos, caretLine.endCharIndex));
-    const rowPrefix = text.slice(caretLine.startCharIndex, clampedCaretPos);
-    const cellOffset = countVisualCells(rowPrefix);
-    const leftPx = horizontalPaddingPx + (cellOffset * charCellWidthPx);
-
-    return {
-      topPx,
-      leftPx,
-      widthPx: charCellWidthPx,
-      heightPx: metrics.rowHeightPx,
-    };
-  }, [
-    bottomRows.length,
     caretPos,
     caretRow,
-    centerRows.length,
+    centerRows,
     charCellWidthPx,
     effectiveCenterStartRow,
     horizontalPaddingPx,
@@ -480,10 +484,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     layout.topHeightPx,
     metrics.rowHeightPx,
     text,
-    topRows.length,
+    topRows,
     topRowsInsetPx,
     viewport.centerRowCount,
-    wrappedLines,
   ]);
 
   return (
@@ -519,11 +522,19 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           } as React.CSSProperties}
         />
 
-        <div className="fixed-focus-indent-overlay" aria-hidden>
-          {indentHighlights.map((highlight, index) => (
+        <div
+          className="fixed-focus-cell-overlay"
+          aria-hidden
+          style={{
+            '--highlight-caret-bg': highlightColors?.caret,
+            '--highlight-leading-bg': highlightColors?.leading,
+            '--highlight-trailing-bg': highlightColors?.trailing,
+          } as React.CSSProperties}
+        >
+          {highlightSpans.map((highlight, index) => (
             <div
               key={`${highlight.topPx}-${highlight.leftPx}-${highlight.widthPx}-${index}`}
-              className="indent-highlight"
+              className={`cell-highlight cell-highlight--${highlight.kind}`}
               style={{
                 top: `${highlight.topPx}px`,
                 left: `${highlight.leftPx}px`,
@@ -533,20 +544,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             />
           ))}
         </div>
-
-        {caretCellHighlight && (
-          <div className="fixed-focus-caret-overlay" aria-hidden>
-            <div
-              className="caret-cell-highlight"
-              style={{
-                top: `${caretCellHighlight.topPx}px`,
-                left: `${caretCellHighlight.leftPx}px`,
-                width: `${caretCellHighlight.widthPx}px`,
-                height: `${caretCellHighlight.heightPx}px`,
-              }}
-            />
-          </div>
-        )}
 
         {/* Top Zone (display-only) */}
         {layout.topHeightPx > 0 && (
