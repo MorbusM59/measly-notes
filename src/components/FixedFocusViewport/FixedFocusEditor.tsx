@@ -11,7 +11,7 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { FixedFocusViewportModel } from './viewportModel';
 import { WrappedLine, findRowForCharIndex } from './textWrapping';
-import { ComputedMetrics } from './lineMetrics';
+import { ComputedMetrics, heightForRows } from './lineMetrics';
 import './FixedFocusEditor.scss';
 
 const charWidthCache = new Map<string, number>();
@@ -220,14 +220,14 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     latestEffectiveViewportStartRowRef.current = effectiveCenterStartRow;
   }, [effectiveCenterStartRow]);
 
-  const finishResize = useCallback(() => {
+  const finishResize = () => {
     setViewportStartRow(latestEffectiveViewportStartRowRef.current);
     resizeStateRef.current = null;
     setResizeAnchorViewportStartRow(null);
     setActiveResizeHandle(null);
     document.body.style.userSelect = '';
     document.body.style.cursor = '';
-  }, [setViewportStartRow]);
+  };
 
   const handleResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = resizeStateRef.current;
@@ -386,9 +386,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     wrappedLines.length * metrics.rowHeightPx
   );
   const topRowsInsetPx = Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx));
-  const topDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx));
-  const bottomDividerTopPx = Math.max(0, Math.round(topInsetPx + layout.topHeightPx + layout.centerHeightPx));
-  const highlightSpans = useMemo(() => {
+  const topDividerTopPx = Math.max(0, Math.round(topInsetPx + heightForRows(viewport.topRowCount, metrics)));
+  const bottomDividerTopPx = Math.max(0, Math.round(
+    topInsetPx +
+    layout.topHeightPx +
+    heightForRows(viewport.centerRowCount, metrics)
+  ));
+  const highlightSpans = (() => {
     const highlights: IndentHighlight[] = [];
     const appendZoneHighlights = (
       rows: WrappedLine[],
@@ -447,21 +451,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     appendZoneHighlights(bottomRows, layout.topHeightPx + layout.centerHeightPx, centerStartRow + centerRows.length);
 
     return highlights;
-  }, [
-    bottomRows,
-    caretPos,
-    caretRow,
-    centerRows,
-    centerStartRow,
-    charCellWidthPx,
-    horizontalPaddingPx,
-    layout.centerHeightPx,
-    layout.topHeightPx,
-    metrics.rowHeightPx,
-    text,
-    topRows,
-    topRowsInsetPx,
-  ]);
+  })();
 
   return (
     <div
@@ -534,7 +524,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               totalWrappedRowCount={wrappedLines.length}
               visibleHeightPx={layout.topHeightPx}
               startRow={Math.max(0, effectiveCenterStartRow - topRows.length)}
-              insetTopPx={Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx))}
+              insetTopPx={topRowsInsetPx}
               horizontalPaddingPx={horizontalPaddingPx}
               textareaClassName={textareaClassName}
               textareaStyle={textareaStyle}
