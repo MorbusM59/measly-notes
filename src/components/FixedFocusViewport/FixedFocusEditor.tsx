@@ -39,6 +39,8 @@ interface HighlightColors {
 interface FixedFocusEditorProps {
   text: string;
   caretPos: number;
+  selectionStart?: number;
+  selectionEnd?: number;
   fontSizePx: number;
   spacingPreset: string;
   highlightColors?: HighlightColors;
@@ -53,8 +55,9 @@ interface FixedFocusEditorProps {
   onViewportStartRowChange?: (nextViewportStartRow: number) => void;
   onTopRowCountChange?: (nextTopRowCount: number) => void;
   onBottomRowCountChange?: (nextBottomRowCount: number) => void;
-  onTextChange: (newText: string, newCaretPos: number) => void;
+  onTextChange: (newText: string, newSelectionStart: number, newSelectionEnd: number) => void;
   onCaretChange?: (newCaretPos: number) => void;
+  onSelectionChange?: (selectionStart: number, selectionEnd: number) => void;
   textareaRef?: React.MutableRefObject<HTMLTextAreaElement | null>;
   textareaClassName?: string;
   textareaStyle?: React.CSSProperties;
@@ -72,6 +75,8 @@ interface FixedFocusEditorProps {
 export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   text,
   caretPos,
+  selectionStart = caretPos,
+  selectionEnd = caretPos,
   fontSizePx,
   spacingPreset,
   highlightColors,
@@ -88,6 +93,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   onBottomRowCountChange,
   onTextChange,
   onCaretChange,
+  onSelectionChange,
   textareaRef,
   textareaClassName,
   textareaStyle,
@@ -276,23 +282,23 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       if (ta.scrollLeft !== 0) ta.scrollLeft = 0;
     }
 
-    if (ta && (ta.selectionStart !== caretPos || ta.selectionEnd !== caretPos)) {
-      ta.setSelectionRange(caretPos, caretPos);
+    if (ta && (ta.selectionStart !== selectionStart || ta.selectionEnd !== selectionEnd)) {
+      ta.setSelectionRange(selectionStart, selectionEnd);
     }
-  }, [caretPos]);
+  }, [selectionEnd, selectionStart]);
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.currentTarget.value;
-    const newCaretPos = e.currentTarget.selectionStart ?? 0;
-    onTextChange(newText, newCaretPos);
+    const newSelectionStart = e.currentTarget.selectionStart ?? 0;
+    const newSelectionEnd = e.currentTarget.selectionEnd ?? newSelectionStart;
+    onTextChange(newText, newSelectionStart, newSelectionEnd);
   };
 
   // Track caret changes from mouse clicks / selection
   const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
-    const newCaretPos = e.currentTarget.selectionStart ?? 0;
-    if (newCaretPos !== caretPos) {
-      onCaretChange?.(newCaretPos);
-    }
+    const newSelectionStart = e.currentTarget.selectionStart ?? 0;
+    const newSelectionEnd = e.currentTarget.selectionEnd ?? newSelectionStart;
+    onSelectionChange?.(newSelectionStart, newSelectionEnd);
   };
 
   const getCharIndexForVisualCell = (row: WrappedLine, targetCell: number) => {

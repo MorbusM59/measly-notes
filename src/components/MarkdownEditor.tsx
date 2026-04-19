@@ -134,6 +134,8 @@ const EDIT_STATE_KEY_PREFIX = 'md-edit-state-';
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview, hasAnyNotes }) => {
   const [content, setContent] = useState('');
   const [caretPos, setCaretPos] = useState(0);
+  const [selectionStart, setSelectionStart] = useState(0);
+  const [selectionEnd, setSelectionEnd] = useState(0);
   const [editViewportStartRow, setEditViewportStartRow] = useState(0);
   const [editorViewportSize, setEditorViewportSize] = useState({ width: 0, height: 0 });
   const [layoutRevision, setLayoutRevision] = useState(0);
@@ -185,7 +187,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.setSelectionRange(start, end);
-    setCaretPos(start);
+    setSelectionStart(start);
+    setSelectionEnd(end);
+    setCaretPos(end);
+  }, []);
+
+  const syncSelectionState = useCallback((start: number, end: number) => {
+    setSelectionStart(start);
+    setSelectionEnd(end);
+    setCaretPos(end);
   }, []);
 
   // Editor style options — Syne and Red Hat (display labels simplified).
@@ -320,6 +330,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         lastSavedTitleRef.current = note.title;
         setEditViewportStartRow(0);
         setCaretPos(0);
+        setSelectionStart(0);
+        setSelectionEnd(0);
 
         // Focus & position cursor for edit mode
         if (!showPreview) {
@@ -826,7 +838,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const textarea = textareaRef.current;
     if (!textarea) return;
     const start = textarea.selectionStart;
-    const newText = content.substring(0, start) + text + content.substring(start);
+    const end = textarea.selectionEnd;
+    const newText = content.substring(0, start) + text + content.substring(end);
     // mark this as a programmatic insert so autosize/ensureCaretVisible
     // triggered by the content-change effect do not run and cause jumps
     programmaticInsertRef.current = true;
@@ -1206,7 +1219,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const handleSelectionChange = () => {
       checkCursorPosition();
       checkFormatting();
-      setCaretPos(textarea.selectionStart ?? 0);
+      syncSelectionState(textarea.selectionStart ?? 0, textarea.selectionEnd ?? textarea.selectionStart ?? 0);
 
       // debounce save edit state for current note
       if (note?.id != null) {
@@ -1228,7 +1241,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         selectionSaveTimeout.current = null;
       }
     };
-  }, [checkCursorPosition, checkFormatting, note]);
+  }, [checkCursorPosition, checkFormatting, note, syncSelectionState]);
 
   // trigger auto-save when moving off first line
   useEffect(() => {
@@ -1602,6 +1615,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             key={`${editorStyle}-${editorFontSize}-${editorSpacing}-${layoutRevision}`}
             text={content}
             caretPos={caretPos}
+            selectionStart={selectionStart}
+            selectionEnd={selectionEnd}
             fontFamily={getEditorFamily(editorStyle)}
             fontSizePx={sizeToPx(editorFontSize)}
             spacingPreset={editorSpacing}
@@ -1615,17 +1630,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             onViewportStartRowChange={setEditViewportStartRow}
             onTopRowCountChange={handleFixedFocusTopRowCountChange}
             onBottomRowCountChange={handleFixedFocusBottomRowCountChange}
-            onTextChange={(newText, newCaretPos) => {
+            onTextChange={(newText, newSelectionStart, newSelectionEnd) => {
               handleContentChange(newText);
-              setCaretPos(newCaretPos);
+              syncSelectionState(newSelectionStart, newSelectionEnd);
               checkCursorPosition();
               scheduleTimeout(() => {
                 const textarea = textareaRef.current;
                 if (!textarea) return;
                 textarea.focus();
-                setTextareaSelection(newCaretPos, newCaretPos);
+                setTextareaSelection(newSelectionStart, newSelectionEnd);
               }, 0);
             }}
+            onSelectionChange={syncSelectionState}
             onCaretChange={(newCaretPos) => {
               const textarea = textareaRef.current;
               if (!textarea) return;
