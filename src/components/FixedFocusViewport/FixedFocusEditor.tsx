@@ -109,8 +109,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [uncontrolledTopRowCount, setUncontrolledTopRowCount] = useState(topRowCount ?? 3);
   const [uncontrolledBottomRowCount, setUncontrolledBottomRowCount] = useState(bottomRowCount ?? 3);
   const [activeResizeHandle, setActiveResizeHandle] = useState<'top' | 'bottom' | null>(null);
+  const [isScrollIndicatorDragging, setIsScrollIndicatorDragging] = useState(false);
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
+  const scrollIndicatorRef = useRef<HTMLDivElement>(null);
   const centerInputRef = useRef<HTMLTextAreaElement>(null);
   const resizeStateRef = useRef<{
     handle: 'top' | 'bottom';
@@ -118,6 +120,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     startTopRowCount: number;
     startBottomRowCount: number;
     totalVisibleRows: number;
+  } | null>(null);
+  const scrollIndicatorDragStateRef = useRef<{
+    pointerId: number;
+    dragOffsetPx: number;
   } | null>(null);
   const latestEffectiveViewportStartRowRef = useRef(0);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
@@ -198,7 +204,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   let effectiveCenterStartRow = activeResizeHandle && resizeAnchorViewportStartRow != null
     ? Math.max(0, Math.min(resizeAnchorViewportStartRow, maxViewportStartRow))
     : clampedCenterStartRow;
-  if (!activeResizeHandle) {
+  if (!activeResizeHandle && !isScrollIndicatorDragging) {
     if (caretRow < effectiveCenterStartRow) {
       effectiveCenterStartRow = caretRow;
     } else if (caretRow >= effectiveCenterStartRow + provisionalViewport.centerRowCount) {
@@ -237,6 +243,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   );
   const bottomIndicatorRowCount = Math.max(0, totalVisibleRows - middleIndicatorRowCount - topIndicatorRowCount);
   const indicatorHeightPx = totalVisibleRows * metrics.rowHeightPx;
+  const indicatorThumbTopPx = topIndicatorRowCount * metrics.rowHeightPx;
+  const indicatorThumbHeightPx = middleIndicatorRowCount * metrics.rowHeightPx;
+  const maxIndicatorThumbTopPx = Math.max(0, indicatorHeightPx - indicatorThumbHeightPx);
 
   // Keep maxStart fresh for use inside the stable wheel listener
   const maxStartRef = useRef(maxStart);
@@ -257,6 +266,26 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     document.body.style.userSelect = '';
     document.body.style.cursor = '';
   };
+
+  const getViewportBoundaryCaretPos = useCallback((viewportStartRowForSnap: number) => {
+    if (wrappedLines.length === 0) return caretPos;
+
+    const visibleStartRow = Math.max(0, Math.min(viewportStartRowForSnap, wrappedLines.length - 1));
+    const visibleEndRow = Math.max(
+      visibleStartRow,
+      Math.min(wrappedLines.length - 1, visibleStartRow + viewport.centerRowCount - 1)
+    );
+
+    if (caretRow < visibleStartRow) {
+      return wrappedLines[visibleStartRow]?.endCharIndex ?? caretPos;
+    }
+
+    if (caretRow > visibleEndRow) {
+      return wrappedLines[visibleEndRow]?.endCharIndex ?? caretPos;
+    }
+
+    return caretPos;
+  }, [caretPos, caretRow, viewport.centerRowCount, wrappedLines]);
 
   const handleResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = resizeStateRef.current;
@@ -287,6 +316,54 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, [activeResizeHandle, finishResize, handleResizeMove]);
+
+  const setViewportStartRowFromIndicatorThumbTopPx = useCallback((thumbTopPx: number) => {
+    if (maxStart <= 0 || maxIndicatorThumbTopPx <= 0) {
+      setViewportStartRow(0);
+      return;
+    }
+
+    const clampedThumbTopPx = Math.max(0, Math.min(maxIndicatorThumbTopPx, thumbTopPx));
+    const nextViewportStartRow = Math.round((clampedThumbTopPx / maxIndicatorThumbTopPx) * maxStart);
+    setViewportStartRow(nextViewportStartRow);
+  }, [maxIndicatorThumbTopPx, maxStart, setViewportStartRow]);
+
+  const handleScrollIndicatorPointerMove = useCallback((event: PointerEvent) => {
+    const dragState = scrollIndicatorDragStateRef.current;
+    const scrollIndicatorElement = scrollIndicatorRef.current;
+    if (!dragState || !scrollIndicatorElement) return;
+
+    const indicatorBounds = scrollIndicatorElement.getBoundingClientRect();
+    const relativePointerY = event.clientY - indicatorBounds.top;
+    setViewportStartRowFromIndicatorThumbTopPx(relativePointerY - dragState.dragOffsetPx);
+  }, [setViewportStartRowFromIndicatorThumbTopPx]);
+
+  useEffect(() => {
+    if (!isScrollIndicatorDragging) return;
+
+    const handlePointerUp = () => {
+      const finalViewportStartRow = latestEffectiveViewportStartRowRef.current;
+      const snappedCaretPos = getViewportBoundaryCaretPos(finalViewportStartRow);
+      scrollIndicatorDragStateRef.current = null;
+      setIsScrollIndicatorDragging(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      if (snappedCaretPos !== caretPos) {
+        onCaretChange?.(snappedCaretPos);
+      }
+      centerInputRef.current?.focus();
+    };
+
+    window.addEventListener('pointermove', handleScrollIndicatorPointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleScrollIndicatorPointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [caretPos, getViewportBoundaryCaretPos, handleScrollIndicatorPointerMove, isScrollIndicatorDragging, onCaretChange]);
 
   // Keep the browser's own textarea scrolling disabled and sync viewport to the caret
   // when edits like Enter move it outside the visible center zone.
@@ -364,6 +441,31 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     window.requestAnimationFrame(() => {
       centerInputRef.current?.focus();
     });
+  };
+
+  const handleScrollIndicatorPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (totalWrappedRowCount <= viewport.centerRowCount) return;
+
+    event.preventDefault();
+    const indicatorBounds = event.currentTarget.getBoundingClientRect();
+    const relativePointerY = Math.max(0, Math.min(indicatorHeightPx, event.clientY - indicatorBounds.top));
+    const thumbBottomPx = indicatorThumbTopPx + indicatorThumbHeightPx;
+    const clickedInsideThumb = relativePointerY >= indicatorThumbTopPx && relativePointerY <= thumbBottomPx;
+    const dragOffsetPx = clickedInsideThumb
+      ? relativePointerY - indicatorThumbTopPx
+      : (indicatorThumbHeightPx / 2);
+
+    scrollIndicatorDragStateRef.current = {
+      pointerId: event.pointerId,
+      dragOffsetPx,
+    };
+    setIsScrollIndicatorDragging(true);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'pointer';
+
+    if (!clickedInsideThumb) {
+      setViewportStartRowFromIndicatorThumbTopPx(relativePointerY - dragOffsetPx);
+    }
   };
 
   const getRowAlignedCaretPos = (targetRow: number) => {
@@ -588,8 +690,15 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         />
 
         <div
-          className="fixed-focus-scroll-indicator"
-          aria-hidden
+          ref={scrollIndicatorRef}
+          className={`fixed-focus-scroll-indicator${isScrollIndicatorDragging ? ' is-dragging' : ''}`}
+          aria-label="Scroll indicator"
+          role="scrollbar"
+          aria-orientation="vertical"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, maxStart)}
+          aria-valuenow={effectiveCenterStartRow}
+          onPointerDown={handleScrollIndicatorPointerDown}
           style={{
             '--grid-row-height': `${metrics.rowHeightPx}px`,
             '--grid-column-width': `${charCellWidthPx}px`,

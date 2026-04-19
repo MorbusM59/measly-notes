@@ -50,16 +50,23 @@
     left: calc(var(--grid-horizontal-padding) + var(--grid-quantized-width));
     width: var(--grid-column-width);
     height: var(--scroll-indicator-height);
-    pointer-events: none;
-    z-index: 1;
+    pointer-events: auto;
+    z-index: 2;
     --grid-line-color: rgba(90, 90, 90, 0.12);
     --scroll-indicator-active-bg: rgba(255, 221, 85, 0.2);
     --scroll-indicator-inactive-bg: rgba(255, 255, 255, 0);
+    cursor: pointer;
+    touch-action: none;
+
+    &.is-dragging {
+      cursor: pointer;
+    }
 
     .scroll-indicator-section {
       position: absolute;
       left: 0;
       width: 100%;
+      pointer-events: none;
 
       &.scroll-indicator-section--top {
         top: 0;
@@ -83,6 +90,7 @@
     .scroll-indicator-grid {
       position: absolute;
       inset: 0;
+      pointer-events: none;
       background-image:
         repeating-linear-gradient(
           to bottom,
