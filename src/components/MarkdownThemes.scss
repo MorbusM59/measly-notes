@@ -71,8 +71,27 @@
   }
 }
 
-@each $h, $fs in (h1: 150%, h2: 125%, h3: 120%, h4: 115%, h5: 110%, h6: 105%) {
+@each $h, $fs in (h1: 150%, h2: 140%, h3: 130%, h4: 120%, h5: 110%, h6: 100%) {
   .markdown-preview #{$h} { font-size: $fs; }
+}
+
+.markdown-preview h1 {
+  text-decoration: underline;
+  text-align: center;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview h4,
+.markdown-preview h5,
+.markdown-preview h6 {
+  font-variant-caps: small-caps;
+}
+
+.markdown-preview h3,
+.markdown-preview h5 {
+  font-style: italic;
 }
 
 /* --------- Spacing (Unified design system: adjust as needed) --------- */
