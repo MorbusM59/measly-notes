@@ -222,6 +222,21 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const quantizedGridWidthPx = gridColumnCount * charCellWidthPx;
   const quantizedGridHeightPx = gridRowCount * metrics.rowHeightPx;
   const totalVisibleRows = viewport.topRowCount + viewport.centerRowCount + viewport.bottomRowCount;
+  const totalWrappedRowCount = Math.max(1, wrappedLines.length);
+  const rowsAboveCenter = Math.max(0, effectiveCenterStartRow);
+  const centerVisibleRowCount = Math.min(viewport.centerRowCount, totalWrappedRowCount);
+  const rowsBelowCenter = Math.max(0, totalWrappedRowCount - rowsAboveCenter - centerVisibleRowCount);
+  const middleIndicatorRowCount = Math.max(
+    1,
+    Math.min(totalVisibleRows, Math.round((totalVisibleRows * centerVisibleRowCount) / totalWrappedRowCount))
+  );
+  const remainingIndicatorRows = Math.max(0, totalVisibleRows - middleIndicatorRowCount);
+  const topIndicatorRowCount = Math.max(
+    0,
+    Math.min(remainingIndicatorRows, Math.round((totalVisibleRows * rowsAboveCenter) / totalWrappedRowCount))
+  );
+  const bottomIndicatorRowCount = Math.max(0, totalVisibleRows - middleIndicatorRowCount - topIndicatorRowCount);
+  const indicatorHeightPx = totalVisibleRows * metrics.rowHeightPx;
 
   // Keep maxStart fresh for use inside the stable wheel listener
   const maxStartRef = useRef(maxStart);
@@ -571,6 +586,31 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             '--grid-line-color': highlightColors?.grid,
           } as React.CSSProperties}
         />
+
+        <div
+          className="fixed-focus-scroll-indicator"
+          aria-hidden
+          style={{
+            '--grid-row-height': `${metrics.rowHeightPx}px`,
+            '--grid-column-width': `${charCellWidthPx}px`,
+            '--grid-horizontal-padding': `${horizontalPaddingPx}px`,
+            '--grid-quantized-width': `${quantizedGridWidthPx}px`,
+            '--grid-line-color': highlightColors?.grid,
+            '--scroll-indicator-active-bg': highlightColors?.caret,
+            '--scroll-indicator-inactive-bg': highlightColors?.background,
+            '--scroll-indicator-height': `${indicatorHeightPx}px`,
+            '--scroll-top-height': `${topIndicatorRowCount * metrics.rowHeightPx}px`,
+            '--scroll-middle-top': `${topIndicatorRowCount * metrics.rowHeightPx}px`,
+            '--scroll-middle-height': `${middleIndicatorRowCount * metrics.rowHeightPx}px`,
+            '--scroll-bottom-top': `${(topIndicatorRowCount + middleIndicatorRowCount) * metrics.rowHeightPx}px`,
+            '--scroll-bottom-height': `${bottomIndicatorRowCount * metrics.rowHeightPx}px`,
+          } as React.CSSProperties}
+        >
+          {topIndicatorRowCount > 0 && <div className="scroll-indicator-section scroll-indicator-section--top" />}
+          {middleIndicatorRowCount > 0 && <div className="scroll-indicator-section scroll-indicator-section--middle" />}
+          {bottomIndicatorRowCount > 0 && <div className="scroll-indicator-section scroll-indicator-section--bottom" />}
+          <div className="scroll-indicator-grid" />
+        </div>
 
         <div
           className="fixed-focus-cell-overlay"

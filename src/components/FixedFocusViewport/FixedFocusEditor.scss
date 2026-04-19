@@ -44,6 +44,65 @@
       var(--grid-column-width) 100%;
   }
 
+  .fixed-focus-scroll-indicator {
+    position: absolute;
+    top: 0;
+    left: calc(var(--grid-horizontal-padding) + var(--grid-quantized-width));
+    width: var(--grid-column-width);
+    height: var(--scroll-indicator-height);
+    pointer-events: none;
+    z-index: 1;
+    --grid-line-color: rgba(90, 90, 90, 0.12);
+    --scroll-indicator-active-bg: rgba(255, 221, 85, 0.2);
+    --scroll-indicator-inactive-bg: rgba(255, 255, 255, 0);
+
+    .scroll-indicator-section {
+      position: absolute;
+      left: 0;
+      width: 100%;
+
+      &.scroll-indicator-section--top {
+        top: 0;
+        height: var(--scroll-top-height);
+        background: var(--scroll-indicator-inactive-bg);
+      }
+
+      &.scroll-indicator-section--middle {
+        top: var(--scroll-middle-top);
+        height: var(--scroll-middle-height);
+        background: var(--scroll-indicator-active-bg);
+      }
+
+      &.scroll-indicator-section--bottom {
+        top: var(--scroll-bottom-top);
+        height: var(--scroll-bottom-height);
+        background: var(--scroll-indicator-inactive-bg);
+      }
+    }
+
+    .scroll-indicator-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(
+          to bottom,
+          var(--grid-line-color) 0 1px,
+          transparent 1px var(--grid-row-height)
+        ),
+        repeating-linear-gradient(
+          to right,
+          var(--grid-line-color) 0 1px,
+          transparent 1px var(--grid-column-width)
+        );
+      background-position:
+        0 0,
+        0 0;
+      background-size:
+        100% var(--grid-row-height),
+        var(--grid-column-width) 100%;
+    }
+  }
+
   .fixed-focus-box-background-overlay {
     position: absolute;
     inset: 0;
