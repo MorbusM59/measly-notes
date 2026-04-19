@@ -71,7 +71,7 @@
   }
 }
 
-@each $h, $fs in (h1: 150%, h2: 140%, h3: 130%, h4: 120%, h5: 110%, h6: 100%) {
+@each $h, $fs in (h1: 180%, h2: 155%, h3: 140%, h4: 125%, h5: 115%, h6: 110%) {
   .markdown-preview #{$h} { font-size: $fs; }
 }
 
@@ -113,7 +113,9 @@ $spacing-sets: (
     pre { margin: map.get($vals, para) 0; padding: map.get($vals, para); }
     hr { margin: map.get($vals, para) 0; }
     // Heading spacing
-    h1, h2, h3, h4, h5, h6 { margin: map.get($vals, para) 0 math.div(map.get($vals, para), 2) 0; }
+    h1 { margin: map.get($vals, para) 0 math.div(map.get($vals, para), 2) 0; }
+    h2, h3, h4, h5, h6 { margin: map.get($vals, para) 0 0 0; }
+    h2 + *, h3 + *, h4 + *, h5 + *, h6 + * { margin-top: 0; }
   }
 }
 
