@@ -643,7 +643,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         fontFamily,
         fontSize: `${fontSizePx}px`,
         overflow: 'hidden',
-      }}
+        '--grid-column-width': `${charCellWidthPx}px`,
+      } as React.CSSProperties}
     >
       <div
         className="fixed-focus-editor-content"
