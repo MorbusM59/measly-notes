@@ -110,6 +110,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [uncontrolledBottomRowCount, setUncontrolledBottomRowCount] = useState(bottomRowCount ?? 3);
   const [activeResizeHandle, setActiveResizeHandle] = useState<'top' | 'bottom' | null>(null);
   const [isScrollIndicatorDragging, setIsScrollIndicatorDragging] = useState(false);
+  const [isPointerSelecting, setIsPointerSelecting] = useState(false);
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const scrollIndicatorRef = useRef<HTMLDivElement>(null);
@@ -124,6 +125,15 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const scrollIndicatorDragStateRef = useRef<{
     pointerId: number;
     dragOffsetPx: number;
+  } | null>(null);
+  const selectionDragStateRef = useRef<{
+    pointerId: number;
+    anchorPos: number;
+    clientX: number;
+    clientY: number;
+    scrollDirection: -1 | 0 | 1;
+    scrollDistancePx: number;
+    fractionalRows: number;
   } | null>(null);
   const latestEffectiveViewportStartRowRef = useRef(0);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
@@ -204,7 +214,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   let effectiveCenterStartRow = activeResizeHandle && resizeAnchorViewportStartRow != null
     ? Math.max(0, Math.min(resizeAnchorViewportStartRow, maxViewportStartRow))
     : clampedCenterStartRow;
-  if (!activeResizeHandle && !isScrollIndicatorDragging) {
+  if (!activeResizeHandle && !isScrollIndicatorDragging && !isPointerSelecting) {
     if (caretRow < effectiveCenterStartRow) {
       effectiveCenterStartRow = caretRow;
     } else if (caretRow >= effectiveCenterStartRow + provisionalViewport.centerRowCount) {
@@ -338,6 +348,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     setViewportStartRowFromIndicatorThumbTopPx(relativePointerY - dragState.dragOffsetPx);
   }, [setViewportStartRowFromIndicatorThumbTopPx]);
 
+  const getAutoScrollRowsPerSecond = useCallback((distancePx: number) => {
+    if (distancePx <= 0) return 0;
+    if (distancePx <= 10) return 1;
+    if (distancePx >= 100) return 20;
+    return 1 + (((distancePx - 10) / 90) * 19);
+  }, []);
+
   useEffect(() => {
     if (!isScrollIndicatorDragging) return;
 
@@ -388,12 +405,14 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
   // Track caret changes from mouse clicks / selection
   const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    if (selectionDragStateRef.current) return;
+
     const newSelectionStart = e.currentTarget.selectionStart ?? 0;
     const newSelectionEnd = e.currentTarget.selectionEnd ?? newSelectionStart;
     onSelectionChange?.(newSelectionStart, newSelectionEnd);
   };
 
-  const getCharIndexForVisualCell = (row: WrappedLine, targetCell: number) => {
+  const getCharIndexForVisualCell = useCallback((row: WrappedLine, targetCell: number) => {
     const rowText = text.slice(row.startCharIndex, row.endCharIndex);
     const clampedTargetCell = Math.max(0, targetCell);
     let traversedCellCount = 0;
@@ -408,7 +427,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     }
 
     return row.endCharIndex;
-  };
+  }, [text]);
 
   const handlePassiveZonePointerDown = (
     zone: 'top' | 'bottom',
@@ -468,6 +487,28 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     }
   };
 
+  const handleCenterPointerDown = (event: React.PointerEvent<HTMLTextAreaElement>) => {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+
+    const anchorPos = getCharIndexForPointer(event.clientX, event.clientY);
+    event.currentTarget.focus();
+    event.currentTarget.setSelectionRange(anchorPos, anchorPos);
+
+    selectionDragStateRef.current = {
+      pointerId: event.pointerId,
+      anchorPos,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      scrollDirection: 0,
+      scrollDistancePx: 0,
+      fractionalRows: 0,
+    };
+    onSelectionChange?.(anchorPos, anchorPos);
+    setIsPointerSelecting(true);
+  };
+
   const getRowAlignedCaretPos = (targetRow: number) => {
     const safeSourceRowIndex = Math.max(0, Math.min(caretRow, wrappedLines.length - 1));
     const safeTargetRowIndex = Math.max(0, Math.min(targetRow, wrappedLines.length - 1));
@@ -494,6 +535,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
       setViewportStartRow(nextViewportStartRow);
 
+      if (isPointerSelecting || selectionStart !== selectionEnd) {
+        return;
+      }
+
       const nextVisibleStart = nextViewportStartRow;
       const nextVisibleEnd = nextViewportStartRow + viewport.centerRowCount - 1;
       if (caretRow < nextVisibleStart) {
@@ -504,7 +549,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     };
     editorRoot.addEventListener('wheel', onWheel, { passive: false });
     return () => editorRoot.removeEventListener('wheel', onWheel);
-  }, [effectiveCenterStartRow, viewport.centerRowCount, caretRow, onCaretChange, wrappedLines, caretPos]);
+  }, [effectiveCenterStartRow, isPointerSelecting, onCaretChange, selectionEnd, selectionStart, viewport.centerRowCount, wrappedLines, caretPos, caretRow]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!(e.shiftKey || e.ctrlKey || e.altKey)) {
@@ -573,6 +618,179 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     layout.topHeightPx +
     heightForRows(viewport.centerRowCount, metrics)
   ));
+
+  const getVisibleRowIndexForPointer = useCallback((clientY: number) => {
+    const editorRoot = editorRootRef.current;
+    if (!editorRoot || wrappedLines.length === 0) return 0;
+
+    const rootBounds = editorRoot.getBoundingClientRect();
+    const relativeY = clientY - rootBounds.top - topInsetPx;
+    const topStartRow = Math.max(0, effectiveCenterStartRow - topRows.length);
+    const centerTopPx = layout.topHeightPx;
+    const centerBottomPx = layout.topHeightPx + layout.centerHeightPx;
+    const bottomStartRow = effectiveCenterStartRow + viewport.centerRowCount;
+
+    if (relativeY <= centerTopPx) {
+      if (topRows.length === 0) {
+        return Math.max(0, Math.min(wrappedLines.length - 1, effectiveCenterStartRow));
+      }
+
+      const adjustedY = Math.max(0, relativeY - topRowsInsetPx);
+      const rowOffset = Math.max(0, Math.min(topRows.length - 1, Math.floor(adjustedY / metrics.rowHeightPx)));
+      return Math.max(0, Math.min(wrappedLines.length - 1, topStartRow + rowOffset));
+    }
+
+    if (relativeY < centerBottomPx) {
+      const rowOffset = Math.max(0, Math.min(centerRows.length - 1, Math.floor((relativeY - centerTopPx) / metrics.rowHeightPx)));
+      return Math.max(0, Math.min(wrappedLines.length - 1, effectiveCenterStartRow + rowOffset));
+    }
+
+    if (bottomRows.length === 0) {
+      return Math.max(0, Math.min(wrappedLines.length - 1, effectiveCenterStartRow + viewport.centerRowCount - 1));
+    }
+
+    const rowOffset = Math.max(0, Math.min(bottomRows.length - 1, Math.floor((relativeY - centerBottomPx) / metrics.rowHeightPx)));
+    return Math.max(0, Math.min(wrappedLines.length - 1, bottomStartRow + rowOffset));
+  }, [bottomRows.length, centerRows.length, effectiveCenterStartRow, layout.centerHeightPx, layout.topHeightPx, metrics.rowHeightPx, topInsetPx, topRows.length, topRowsInsetPx, viewport.centerRowCount, wrappedLines]);
+
+  const getCharIndexForPointer = useCallback((clientX: number, clientY: number) => {
+    const editorRoot = editorRootRef.current;
+    if (!editorRoot || wrappedLines.length === 0) return 0;
+
+    const targetRowIndex = getVisibleRowIndexForPointer(clientY);
+    const targetRow = wrappedLines[targetRowIndex];
+    if (!targetRow) return 0;
+
+    const rootBounds = editorRoot.getBoundingClientRect();
+    const relativeX = clientX - rootBounds.left - horizontalPaddingPx;
+    const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
+    return getCharIndexForVisualCell(targetRow, targetCell);
+  }, [charCellWidthPx, getCharIndexForVisualCell, getVisibleRowIndexForPointer, horizontalPaddingPx, wrappedLines]);
+
+  const getCenterZoneBounds = useCallback(() => {
+    const editorRoot = editorRootRef.current;
+    if (!editorRoot) return null;
+
+    const bounds = editorRoot.getBoundingClientRect();
+    const top = bounds.top + topInsetPx + layout.topHeightPx;
+    const bottom = top + layout.centerHeightPx;
+    return {
+      left: bounds.left,
+      right: bounds.right,
+      top,
+      bottom,
+    };
+  }, [layout.centerHeightPx, layout.topHeightPx, topInsetPx]);
+
+  const getOutsideCenterScrollForPointer = useCallback((clientY: number) => {
+    const bounds = getCenterZoneBounds();
+    if (!bounds) return { direction: 0 as -1 | 0 | 1, distancePx: 0 };
+
+    if (clientY < bounds.top) {
+      return { direction: -1 as const, distancePx: bounds.top - clientY };
+    }
+
+    if (clientY > bounds.bottom) {
+      return { direction: 1 as const, distancePx: clientY - bounds.bottom };
+    }
+
+    return { direction: 0 as -1 | 0 | 1, distancePx: 0 };
+  }, [getCenterZoneBounds]);
+
+  useEffect(() => {
+    if (!isPointerSelecting) return;
+
+    document.body.style.userSelect = 'none';
+
+    const updateSelectionForPointer = (clientX: number, clientY: number) => {
+      const selectionDragState = selectionDragStateRef.current;
+      if (!selectionDragState) return;
+
+      const targetPos = getCharIndexForPointer(clientX, clientY);
+      const nextSelectionStart = Math.min(selectionDragState.anchorPos, targetPos);
+      const nextSelectionEnd = Math.max(selectionDragState.anchorPos, targetPos);
+      onSelectionChange?.(nextSelectionStart, nextSelectionEnd);
+    };
+
+    let animationFrameId = 0;
+    let lastTimestamp: number | null = null;
+
+    const step = (timestamp: number) => {
+      const selectionDragState = selectionDragStateRef.current;
+      if (!selectionDragState) return;
+
+      const previousTimestamp = lastTimestamp ?? timestamp;
+      lastTimestamp = timestamp;
+      const elapsedSeconds = (timestamp - previousTimestamp) / 1000;
+
+      if (selectionDragState.scrollDirection !== 0) {
+        const rowsPerSecond = getAutoScrollRowsPerSecond(selectionDragState.scrollDistancePx);
+        selectionDragState.fractionalRows += rowsPerSecond * elapsedSeconds;
+
+        let wholeRows = Math.floor(selectionDragState.fractionalRows);
+        if (wholeRows > 0) {
+          selectionDragState.fractionalRows -= wholeRows;
+          let nextViewportStartRow = latestEffectiveViewportStartRowRef.current;
+          while (wholeRows > 0) {
+            const candidateViewportStartRow = Math.max(0, Math.min(maxStartRef.current, nextViewportStartRow + selectionDragState.scrollDirection));
+            if (candidateViewportStartRow === nextViewportStartRow) break;
+            nextViewportStartRow = candidateViewportStartRow;
+            wholeRows -= 1;
+          }
+
+          if (nextViewportStartRow !== latestEffectiveViewportStartRowRef.current) {
+            latestEffectiveViewportStartRowRef.current = nextViewportStartRow;
+            setViewportStartRow(nextViewportStartRow);
+            updateSelectionForPointer(selectionDragState.clientX, selectionDragState.clientY);
+          }
+        }
+      }
+
+      animationFrameId = window.requestAnimationFrame(step);
+    };
+
+    animationFrameId = window.requestAnimationFrame(step);
+
+    const finishPointerSelection = (event?: PointerEvent) => {
+      const selectionDragState = selectionDragStateRef.current;
+      if (event && selectionDragState && event.pointerId !== selectionDragState.pointerId) return;
+
+      selectionDragStateRef.current = null;
+      setIsPointerSelecting(false);
+      centerInputRef.current?.focus();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const selectionDragState = selectionDragStateRef.current;
+      if (!selectionDragState || event.pointerId !== selectionDragState.pointerId) return;
+      if ((event.buttons & 1) === 0) return;
+
+      selectionDragState.clientX = event.clientX;
+      selectionDragState.clientY = event.clientY;
+
+      updateSelectionForPointer(event.clientX, event.clientY);
+
+      const { direction, distancePx } = getOutsideCenterScrollForPointer(event.clientY);
+      selectionDragState.scrollDirection = direction;
+      selectionDragState.scrollDistancePx = distancePx;
+      if (direction === 0) {
+        selectionDragState.fractionalRows = 0;
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', finishPointerSelection);
+    window.addEventListener('pointercancel', finishPointerSelection);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', finishPointerSelection);
+      window.removeEventListener('pointercancel', finishPointerSelection);
+      document.body.style.userSelect = '';
+    };
+  }, [getAutoScrollRowsPerSecond, getCharIndexForPointer, getOutsideCenterScrollForPointer, isPointerSelecting, onSelectionChange, setViewportStartRow]);
+
   const highlightSpans = (() => {
     const highlights: IndentHighlight[] = [];
     const appendZoneHighlights = (
@@ -791,6 +1009,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             value={text}
             onChange={handleInput}
             onSelect={handleSelect}
+            onPointerDown={handleCenterPointerDown}
             onKeyDown={handleKeyDown}
             onKeyUp={onKeyUp}
             onCopy={onCopy}
