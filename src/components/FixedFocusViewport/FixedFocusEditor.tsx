@@ -15,6 +15,63 @@ import { ComputedMetrics, heightForRows } from './lineMetrics';
 import './FixedFocusEditor.scss';
 
 const charWidthCache = new Map<string, number>();
+const VIEWPORT_JUMP_ANIMATION_DURATION_MS = 400;
+const VIEWPORT_JUMP_MAX_STEP_MS = 100;
+const VIEWPORT_JUMP_CURVE_EXPONENT = 1;
+const VIEWPORT_JUMP_CURVE_EXPONENT_DISTANCE_FACTOR = 0.002;
+const VIEWPORT_JUMP_CURVE_EXPONENT_MAX = 1.5;
+const VIEWPORT_JUMP_STEP_DURATION_OFFSET_MS = 0.05;
+
+interface ViewportAnimationStep {
+  atMs: number;
+  targetRow: number;
+}
+
+function getViewportJumpStepWeight(stepIndex: number, totalSteps: number, exponent: number): number {
+  const k = -1 + ((2 * (stepIndex + 0.5)) / totalSteps);
+  return Math.pow(k * k, exponent);
+}
+
+function getViewportJumpCurveExponent(totalDistance: number): number {
+  return Math.min(
+    VIEWPORT_JUMP_CURVE_EXPONENT_MAX,
+    VIEWPORT_JUMP_CURVE_EXPONENT + (totalDistance * VIEWPORT_JUMP_CURVE_EXPONENT_DISTANCE_FACTOR)
+  );
+}
+
+function buildViewportAnimationSchedule(
+  startRow: number,
+  targetRow: number,
+  preferredDurationMs: number
+): ViewportAnimationStep[] {
+  const totalDistance = Math.abs(targetRow - startRow);
+  if (totalDistance === 0) return [];
+
+  const direction = targetRow > startRow ? 1 : -1;
+  const curveExponent = getViewportJumpCurveExponent(totalDistance);
+  const weights = Array.from(
+    { length: totalDistance },
+    (_, stepIndex) => getViewportJumpStepWeight(stepIndex, totalDistance, curveExponent) + VIEWPORT_JUMP_STEP_DURATION_OFFSET_MS
+  );
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  if (totalWeight <= 0) {
+    return [{ atMs: Math.min(preferredDurationMs, VIEWPORT_JUMP_MAX_STEP_MS), targetRow }];
+  }
+
+  const scaleFactor = preferredDurationMs / totalWeight;
+  const firstStepDurationMs = weights[0] * scaleFactor;
+  const secondaryScaleFactor = firstStepDurationMs > VIEWPORT_JUMP_MAX_STEP_MS
+    ? (VIEWPORT_JUMP_MAX_STEP_MS / firstStepDurationMs)
+    : 1;
+  let elapsedMs = 0;
+  return weights.map((weight, stepIndex) => {
+    elapsedMs += weight * scaleFactor * secondaryScaleFactor;
+    return {
+      atMs: elapsedMs,
+      targetRow: startRow + (direction * (stepIndex + 1)),
+    };
+  });
+}
 
 interface IndentHighlight {
   kind: CellHighlightKind;
@@ -111,6 +168,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [activeResizeHandle, setActiveResizeHandle] = useState<'top' | 'bottom' | null>(null);
   const [isScrollIndicatorDragging, setIsScrollIndicatorDragging] = useState(false);
   const [isPointerSelecting, setIsPointerSelecting] = useState(false);
+  const [isViewportAnimating, setIsViewportAnimating] = useState(false);
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const scrollIndicatorRef = useRef<HTMLDivElement>(null);
@@ -134,6 +192,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     scrollDirection: -1 | 0 | 1;
     scrollDistancePx: number;
     fractionalRows: number;
+  } | null>(null);
+  const viewportAnimationRef = useRef<{
+    frameId: number;
+    nextStepIndex: number;
+    onComplete?: () => void;
+    startTimeMs: number | null;
+    steps: ViewportAnimationStep[];
   } | null>(null);
   const latestEffectiveViewportStartRowRef = useRef(0);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
@@ -258,6 +323,87 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     latestEffectiveViewportStartRowRef.current = effectiveCenterStartRow;
   }, [effectiveCenterStartRow]);
 
+  const cancelViewportAnimation = useCallback(() => {
+    const animationState = viewportAnimationRef.current;
+    if (!animationState) return;
+
+    window.cancelAnimationFrame(animationState.frameId);
+    viewportAnimationRef.current = null;
+    setIsViewportAnimating(false);
+  }, []);
+
+  const animateViewportStartRow = useCallback((nextViewportStartRow: number, onComplete?: () => void) => {
+    const clampedTargetRow = Math.max(0, Math.min(maxStartRef.current, nextViewportStartRow));
+    const startRow = latestEffectiveViewportStartRowRef.current;
+    if (clampedTargetRow === startRow) {
+      onComplete?.();
+      return;
+    }
+
+    cancelViewportAnimation();
+
+    const steps = buildViewportAnimationSchedule(
+      startRow,
+      clampedTargetRow,
+      VIEWPORT_JUMP_ANIMATION_DURATION_MS
+    );
+
+    if (steps.length === 0) {
+      onComplete?.();
+      return;
+    }
+
+    setIsViewportAnimating(true);
+    const animationState = {
+      frameId: 0,
+      nextStepIndex: 0,
+      onComplete,
+      startTimeMs: null as number | null,
+      steps,
+    };
+
+    const finishAnimation = () => {
+      const completedAnimation = viewportAnimationRef.current;
+      viewportAnimationRef.current = null;
+      setIsViewportAnimating(false);
+      completedAnimation?.onComplete?.();
+    };
+
+    const stepAnimation = (timestamp: number) => {
+      const currentAnimation = viewportAnimationRef.current;
+      if (!currentAnimation) return;
+
+      if (currentAnimation.startTimeMs == null) {
+        currentAnimation.startTimeMs = timestamp;
+      }
+
+      const elapsedMs = timestamp - currentAnimation.startTimeMs;
+      while (
+        currentAnimation.nextStepIndex < currentAnimation.steps.length
+        && elapsedMs >= currentAnimation.steps[currentAnimation.nextStepIndex].atMs
+      ) {
+        const stepTargetRow = currentAnimation.steps[currentAnimation.nextStepIndex].targetRow;
+        latestEffectiveViewportStartRowRef.current = stepTargetRow;
+        setViewportStartRow(stepTargetRow);
+        currentAnimation.nextStepIndex += 1;
+      }
+
+      if (currentAnimation.nextStepIndex >= currentAnimation.steps.length) {
+        finishAnimation();
+        return;
+      }
+
+      currentAnimation.frameId = window.requestAnimationFrame(stepAnimation);
+    };
+
+    viewportAnimationRef.current = animationState;
+    animationState.frameId = window.requestAnimationFrame(stepAnimation);
+  }, [cancelViewportAnimation, setViewportStartRow]);
+
+  useEffect(() => () => {
+    cancelViewportAnimation();
+  }, [cancelViewportAnimation]);
+
   const finishResize = () => {
     setViewportStartRow(latestEffectiveViewportStartRowRef.current);
     resizeStateRef.current = null;
@@ -288,14 +434,14 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   }, [caretPos, caretRow, viewport.centerRowCount, wrappedLines]);
 
   useEffect(() => {
-    if (activeResizeHandle || isScrollIndicatorDragging || isPointerSelecting) return;
+    if (activeResizeHandle || isScrollIndicatorDragging || isPointerSelecting || isViewportAnimating) return;
     if (selectionStart !== selectionEnd) return;
 
     const clampedCaretPos = getViewportBoundaryCaretPos(effectiveCenterStartRow);
     if (clampedCaretPos !== caretPos) {
       onCaretChange?.(clampedCaretPos);
     }
-  }, [activeResizeHandle, caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, isScrollIndicatorDragging, onCaretChange, selectionEnd, selectionStart]);
+  }, [activeResizeHandle, caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, isScrollIndicatorDragging, isViewportAnimating, onCaretChange, selectionEnd, selectionStart]);
 
   const handleResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = resizeStateRef.current;
@@ -437,6 +583,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   ) => (event: React.PointerEvent<HTMLDivElement>) => {
     if (zoneRows.length === 0) return;
 
+    cancelViewportAnimation();
+
     const zoneBounds = event.currentTarget.getBoundingClientRect();
     const relativeY = event.clientY - zoneBounds.top - insetTopPx;
     const rawRowIndex = Math.floor(relativeY / metrics.rowHeightPx);
@@ -448,17 +596,15 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const relativeX = event.clientX - zoneBounds.left - horizontalPaddingPx;
     const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
     const nextCaretPos = getCharIndexForVisualCell(targetRow, targetCell);
+    const nextViewportStartRow = zone === 'top'
+      ? targetRowIndex
+      : Math.max(0, targetRowIndex - viewport.centerRowCount + 1);
 
-    if (zone === 'top') {
-      setViewportStartRow(targetRowIndex);
-    } else {
-      const nextViewportStartRow = Math.max(0, targetRowIndex - viewport.centerRowCount + 1);
-      setViewportStartRow(nextViewportStartRow);
-    }
-
-    onCaretChange?.(nextCaretPos);
-    window.requestAnimationFrame(() => {
-      centerInputRef.current?.focus();
+    animateViewportStartRow(nextViewportStartRow, () => {
+      onCaretChange?.(nextCaretPos);
+      window.requestAnimationFrame(() => {
+        centerInputRef.current?.focus();
+      });
     });
   };
 
@@ -474,6 +620,20 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       ? relativePointerY - indicatorThumbTopPx
       : (indicatorThumbHeightPx / 2);
 
+    cancelViewportAnimation();
+
+    if (!clickedInsideThumb) {
+      if (maxStart <= 0 || maxIndicatorThumbTopPx <= 0) {
+        animateViewportStartRow(0);
+        return;
+      }
+
+      const clampedThumbTopPx = Math.max(0, Math.min(maxIndicatorThumbTopPx, relativePointerY - dragOffsetPx));
+      const nextViewportStartRow = Math.round((clampedThumbTopPx / maxIndicatorThumbTopPx) * maxStart);
+      animateViewportStartRow(nextViewportStartRow);
+      return;
+    }
+
     scrollIndicatorDragStateRef.current = {
       pointerId: event.pointerId,
       dragOffsetPx,
@@ -481,15 +641,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     setIsScrollIndicatorDragging(true);
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'pointer';
-
-    if (!clickedInsideThumb) {
-      setViewportStartRowFromIndicatorThumbTopPx(relativePointerY - dragOffsetPx);
-    }
   };
 
   const handleCenterPointerDown = (event: React.PointerEvent<HTMLTextAreaElement>) => {
     if (event.button !== 0) return;
 
+    cancelViewportAnimation();
     event.preventDefault();
 
     const anchorPos = getCharIndexForPointer(event.clientX, event.clientY);
@@ -515,6 +672,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const editorRoot = editorRootRef.current;
     if (!editorRoot) return;
     const onWheel = (e: WheelEvent) => {
+      cancelViewportAnimation();
       e.preventDefault();
       const dir = e.deltaY > 0 ? 1 : -1;
       const scrollCeiling = Math.max(maxStartRef.current, effectiveCenterStartRow);
@@ -534,7 +692,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     };
     editorRoot.addEventListener('wheel', onWheel, { passive: false });
     return () => editorRoot.removeEventListener('wheel', onWheel);
-  }, [caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, onCaretChange, selectionEnd, selectionStart]);
+  }, [cancelViewportAnimation, caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, onCaretChange, selectionEnd, selectionStart]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!(e.shiftKey || e.ctrlKey || e.altKey)) {
@@ -575,6 +733,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   };
 
   const startResize = (handle: 'top' | 'bottom') => (event: React.PointerEvent<HTMLDivElement>) => {
+    cancelViewportAnimation();
     event.preventDefault();
     resizeStateRef.current = {
       handle,
