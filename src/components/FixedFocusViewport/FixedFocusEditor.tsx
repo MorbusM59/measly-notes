@@ -211,19 +211,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const maxStart = Math.max(0, wrappedLines.length - provisionalViewport.centerRowCount);
   const maxViewportStartRow = Math.max(0, wrappedLines.length - 1);
   const clampedCenterStartRow = Math.max(0, Math.min(centerStartRow, maxViewportStartRow));
-  let effectiveCenterStartRow = activeResizeHandle && resizeAnchorViewportStartRow != null
+  const effectiveCenterStartRow = activeResizeHandle && resizeAnchorViewportStartRow != null
     ? Math.max(0, Math.min(resizeAnchorViewportStartRow, maxViewportStartRow))
     : clampedCenterStartRow;
-  if (!activeResizeHandle && !isScrollIndicatorDragging && !isPointerSelecting && selectionStart === selectionEnd) {
-    if (caretRow < effectiveCenterStartRow) {
-      effectiveCenterStartRow = caretRow;
-    } else if (caretRow >= effectiveCenterStartRow + provisionalViewport.centerRowCount) {
-      effectiveCenterStartRow = Math.min(
-        maxViewportStartRow,
-        caretRow - provisionalViewport.centerRowCount + 1
-      );
-    }
-  }
 
   model.setViewportStartRow(effectiveCenterStartRow);
 
@@ -287,7 +277,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     );
 
     if (caretRow < visibleStartRow) {
-      return wrappedLines[visibleStartRow]?.endCharIndex ?? caretPos;
+      return wrappedLines[visibleStartRow]?.startCharIndex ?? caretPos;
     }
 
     if (caretRow > visibleEndRow) {
@@ -296,6 +286,16 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
     return caretPos;
   }, [caretPos, caretRow, viewport.centerRowCount, wrappedLines]);
+
+  useEffect(() => {
+    if (activeResizeHandle || isScrollIndicatorDragging || isPointerSelecting) return;
+    if (selectionStart !== selectionEnd) return;
+
+    const clampedCaretPos = getViewportBoundaryCaretPos(effectiveCenterStartRow);
+    if (clampedCaretPos !== caretPos) {
+      onCaretChange?.(clampedCaretPos);
+    }
+  }, [activeResizeHandle, caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, isScrollIndicatorDragging, onCaretChange, selectionEnd, selectionStart]);
 
   const handleResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = resizeStateRef.current;
@@ -509,18 +509,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     setIsPointerSelecting(true);
   };
 
-  const getRowAlignedCaretPos = (targetRow: number) => {
-    const safeSourceRowIndex = Math.max(0, Math.min(caretRow, wrappedLines.length - 1));
-    const safeTargetRowIndex = Math.max(0, Math.min(targetRow, wrappedLines.length - 1));
-    const sourceRow = wrappedLines[safeSourceRowIndex];
-    const target = wrappedLines[safeTargetRowIndex];
-    if (!sourceRow || !target) return caretPos;
-
-    const caretCol = caretPos - sourceRow.startCharIndex;
-    const targetRowLen = target.endCharIndex - target.startCharIndex;
-    return target.startCharIndex + Math.min(caretCol, targetRowLen);
-  };
-
   // Register non-passive wheel listener once so we can call preventDefault.
   // (React's synthetic onWheel cannot preventDefault on passive listeners.)
   useEffect(() => {
@@ -539,17 +527,14 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         return;
       }
 
-      const nextVisibleStart = nextViewportStartRow;
-      const nextVisibleEnd = nextViewportStartRow + viewport.centerRowCount - 1;
-      if (caretRow < nextVisibleStart) {
-        onCaretChange?.(getRowAlignedCaretPos(nextVisibleStart));
-      } else if (caretRow > nextVisibleEnd) {
-        onCaretChange?.(getRowAlignedCaretPos(nextVisibleEnd));
+      const clampedCaretPos = getViewportBoundaryCaretPos(nextViewportStartRow);
+      if (clampedCaretPos !== caretPos) {
+        onCaretChange?.(clampedCaretPos);
       }
     };
     editorRoot.addEventListener('wheel', onWheel, { passive: false });
     return () => editorRoot.removeEventListener('wheel', onWheel);
-  }, [effectiveCenterStartRow, isPointerSelecting, onCaretChange, selectionEnd, selectionStart, viewport.centerRowCount, wrappedLines, caretPos, caretRow]);
+  }, [caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, onCaretChange, selectionEnd, selectionStart]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!(e.shiftKey || e.ctrlKey || e.altKey)) {
