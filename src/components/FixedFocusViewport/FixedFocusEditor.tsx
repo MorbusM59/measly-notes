@@ -214,7 +214,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   let effectiveCenterStartRow = activeResizeHandle && resizeAnchorViewportStartRow != null
     ? Math.max(0, Math.min(resizeAnchorViewportStartRow, maxViewportStartRow))
     : clampedCenterStartRow;
-  if (!activeResizeHandle && !isScrollIndicatorDragging && !isPointerSelecting) {
+  if (!activeResizeHandle && !isScrollIndicatorDragging && !isPointerSelecting && selectionStart === selectionEnd) {
     if (caretRow < effectiveCenterStartRow) {
       effectiveCenterStartRow = caretRow;
     } else if (caretRow >= effectiveCenterStartRow + provisionalViewport.centerRowCount) {
