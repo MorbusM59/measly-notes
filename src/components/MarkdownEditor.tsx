@@ -187,6 +187,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.setSelectionRange(start, end);
+    // Reset scroll immediately: Chromium can internally scroll the textarea to reveal the
+    // caret even with overflow:hidden, which would desync the mirrored top/bottom zones.
+    if (textarea.scrollTop !== 0) textarea.scrollTop = 0;
+    if (textarea.scrollLeft !== 0) textarea.scrollLeft = 0;
     setSelectionStart(start);
     setSelectionEnd(end);
     setCaretPos(end);

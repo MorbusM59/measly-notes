@@ -532,14 +532,16 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   // when edits like Enter move it outside the visible center zone.
   useEffect(() => {
     const ta = centerInputRef.current;
-    if (ta) {
-      if (ta.scrollTop !== 0) ta.scrollTop = 0;
-      if (ta.scrollLeft !== 0) ta.scrollLeft = 0;
-    }
+    if (!ta) return;
 
-    if (ta && (ta.selectionStart !== selectionStart || ta.selectionEnd !== selectionEnd)) {
+    if (ta.selectionStart !== selectionStart || ta.selectionEnd !== selectionEnd) {
       ta.setSelectionRange(selectionStart, selectionEnd);
     }
+
+    // Reset scroll AFTER setSelectionRange: Chromium can internally scroll a textarea
+    // (even with overflow:hidden) to reveal the caret, which would desync the mirrored zones.
+    if (ta.scrollTop !== 0) ta.scrollTop = 0;
+    if (ta.scrollLeft !== 0) ta.scrollLeft = 0;
   }, [selectionEnd, selectionStart]);
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
