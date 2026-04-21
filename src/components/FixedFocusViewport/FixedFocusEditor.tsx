@@ -8,7 +8,7 @@
  * - Top/bottom are display-only divs
  */
 
-import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { FixedFocusViewportModel } from './viewportModel';
 import { WrappedLine, findRowForCharIndex } from './textWrapping';
 import { ComputedMetrics, heightForRows } from './lineMetrics';
@@ -206,6 +206,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const latestEffectiveViewportStartRowRef = useRef(0);
   const previousCaretPosRef = useRef(0);
   const previousViewportStartRowRef = useRef(0);
+  const lastCaretViewportOffsetRef = useRef(0);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
   const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
@@ -473,7 +474,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     onCaretChange?.(nextCaretPos);
   }, [onCaretChange]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeResizeHandle || isScrollIndicatorDragging || isPointerSelecting || isViewportAnimating || selectionStart !== selectionEnd) {
       previousCaretPosRef.current = caretPos;
       previousViewportStartRowRef.current = effectiveCenterStartRow;
@@ -488,6 +489,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const caretOutsideVisibleCenter = wrappedLines.length > 0
       && (caretRow < visibleStartRow || caretRow > visibleEndRow);
 
+    if (!caretOutsideVisibleCenter && wrappedLines.length > 0) {
+      lastCaretViewportOffsetRef.current = Math.max(0, caretRow - visibleStartRow);
+    }
+
     if (caretOutsideVisibleCenter) {
       const caretMoved = caretPos !== previousCaretPosRef.current;
       const viewportMoved = effectiveCenterStartRow !== previousViewportStartRowRef.current;
@@ -495,9 +500,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       // When caret movement drives the out-of-bounds state (typing, Enter, Home/End, etc.),
       // scroll the viewport to keep the caret in center instead of snapping caret backwards.
       if (caretMoved && !viewportMoved) {
-        const nextViewportStartRow = caretRow < visibleStartRow
-          ? caretRow
-          : Math.max(0, caretRow - viewport.centerRowCount + 1);
+        const preferredOffset = Math.max(0, Math.min(viewport.centerRowCount - 1, lastCaretViewportOffsetRef.current));
+        const nextViewportStartRow = Math.max(0, caretRow - preferredOffset);
         if (nextViewportStartRow !== effectiveCenterStartRow) {
           setViewportStartRow(nextViewportStartRow);
           previousCaretPosRef.current = caretPos;

@@ -1034,13 +1034,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       e.preventDefault();
       const textarea = textareaRef.current;
       if (!textarea) return;
+      const sourceText = textarea.value;
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
-      const lineStart = content.lastIndexOf('\n', start - 1) + 1;
-      const currentLineBeforeCursor = content.substring(lineStart, start);
+      const lineStart = sourceText.lastIndexOf('\n', start - 1) + 1;
+      const currentLineBeforeCursor = sourceText.substring(lineStart, start);
       const currentLineFull = (() => {
-        const lineEnd = content.indexOf('\n', lineStart);
-        return lineEnd === -1 ? content.substring(lineStart) : content.substring(lineStart, lineEnd);
+        const lineEnd = sourceText.indexOf('\n', lineStart);
+        return lineEnd === -1 ? sourceText.substring(lineStart) : sourceText.substring(lineStart, lineEnd);
       })();
 
       const leadingWhitespace = currentLineFull.match(/^[ \t]*/)?.[0] ?? '';
@@ -1052,14 +1053,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       // Ctrl+Enter: insert an extra blank line and start next line without indentation
       if (e.ctrlKey || e.metaKey) {
         const trimmedBefore = stripTrailingWhitespace(currentLineBeforeCursor);
-        const newText = content.substring(0, lineStart) + trimmedBefore + '\n\n' + content.substring(end);
+        const newText = sourceText.substring(0, lineStart) + trimmedBefore + '\n\n' + sourceText.substring(end);
         const newCursorPos = lineStart + trimmedBefore.length + 2; // after the two newlines
         programmaticInsertRef.current = true;
-        setCaretPos(newCursorPos);
         handleContentChange(newText);
+        syncSelectionState(newCursorPos, newCursorPos);
         scheduleTimeout(() => {
           textarea.focus();
-          setTextareaSelection(newCursorPos, newCursorPos);
           autosizeTextarea(textarea);
           ensureCaretVisible();
           programmaticInsertRef.current = false;
@@ -1071,14 +1071,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       if (e.shiftKey) {
         const trimmedBefore = stripTrailingWhitespace(currentLineBeforeCursor);
         const insert = '  \n' + leadingWhitespace;
-        const newText = content.substring(0, lineStart) + trimmedBefore + insert + content.substring(end);
+        const newText = sourceText.substring(0, lineStart) + trimmedBefore + insert + sourceText.substring(end);
         const newCursorPos = lineStart + trimmedBefore.length + 3 + leadingWhitespace.length;
         programmaticInsertRef.current = true;
-        setCaretPos(newCursorPos);
         handleContentChange(newText);
+        syncSelectionState(newCursorPos, newCursorPos);
         scheduleTimeout(() => {
           textarea.focus();
-          setTextareaSelection(newCursorPos, newCursorPos);
           autosizeTextarea(textarea);
           ensureCaretVisible();
           programmaticInsertRef.current = false;
@@ -1098,14 +1097,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
 
       const trimmedBefore = stripTrailingWhitespace(currentLineBeforeCursor);
       const insert = '\n' + leadingWhitespace + markerText;
-      const newText = content.substring(0, lineStart) + trimmedBefore + insert + content.substring(end);
+      const newText = sourceText.substring(0, lineStart) + trimmedBefore + insert + sourceText.substring(end);
       const newCursorPos = lineStart + trimmedBefore.length + 1 + leadingWhitespace.length + markerText.length;
       programmaticInsertRef.current = true;
-      setCaretPos(newCursorPos);
       handleContentChange(newText);
+      syncSelectionState(newCursorPos, newCursorPos);
       scheduleTimeout(() => {
         textarea.focus();
-        setTextareaSelection(newCursorPos, newCursorPos);
         autosizeTextarea(textarea);
         ensureCaretVisible();
         programmaticInsertRef.current = false;
@@ -1671,15 +1669,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
               handleContentChange(newText);
               syncSelectionState(newSelectionStart, newSelectionEnd);
               checkCursorPosition();
-              scheduleTimeout(() => {
-                const textarea = textareaRef.current;
-                if (!textarea) return;
-                textarea.focus();
-                setTextareaSelection(newSelectionStart, newSelectionEnd);
-              }, 0);
             }}
-            onSelectionChange={syncSelectionState}
+            onSelectionChange={(start, end) => {
+              // Programmatic transforms (Enter/list continuation/etc.) set an explicit
+              // target selection. Ignore transient browser select events in that window.
+              if (programmaticInsertRef.current) return;
+              syncSelectionState(start, end);
+            }}
             onCaretChange={(newCaretPos) => {
+              if (programmaticInsertRef.current) return;
               const textarea = textareaRef.current;
               if (!textarea) return;
               setTextareaSelection(newCaretPos, newCaretPos);
