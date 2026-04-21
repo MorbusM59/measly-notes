@@ -6,15 +6,16 @@ import { FixedFocusEditor } from './FixedFocusViewport';
 import './MarkdownEditor.scss';
 import './MarkdownThemes.scss';
 
-type HighlightColorKey = 'caret' | 'leading' | 'trailing' | 'grid' | 'background' | 'topBackground' | 'bottomBackground';
+type HighlightColorKey = 'caret' | 'leading' | 'trailing' | 'background' | 'topBackground' | 'bottomBackground';
 
 type HighlightColors = Record<HighlightColorKey, string>;
+
+type FixedFocusHighlightColors = HighlightColors & { grid: string };
 
 const DEFAULT_HIGHLIGHT_COLORS: HighlightColors = {
   caret: 'rgba(255, 221, 85, 0.2)',
   leading: 'rgba(120, 120, 120, 0.12)',
   trailing: 'rgba(245, 184, 85, 0.16)',
-  grid: 'rgba(90, 90, 90, 0.12)',
   background: 'rgba(255, 255, 255, 0)',
   topBackground: 'rgba(255, 255, 255, 0)',
   bottomBackground: 'rgba(255, 255, 255, 0)',
@@ -24,7 +25,6 @@ const HIGHLIGHT_COLOR_STORAGE_KEYS: Record<HighlightColorKey, string> = {
   caret: 'markdown-editor-highlight-caret',
   leading: 'markdown-editor-highlight-leading',
   trailing: 'markdown-editor-highlight-trailing',
-  grid: 'markdown-editor-highlight-grid',
   background: 'markdown-editor-highlight-background',
   topBackground: 'markdown-editor-highlight-top-background',
   bottomBackground: 'markdown-editor-highlight-bottom-background',
@@ -34,7 +34,6 @@ const HIGHLIGHT_COLOR_LABELS: Record<HighlightColorKey, string> = {
   caret: 'C',
   leading: 'L',
   trailing: 'T',
-  grid: 'G',
   background: 'B',
   topBackground: '↑',
   bottomBackground: '↓',
@@ -44,11 +43,34 @@ const HIGHLIGHT_COLOR_TITLES: Record<HighlightColorKey, string> = {
   caret: 'Caret box color',
   leading: 'Leading space box color',
   trailing: 'Trailing space box color',
-  grid: 'Grid line color',
   background: 'Regular box background color',
   topBackground: 'Top section regular box background color',
   bottomBackground: 'Bottom section regular box background color',
 };
+
+function toOpaqueColor(color: string | null | undefined): string | null {
+  if (!color) return null;
+  const trimmed = color.trim();
+
+  const rgbOrRgbaMatch = trimmed.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?\s*\)$/i);
+  if (rgbOrRgbaMatch) {
+    const red = Math.max(0, Math.min(255, Number(rgbOrRgbaMatch[1])));
+    const green = Math.max(0, Math.min(255, Number(rgbOrRgbaMatch[2])));
+    const blue = Math.max(0, Math.min(255, Number(rgbOrRgbaMatch[3])));
+    return `rgb(${red}, ${green}, ${blue})`;
+  }
+
+  const hexMatch = trimmed.match(/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    const red = Number.parseInt(hex.slice(0, 2), 16);
+    const green = Number.parseInt(hex.slice(2, 4), 16);
+    const blue = Number.parseInt(hex.slice(4, 6), 16);
+    return `rgb(${red}, ${green}, ${blue})`;
+  }
+
+  return null;
+}
 
 function normalizeHighlightColorInput(input: string): string | null {
   const trimmed = input.trim();
@@ -154,6 +176,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [editorFontSize, setEditorFontSize] = useState<string>('m');
   const [editorSpacing, setEditorSpacing] = useState<string>('cozy');
   const [highlightColors, setHighlightColors] = useState<HighlightColors>(DEFAULT_HIGHLIGHT_COLORS);
+  const [editorPanelGridColor, setEditorPanelGridColor] = useState<string>('rgb(255, 255, 255)');
   const [activeHighlightColorKey, setActiveHighlightColorKey] = useState<HighlightColorKey | null>(null);
   const [highlightColorInput, setHighlightColorInput] = useState('');
   const [highlightColorInputInvalid, setHighlightColorInputInvalid] = useState(false);
@@ -408,7 +431,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       caret: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.caret) || DEFAULT_HIGHLIGHT_COLORS.caret,
       leading: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.leading) || DEFAULT_HIGHLIGHT_COLORS.leading,
       trailing: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.trailing) || DEFAULT_HIGHLIGHT_COLORS.trailing,
-      grid: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.grid) || DEFAULT_HIGHLIGHT_COLORS.grid,
       background: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.background) || DEFAULT_HIGHLIGHT_COLORS.background,
       topBackground: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.topBackground) || DEFAULT_HIGHLIGHT_COLORS.topBackground,
       bottomBackground: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.bottomBackground) || DEFAULT_HIGHLIGHT_COLORS.bottomBackground,
@@ -1268,6 +1290,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         width: container.clientWidth,
         height: container.clientHeight,
       });
+
+      const panelBackgroundColor = window.getComputedStyle(container).backgroundColor;
+      const opaquePanelBackgroundColor = toOpaqueColor(panelBackgroundColor);
+      if (opaquePanelBackgroundColor) {
+        setEditorPanelGridColor(opaquePanelBackgroundColor);
+      }
     };
 
     updateSize();
@@ -1279,6 +1307,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       observer.disconnect();
     };
   }, [showPreview, note?.id]);
+
+  const fixedFocusHighlightColors: FixedFocusHighlightColors = {
+    ...highlightColors,
+    grid: editorPanelGridColor,
+  };
 
   useEffect(() => {
     const reflowTextarea = () => {
@@ -1540,7 +1573,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           ) : (
             <>
               <div className="highlight-color-controls">
-                {(['caret', 'leading', 'trailing', 'grid', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
+                {(['caret', 'leading', 'trailing', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
                   <button
                     key={key}
                     className={`toolbar-btn-icon color-swatch-btn${activeHighlightColorKey === key ? ' is-open' : ''}`}
@@ -1624,7 +1657,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             fontFamily={getEditorFamily(editorStyle)}
             fontSizePx={sizeToPx(editorFontSize)}
             spacingPreset={editorSpacing}
-            highlightColors={highlightColors}
+            highlightColors={fixedFocusHighlightColors}
             horizontalPaddingPx={20}
             topRowCount={fixedFocusTopRowCount}
             bottomRowCount={fixedFocusBottomRowCount}
