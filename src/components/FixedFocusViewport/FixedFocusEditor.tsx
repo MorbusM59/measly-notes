@@ -200,6 +200,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     startTimeMs: number | null;
     steps: ViewportAnimationStep[];
   } | null>(null);
+  const preferredCaretVisualColumnRef = useRef<number | null>(null);
+  const pendingAutomaticCaretPosRef = useRef<number | null>(null);
+  const pendingPreferredCaretVisualColumnRef = useRef<number | null>(null);
   const latestEffectiveViewportStartRowRef = useRef(0);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
@@ -323,6 +326,35 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     latestEffectiveViewportStartRowRef.current = effectiveCenterStartRow;
   }, [effectiveCenterStartRow]);
 
+  const rememberPreferredCaretVisualColumn = useCallback((nextVisualColumn: number) => {
+    pendingPreferredCaretVisualColumnRef.current = Math.max(0, Math.floor(nextVisualColumn));
+  }, []);
+
+  const getVisualColumnForCaretPos = useCallback((charIndex: number) => {
+    return getVisualColumnForCaretPosition(charIndex, wrappedLines, text);
+  }, [text, wrappedLines]);
+
+  useEffect(() => {
+    if (selectionStart !== selectionEnd) return;
+
+    const pendingPreferredVisualColumn = pendingPreferredCaretVisualColumnRef.current;
+    if (pendingPreferredVisualColumn != null) {
+      preferredCaretVisualColumnRef.current = pendingPreferredVisualColumn;
+      pendingPreferredCaretVisualColumnRef.current = null;
+      if (pendingAutomaticCaretPosRef.current === selectionEnd) {
+        pendingAutomaticCaretPosRef.current = null;
+      }
+      return;
+    }
+
+    if (pendingAutomaticCaretPosRef.current === selectionEnd) {
+      pendingAutomaticCaretPosRef.current = null;
+      return;
+    }
+
+    preferredCaretVisualColumnRef.current = getVisualColumnForCaretPos(selectionEnd);
+  }, [getVisualColumnForCaretPos, selectionEnd, selectionStart]);
+
   const cancelViewportAnimation = useCallback(() => {
     const animationState = viewportAnimationRef.current;
     if (!animationState) return;
@@ -421,17 +453,18 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       visibleStartRow,
       Math.min(wrappedLines.length - 1, visibleStartRow + viewport.centerRowCount - 1)
     );
+    const preferredVisualColumn = preferredCaretVisualColumnRef.current ?? getVisualColumnForCaretPos(caretPos);
 
     if (caretRow < visibleStartRow) {
-      return wrappedLines[visibleStartRow]?.startCharIndex ?? caretPos;
+      return getCharIndexForVisualCellInRow(wrappedLines[visibleStartRow], text, preferredVisualColumn);
     }
 
     if (caretRow > visibleEndRow) {
-      return wrappedLines[visibleEndRow]?.endCharIndex ?? caretPos;
+      return getCharIndexForVisualCellInRow(wrappedLines[visibleEndRow], text, preferredVisualColumn);
     }
 
     return caretPos;
-  }, [caretPos, caretRow, viewport.centerRowCount, wrappedLines]);
+  }, [caretPos, caretRow, getVisualColumnForCaretPos, text, viewport.centerRowCount, wrappedLines]);
 
   useEffect(() => {
     if (activeResizeHandle || isScrollIndicatorDragging || isPointerSelecting || isViewportAnimating) return;
@@ -561,21 +594,25 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   };
 
   const getCharIndexForVisualCell = useCallback((row: WrappedLine, targetCell: number) => {
-    const rowText = text.slice(row.startCharIndex, row.endCharIndex);
-    const clampedTargetCell = Math.max(0, targetCell);
-    let traversedCellCount = 0;
-
-    for (let charIndex = 0; charIndex < rowText.length; charIndex += 1) {
-      if (traversedCellCount >= clampedTargetCell) {
-        return row.startCharIndex + charIndex;
-      }
-
-      const char = rowText[charIndex];
-      traversedCellCount += char === '\t' ? 3 : 1;
-    }
-
-    return row.endCharIndex;
+    return getCharIndexForVisualCellInRow(row, text, targetCell);
   }, [text]);
+
+  const moveCaretToWrappedRow = useCallback((targetRowIndex: number) => {
+    if (wrappedLines.length === 0) return null;
+
+    const clampedTargetRowIndex = Math.max(0, Math.min(wrappedLines.length - 1, targetRowIndex));
+    const targetRow = wrappedLines[clampedTargetRowIndex];
+    if (!targetRow) return null;
+
+    const preferredVisualColumn = preferredCaretVisualColumnRef.current ?? getVisualColumnForCaretPos(caretPos);
+    const nextCaretPos = getCharIndexForVisualCell(targetRow, preferredVisualColumn);
+    pendingAutomaticCaretPosRef.current = nextCaretPos;
+    onCaretChange?.(nextCaretPos);
+    return {
+      nextCaretPos,
+      targetRowIndex: clampedTargetRowIndex,
+    };
+  }, [caretPos, getCharIndexForVisualCell, getVisualColumnForCaretPos, onCaretChange, wrappedLines]);
 
   const handlePassiveZonePointerDown = (
     zone: 'top' | 'bottom',
@@ -597,6 +634,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
     const relativeX = event.clientX - zoneBounds.left - horizontalPaddingPx;
     const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
+    rememberPreferredCaretVisualColumn(targetCell);
     const nextCaretPos = getCharIndexForVisualCell(targetRow, targetCell);
     const nextViewportStartRow = zone === 'top'
       ? targetRowIndex
@@ -651,6 +689,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     cancelViewportAnimation();
     event.preventDefault();
 
+    const editorRoot = editorRootRef.current;
+    const rootBounds = editorRoot?.getBoundingClientRect();
+    const pointerCell = rootBounds
+      ? Math.max(0, Math.round((event.clientX - rootBounds.left - horizontalPaddingPx) / charCellWidthPx))
+      : 0;
+    rememberPreferredCaretVisualColumn(pointerCell);
     const anchorPos = getCharIndexForPointer(event.clientX, event.clientY);
     event.currentTarget.focus();
     event.currentTarget.setSelectionRange(anchorPos, anchorPos);
@@ -703,10 +747,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         const caretRow = findRowForCharIndex(caretPos, wrappedLines);
         if (caretRow > 0) {
           const prevRow = caretRow - 1;
-          const caretCol = caretPos - wrappedLines[caretRow].startCharIndex;
-          const prevRowLen = wrappedLines[prevRow].endCharIndex - wrappedLines[prevRow].startCharIndex;
-          const newCaretPos = wrappedLines[prevRow].startCharIndex + Math.min(caretCol, prevRowLen);
-          onCaretChange?.(newCaretPos);
+          moveCaretToWrappedRow(prevRow);
           if (prevRow < centerStartRow) {
             setViewportStartRow(row => Math.max(0, row - 1));
           }
@@ -719,14 +760,33 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         const caretRow = findRowForCharIndex(caretPos, wrappedLines);
         if (caretRow < wrappedLines.length - 1) {
           const nextRow = caretRow + 1;
-          const caretCol = caretPos - wrappedLines[caretRow].startCharIndex;
-          const nextRowLen = wrappedLines[nextRow].endCharIndex - wrappedLines[nextRow].startCharIndex;
-          const newCaretPos = wrappedLines[nextRow].startCharIndex + Math.min(caretCol, nextRowLen);
-          onCaretChange?.(newCaretPos);
+          moveCaretToWrappedRow(nextRow);
           if (nextRow >= effectiveCenterStartRow + viewport.centerRowCount) {
             setViewportStartRow(row => Math.min(Math.max(maxStartRef.current, row), row + 1));
           }
         }
+        return;
+      }
+
+      if (e.key === 'PageUp') {
+        e.preventDefault();
+        const pageRowDelta = Math.max(1, viewport.centerRowCount);
+        const caretRow = findRowForCharIndex(caretPos, wrappedLines);
+        const targetRow = Math.max(0, caretRow - pageRowDelta);
+        const targetViewportStartRow = Math.max(0, effectiveCenterStartRow - pageRowDelta);
+        setViewportStartRow(targetViewportStartRow);
+        moveCaretToWrappedRow(targetRow);
+        return;
+      }
+
+      if (e.key === 'PageDown') {
+        e.preventDefault();
+        const pageRowDelta = Math.max(1, viewport.centerRowCount);
+        const caretRow = findRowForCharIndex(caretPos, wrappedLines);
+        const targetRow = Math.min(wrappedLines.length - 1, caretRow + pageRowDelta);
+        const targetViewportStartRow = Math.min(maxStartRef.current, effectiveCenterStartRow + pageRowDelta);
+        setViewportStartRow(targetViewportStartRow);
+        moveCaretToWrappedRow(targetRow);
         return;
       }
     }
@@ -1392,5 +1452,32 @@ function countVisualCells(text: string): number {
     }
   }
   return cellCount;
+}
+
+function getCharIndexForVisualCellInRow(row: WrappedLine, text: string, targetCell: number): number {
+  const rowText = text.slice(row.startCharIndex, row.endCharIndex);
+  const clampedTargetCell = Math.max(0, targetCell);
+  let traversedCellCount = 0;
+
+  for (let charIndex = 0; charIndex < rowText.length; charIndex += 1) {
+    if (traversedCellCount >= clampedTargetCell) {
+      return row.startCharIndex + charIndex;
+    }
+
+    const char = rowText[charIndex];
+    traversedCellCount += char === '\t' ? 3 : 1;
+  }
+
+  return row.endCharIndex;
+}
+
+function getVisualColumnForCaretPosition(charIndex: number, wrappedLines: WrappedLine[], text: string): number {
+  if (wrappedLines.length === 0) return 0;
+
+  const row = wrappedLines[findRowForCharIndex(charIndex, wrappedLines)];
+  if (!row) return 0;
+
+  const clampedCharIndex = Math.max(row.startCharIndex, Math.min(charIndex, row.endCharIndex));
+  return countVisualCells(text.slice(row.startCharIndex, clampedCharIndex));
 }
 

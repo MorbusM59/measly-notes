@@ -169,7 +169,20 @@ export function findRowForCharIndex(
 ): number {
   for (let i = 0; i < wrappedLines.length; i++) {
     const row = wrappedLines[i];
-    if (charIndex >= row.startCharIndex && charIndex <= row.endCharIndex) {
+    const isLastRow = i === wrappedLines.length - 1;
+    const isEmptyRow = row.startCharIndex === row.endCharIndex;
+    if (charIndex < row.startCharIndex) {
+      continue;
+    }
+
+    if (charIndex < row.endCharIndex) {
+      return i;
+    }
+
+    // Wrapped rows share a boundary between the previous row's exclusive end and
+    // the next row's inclusive start. Treat that boundary as belonging to the next
+    // wrapped row unless this row is a true line end / EOF / empty logical line.
+    if (charIndex === row.endCharIndex && (row.isLineEnd || isLastRow || isEmptyRow)) {
       return i;
     }
   }
