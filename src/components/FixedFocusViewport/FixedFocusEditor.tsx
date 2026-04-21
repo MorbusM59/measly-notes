@@ -21,6 +21,7 @@ const VIEWPORT_JUMP_CURVE_EXPONENT = 1;
 const VIEWPORT_JUMP_CURVE_EXPONENT_DISTANCE_FACTOR = 0.002;
 const VIEWPORT_JUMP_CURVE_EXPONENT_MAX = 1.5;
 const VIEWPORT_JUMP_STEP_DURATION_OFFSET_MS = 0.05;
+const CARET_ANIMATION_RESUME_DELAY_MS = 200;
 
 interface ViewportAnimationStep {
   atMs: number;
@@ -169,6 +170,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [isScrollIndicatorDragging, setIsScrollIndicatorDragging] = useState(false);
   const [isPointerSelecting, setIsPointerSelecting] = useState(false);
   const [isViewportAnimating, setIsViewportAnimating] = useState(false);
+  const [isCaretAnimationPaused, setIsCaretAnimationPaused] = useState(false);
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const scrollIndicatorRef = useRef<HTMLDivElement>(null);
@@ -207,6 +209,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const previousCaretPosRef = useRef(0);
   const previousViewportStartRowRef = useRef(0);
   const lastCaretViewportOffsetRef = useRef(0);
+  const previousCaretPosForAnimationRef = useRef(caretPos);
+  const caretAnimationResumeTimeoutRef = useRef<number | null>(null);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
   const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
@@ -249,6 +253,26 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (!textareaRef) return;
     textareaRef.current = centerInputRef.current;
   }, [textareaRef]);
+
+  useEffect(() => {
+    if (caretPos === previousCaretPosForAnimationRef.current) return;
+
+    previousCaretPosForAnimationRef.current = caretPos;
+    setIsCaretAnimationPaused(true);
+    if (caretAnimationResumeTimeoutRef.current != null) {
+      window.clearTimeout(caretAnimationResumeTimeoutRef.current);
+    }
+    caretAnimationResumeTimeoutRef.current = window.setTimeout(() => {
+      setIsCaretAnimationPaused(false);
+      caretAnimationResumeTimeoutRef.current = null;
+    }, CARET_ANIMATION_RESUME_DELAY_MS);
+  }, [caretPos]);
+
+  useEffect(() => () => {
+    if (caretAnimationResumeTimeoutRef.current != null) {
+      window.clearTimeout(caretAnimationResumeTimeoutRef.current);
+    }
+  }, []);
 
   // Build model for zone slicing + layout; viewport driven entirely by centerStartRow state
   const model = useMemo(() => {
@@ -1204,7 +1228,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           {highlightSpans.map((highlight, index) => (
             <div
               key={`${highlight.topPx}-${highlight.leftPx}-${highlight.widthPx}-${index}`}
-              className={`cell-highlight cell-highlight--${highlight.kind}`}
+              className={`cell-highlight cell-highlight--${highlight.kind}${highlight.kind === 'caret' && isCaretAnimationPaused ? ' cell-highlight--caret-paused' : ''}`}
               style={{
                 top: `${highlight.topPx}px`,
                 left: `${highlight.leftPx}px`,

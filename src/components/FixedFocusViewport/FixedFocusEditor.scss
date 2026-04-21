@@ -164,6 +164,11 @@
         will-change: opacity;
       }
 
+      &.cell-highlight--caret-paused {
+        animation: none;
+        opacity: 0.7;
+      }
+
       &.cell-highlight--leading {
         background: var(--highlight-leading-bg);
       }
