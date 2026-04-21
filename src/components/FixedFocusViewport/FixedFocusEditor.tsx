@@ -204,6 +204,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const pendingAutomaticCaretPosRef = useRef<number | null>(null);
   const pendingPreferredCaretVisualColumnRef = useRef<number | null>(null);
   const latestEffectiveViewportStartRowRef = useRef(0);
+  const previousCaretPosRef = useRef(0);
+  const previousViewportStartRowRef = useRef(0);
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
   const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
@@ -466,15 +468,53 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     return caretPos;
   }, [caretPos, caretRow, getVisualColumnForCaretPos, text, viewport.centerRowCount, wrappedLines]);
 
+  const applyAutomaticCaretPos = useCallback((nextCaretPos: number) => {
+    pendingAutomaticCaretPosRef.current = nextCaretPos;
+    onCaretChange?.(nextCaretPos);
+  }, [onCaretChange]);
+
   useEffect(() => {
-    if (activeResizeHandle || isScrollIndicatorDragging || isPointerSelecting || isViewportAnimating) return;
-    if (selectionStart !== selectionEnd) return;
+    if (activeResizeHandle || isScrollIndicatorDragging || isPointerSelecting || isViewportAnimating || selectionStart !== selectionEnd) {
+      previousCaretPosRef.current = caretPos;
+      previousViewportStartRowRef.current = effectiveCenterStartRow;
+      return;
+    }
+
+    const visibleStartRow = Math.max(0, Math.min(effectiveCenterStartRow, wrappedLines.length - 1));
+    const visibleEndRow = Math.max(
+      visibleStartRow,
+      Math.min(wrappedLines.length - 1, visibleStartRow + viewport.centerRowCount - 1)
+    );
+    const caretOutsideVisibleCenter = wrappedLines.length > 0
+      && (caretRow < visibleStartRow || caretRow > visibleEndRow);
+
+    if (caretOutsideVisibleCenter) {
+      const caretMoved = caretPos !== previousCaretPosRef.current;
+      const viewportMoved = effectiveCenterStartRow !== previousViewportStartRowRef.current;
+
+      // When caret movement drives the out-of-bounds state (typing, Enter, Home/End, etc.),
+      // scroll the viewport to keep the caret in center instead of snapping caret backwards.
+      if (caretMoved && !viewportMoved) {
+        const nextViewportStartRow = caretRow < visibleStartRow
+          ? caretRow
+          : Math.max(0, caretRow - viewport.centerRowCount + 1);
+        if (nextViewportStartRow !== effectiveCenterStartRow) {
+          setViewportStartRow(nextViewportStartRow);
+          previousCaretPosRef.current = caretPos;
+          previousViewportStartRowRef.current = effectiveCenterStartRow;
+          return;
+        }
+      }
+    }
 
     const clampedCaretPos = getViewportBoundaryCaretPos(effectiveCenterStartRow);
     if (clampedCaretPos !== caretPos) {
-      onCaretChange?.(clampedCaretPos);
+      applyAutomaticCaretPos(clampedCaretPos);
     }
-  }, [activeResizeHandle, caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, isScrollIndicatorDragging, isViewportAnimating, onCaretChange, selectionEnd, selectionStart]);
+
+    previousCaretPosRef.current = caretPos;
+    previousViewportStartRowRef.current = effectiveCenterStartRow;
+  }, [activeResizeHandle, applyAutomaticCaretPos, caretPos, caretRow, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, isScrollIndicatorDragging, isViewportAnimating, selectionEnd, selectionStart, setViewportStartRow, viewport.centerRowCount, wrappedLines.length]);
 
   const handleResizeMove = useCallback((event: PointerEvent) => {
     const resizeState = resizeStateRef.current;
@@ -545,7 +585,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
       if (snappedCaretPos !== caretPos) {
-        onCaretChange?.(snappedCaretPos);
+        applyAutomaticCaretPos(snappedCaretPos);
       }
       centerInputRef.current?.focus();
     };
@@ -559,7 +599,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
     };
-  }, [caretPos, getViewportBoundaryCaretPos, handleScrollIndicatorPointerMove, isScrollIndicatorDragging, onCaretChange]);
+  }, [applyAutomaticCaretPos, caretPos, getViewportBoundaryCaretPos, handleScrollIndicatorPointerMove, isScrollIndicatorDragging]);
 
   // Keep the browser's own textarea scrolling disabled and sync viewport to the caret
   // when edits like Enter move it outside the visible center zone.
@@ -733,12 +773,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
       const clampedCaretPos = getViewportBoundaryCaretPos(nextViewportStartRow);
       if (clampedCaretPos !== caretPos) {
-        onCaretChange?.(clampedCaretPos);
+        applyAutomaticCaretPos(clampedCaretPos);
       }
     };
     editorRoot.addEventListener('wheel', onWheel, { passive: false });
     return () => editorRoot.removeEventListener('wheel', onWheel);
-  }, [cancelViewportAnimation, caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, onCaretChange, selectionEnd, selectionStart]);
+  }, [applyAutomaticCaretPos, cancelViewportAnimation, caretPos, effectiveCenterStartRow, getViewportBoundaryCaretPos, isPointerSelecting, selectionEnd, selectionStart]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!(e.shiftKey || e.ctrlKey || e.altKey)) {
