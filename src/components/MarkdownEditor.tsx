@@ -6,23 +6,25 @@ import { FixedFocusEditor } from './FixedFocusViewport';
 import './MarkdownEditor.scss';
 import './MarkdownThemes.scss';
 
-type HighlightColorKey = 'caret' | 'leading' | 'trailing' | 'background' | 'topBackground' | 'bottomBackground';
+type HighlightColorKey = 'caret' | 'selection' | 'leading' | 'trailing' | 'background' | 'topBackground' | 'bottomBackground';
 
 type HighlightColors = Record<HighlightColorKey, string>;
 
 type FixedFocusHighlightColors = HighlightColors & { grid: string };
 
 const DEFAULT_HIGHLIGHT_COLORS: HighlightColors = {
-  caret: 'rgba(255, 221, 85, 0.2)',
-  leading: 'rgba(120, 120, 120, 0.12)',
-  trailing: 'rgba(245, 184, 85, 0.16)',
-  background: 'rgba(255, 255, 255, 0)',
-  topBackground: 'rgba(255, 255, 255, 0)',
-  bottomBackground: 'rgba(255, 255, 255, 0)',
+  caret: 'rgba(0, 0, 0, 0.3)',
+  selection: 'rgba(0, 0, 0, 0.1)',
+  leading: 'rgba(0, 0, 0, 0)',
+  trailing: 'rgba(0, 0, 0, 0)',
+  background: 'rgba(0, 0, 0, 0.05)',
+  topBackground: 'rgba(0, 0, 0, 0.08)',
+  bottomBackground: 'rgba(0, 0, 0, 0.08)',
 };
 
 const HIGHLIGHT_COLOR_STORAGE_KEYS: Record<HighlightColorKey, string> = {
   caret: 'markdown-editor-highlight-caret',
+  selection: 'markdown-editor-highlight-selection',
   leading: 'markdown-editor-highlight-leading',
   trailing: 'markdown-editor-highlight-trailing',
   background: 'markdown-editor-highlight-background',
@@ -32,6 +34,7 @@ const HIGHLIGHT_COLOR_STORAGE_KEYS: Record<HighlightColorKey, string> = {
 
 const HIGHLIGHT_COLOR_LABELS: Record<HighlightColorKey, string> = {
   caret: 'C',
+  selection: 'S',
   leading: 'L',
   trailing: 'T',
   background: 'B',
@@ -41,6 +44,7 @@ const HIGHLIGHT_COLOR_LABELS: Record<HighlightColorKey, string> = {
 
 const HIGHLIGHT_COLOR_TITLES: Record<HighlightColorKey, string> = {
   caret: 'Caret box color',
+  selection: 'Selection box color',
   leading: 'Leading space box color',
   trailing: 'Trailing space box color',
   background: 'Regular box background color',
@@ -429,6 +433,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     const savedFixedFocusBottomRowCount = localStorage.getItem('markdown-editor-fixed-focus-bottom-rows');
     const savedHighlightColors: HighlightColors = {
       caret: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.caret) || DEFAULT_HIGHLIGHT_COLORS.caret,
+      selection: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.selection) || DEFAULT_HIGHLIGHT_COLORS.selection,
       leading: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.leading) || DEFAULT_HIGHLIGHT_COLORS.leading,
       trailing: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.trailing) || DEFAULT_HIGHLIGHT_COLORS.trailing,
       background: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.background) || DEFAULT_HIGHLIGHT_COLORS.background,
@@ -1602,7 +1607,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           ) : (
             <>
               <div className="highlight-color-controls">
-                {(['caret', 'leading', 'trailing', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
+                {(['caret', 'selection', 'leading', 'trailing', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
                   <button
                     key={key}
                     className={`toolbar-btn-icon color-swatch-btn${activeHighlightColorKey === key ? ' is-open' : ''}`}

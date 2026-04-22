@@ -82,10 +82,11 @@ interface IndentHighlight {
   heightPx: number;
 }
 
-type CellHighlightKind = 'caret' | 'leading' | 'trailing';
+type CellHighlightKind = 'caret' | 'selection' | 'leading' | 'trailing';
 
 interface HighlightColors {
   caret: string;
+  selection: string;
   leading: string;
   trailing: string;
   grid: string;
@@ -1078,8 +1079,20 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         const occupiedCells = new Map<number, CellHighlightKind>();
         const rowCellCount = countVisualCells(rowText);
         const visibleRowIndex = zoneStartRow + rowIndex;
+        const normalizedSelectionStart = Math.min(selectionStart, selectionEnd);
+        const normalizedSelectionEnd = Math.max(selectionStart, selectionEnd);
+        const rowSelectionStart = Math.max(row.startCharIndex, normalizedSelectionStart);
+        const rowSelectionEnd = Math.min(row.endCharIndex, normalizedSelectionEnd);
 
-        if (visibleRowIndex === caretRow) {
+        if (rowSelectionEnd > rowSelectionStart) {
+          const selectionStartCell = countVisualCells(text.slice(row.startCharIndex, rowSelectionStart));
+          const selectionEndCell = countVisualCells(text.slice(row.startCharIndex, rowSelectionEnd));
+          for (let cellIndex = selectionStartCell; cellIndex < selectionEndCell; cellIndex += 1) {
+            occupiedCells.set(cellIndex, 'selection');
+          }
+        }
+
+        if (selectionStart === selectionEnd && visibleRowIndex === caretRow) {
           const clampedCaretPos = Math.max(row.startCharIndex, Math.min(caretPos, row.endCharIndex));
           const rowPrefix = text.slice(row.startCharIndex, clampedCaretPos);
           const caretColumn = countVisualCells(rowPrefix);
@@ -1126,6 +1139,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   }, [
     caretPos,
     caretRow,
+    selectionStart,
+    selectionEnd,
     centerRows,
     centerStartRow,
     charCellWidthPx,
@@ -1234,6 +1249,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             '--grid-row-height': `${metrics.rowHeightPx}px`,
             '--grid-column-width': `${charCellWidthPx}px`,
             '--highlight-caret-bg': highlightColors?.caret,
+            '--highlight-selection-bg': highlightColors?.selection,
             '--highlight-leading-bg': highlightColors?.leading,
             '--highlight-trailing-bg': highlightColors?.trailing,
           } as React.CSSProperties}

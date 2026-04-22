@@ -149,6 +149,7 @@
     z-index: 0;
 
     --highlight-caret-bg: rgba(255, 221, 85, 0.2);
+    --highlight-selection-bg: rgba(76, 151, 255, 0.25);
     --highlight-leading-bg: rgba(120, 120, 120, 0.12);
     --highlight-trailing-bg: rgba(245, 184, 85, 0.16);
 
@@ -167,6 +168,10 @@
       &.cell-highlight--caret-paused {
         animation: none;
         opacity: 0.7;
+      }
+
+      &.cell-highlight--selection {
+        background: var(--highlight-selection-bg);
       }
 
       &.cell-highlight--leading {
@@ -288,7 +293,12 @@
         word-wrap: break-word;
         
         &::selection {
-          background-color: #b3d9ff;
+          background-color: transparent;
+          color: inherit;
+        }
+
+        &::-moz-selection {
+          background-color: transparent;
           color: inherit;
         }
       }
