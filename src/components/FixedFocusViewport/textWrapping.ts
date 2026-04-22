@@ -167,27 +167,45 @@ export function findRowForCharIndex(
   charIndex: number,
   wrappedLines: WrappedLine[]
 ): number {
-  for (let i = 0; i < wrappedLines.length; i++) {
+  if (wrappedLines.length === 0) return 0;
+
+  let low = 0;
+  let high = wrappedLines.length - 1;
+  let candidate = high;
+
+  // Find first row whose end boundary is >= charIndex.
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const row = wrappedLines[mid];
+    if (charIndex <= row.endCharIndex) {
+      candidate = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+
+  // Walk forward from candidate to resolve shared wrapped-row boundaries.
+  for (let i = candidate; i < wrappedLines.length; i += 1) {
     const row = wrappedLines[i];
     const isLastRow = i === wrappedLines.length - 1;
     const isEmptyRow = row.startCharIndex === row.endCharIndex;
+
     if (charIndex < row.startCharIndex) {
-      continue;
+      return i;
     }
 
     if (charIndex < row.endCharIndex) {
       return i;
     }
 
-    // Wrapped rows share a boundary between the previous row's exclusive end and
-    // the next row's inclusive start. Treat that boundary as belonging to the next
-    // wrapped row unless this row is a true line end / EOF / empty logical line.
+    // Shared boundary belongs to next wrapped row unless this row is terminal.
     if (charIndex === row.endCharIndex && (row.isLineEnd || isLastRow || isEmptyRow)) {
       return i;
     }
   }
-  // If not found, return last row
-  return Math.max(0, wrappedLines.length - 1);
+
+  return wrappedLines.length - 1;
 }
 
 /**

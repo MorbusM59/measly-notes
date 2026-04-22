@@ -293,7 +293,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     spacingPreset,
     contentWidthPx,
     drawableHeightPx,
-    centerStartRow,
     fontFamily,
     resolvedTopRowCount,
     resolvedBottomRowCount,
@@ -1065,7 +1064,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     };
   }, [getAutoScrollRowsPerSecond, getCharIndexForPointer, getOutsideCenterScrollForPointer, isPointerSelecting, onSelectionChange, setViewportStartRow]);
 
-  const highlightSpans = (() => {
+  const highlightSpans = useMemo(() => {
     const highlights: IndentHighlight[] = [];
     const appendZoneHighlights = (
       rows: WrappedLine[],
@@ -1124,7 +1123,21 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     appendZoneHighlights(bottomRows, layout.topHeightPx + layout.centerHeightPx, centerStartRow + centerRows.length);
 
     return highlights;
-  })();
+  }, [
+    caretPos,
+    caretRow,
+    centerRows,
+    centerStartRow,
+    charCellWidthPx,
+    horizontalPaddingPx,
+    layout.centerHeightPx,
+    layout.topHeightPx,
+    metrics.rowHeightPx,
+    text,
+    topRows,
+    topRowsInsetPx,
+    bottomRows,
+  ]);
 
   return (
     <div
