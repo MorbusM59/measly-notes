@@ -1231,7 +1231,38 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           programmaticInsertRef.current = false;
         }, 0);
       } else {
-        insertAtCursor('   ');
+        // insert three spaces at the beginning of each selected line (or current line)
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+        const lineEnd = content.indexOf('\n', end);
+        const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
+        const selected = content.substring(lineStart, actualLineEnd);
+        const lines = selected.split('\n');
+
+        const INDENT = '   ';
+        const newLines = lines.map(ln => INDENT + ln);
+        const addedPerLine = INDENT.length;
+
+        const newText = content.substring(0, lineStart) + newLines.join('\n') + content.substring(actualLineEnd);
+        const linesBeforeStart = content.substring(lineStart, start).split('\n').length;
+        const linesBeforeEnd = content.substring(lineStart, end).split('\n').length;
+        const newStart = start + addedPerLine * linesBeforeStart;
+        const newEnd = end + addedPerLine * linesBeforeEnd;
+
+        programmaticInsertRef.current = true;
+        setContent(newText);
+        handleContentChange(newText);
+
+        scheduleTimeout(() => {
+          textarea.focus();
+          setTextareaSelection(newStart, newEnd);
+          autosizeTextarea(textarea);
+          checkFormatting();
+          programmaticInsertRef.current = false;
+        }, 0);
       }
     }
   };
