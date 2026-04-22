@@ -708,6 +708,18 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       ? targetRowIndex
       : Math.max(0, targetRowIndex - viewport.centerRowCount + 1);
 
+    if (event.shiftKey) {
+      animateViewportStartRow(nextViewportStartRow, () => {
+        const nextSelectionStart = Math.min(caretPos, nextCaretPos);
+        const nextSelectionEnd = Math.max(caretPos, nextCaretPos);
+        onSelectionChange?.(nextSelectionStart, nextSelectionEnd);
+        window.requestAnimationFrame(() => {
+          centerInputRef.current?.focus();
+        });
+      });
+      return;
+    }
+
     animateViewportStartRow(nextViewportStartRow, () => {
       onCaretChange?.(nextCaretPos);
       window.requestAnimationFrame(() => {
@@ -763,7 +775,18 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       ? Math.max(0, Math.round((event.clientX - rootBounds.left - horizontalPaddingPx) / charCellWidthPx))
       : 0;
     rememberPreferredCaretVisualColumn(pointerCell);
-    const anchorPos = getCharIndexForPointer(event.clientX, event.clientY);
+    const clickedPos = getCharIndexForPointer(event.clientX, event.clientY);
+
+    if (event.shiftKey) {
+      const nextSelectionStart = Math.min(caretPos, clickedPos);
+      const nextSelectionEnd = Math.max(caretPos, clickedPos);
+      event.currentTarget.focus();
+      event.currentTarget.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+      onSelectionChange?.(nextSelectionStart, nextSelectionEnd);
+      return;
+    }
+
+    const anchorPos = clickedPos;
     event.currentTarget.focus();
     event.currentTarget.setSelectionRange(anchorPos, anchorPos);
 
