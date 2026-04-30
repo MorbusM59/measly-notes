@@ -30,12 +30,17 @@ export interface WrappedLine {
 /**
  * Compute wrapped rows for a given text and container width.
  * Returns array of wrapped lines, where each represents one visual row.
+ *
+ * @param charCellWidthPx - When provided (DOM-measured), used directly for column
+ *   calculation instead of canvas measurement. This ensures the wrap model is
+ *   consistent with the browser's actual text layout.
  */
 export function computeWrappedLines(
   text: string,
   containerWidthPx: number,
   metrics: ComputedMetrics,
-  fontFamily = '"Syne Mono", Menlo, Monaco, monospace'
+  fontFamily = '"Syne Mono", Menlo, Monaco, monospace',
+  charCellWidthPx?: number
 ): WrappedLine[] {
   const lines: WrappedLine[] = [];
   const logicalLines = text.split('\n');
@@ -66,15 +71,27 @@ export function computeWrappedLines(
           rowStart,
           containerWidthPx,
           metrics.fontSizePx,
-          fontFamily
+          fontFamily,
+          charCellWidthPx
         );
         let rowEnd = maxRowEnd;
 
         // Prefer wrapping at whitespace to better match textarea pre-wrap behavior.
+        // CSS pre-wrap keeps trailing whitespace on the current visual line (the
+        // space "falls off" the right edge but is still part of that row). The
+        // next word begins on the following row.
         if (maxRowEnd < lineCharCount) {
-          const breakPos = findWrapBreak(logicalLine, rowStart, maxRowEnd);
-          if (breakPos > rowStart) {
-            rowEnd = breakPos;
+          const charAtBoundary = logicalLine[maxRowEnd];
+          const isAtWordBoundary = charAtBoundary === ' ' || charAtBoundary === '\t';
+          if (isAtWordBoundary) {
+            // Include the trailing space/tab in this row so that the caret
+            // position after it maps to this row, matching browser behaviour.
+            rowEnd = maxRowEnd + 1;
+          } else {
+            const breakPos = findWrapBreak(logicalLine, rowStart, maxRowEnd);
+            if (breakPos > rowStart) {
+              rowEnd = breakPos;
+            }
           }
         }
 
@@ -129,8 +146,27 @@ function findMaxFittingEnd(
   rowStart: number,
   maxWidthPx: number,
   fontSizePx: number,
-  fontFamily: string
+  fontFamily: string,
+  charCellWidthPx?: number
 ): number {
+  // When a DOM-measured cell width is provided, iterate through characters
+  // counting visual cells (accounting for tabs = 3 cells, others = 1 cell).
+  if (charCellWidthPx && charCellWidthPx > 0) {
+    const maxCells = Math.floor(maxWidthPx / charCellWidthPx);
+    let cellsUsed = 0;
+
+    for (let i = rowStart; i < line.length; i++) {
+      const char = line[i];
+      const cellsForChar = char === '\t' ? 3 : 1;
+      if (cellsUsed + cellsForChar > maxCells) {
+        return i;
+      }
+      cellsUsed += cellsForChar;
+    }
+
+    return line.length;
+  }
+
   let low = rowStart + 1;
   let high = line.length;
   let best = rowStart + 1;

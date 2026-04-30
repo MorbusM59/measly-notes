@@ -47,6 +47,7 @@ export class FixedFocusViewportModel {
   private fontFamily: string;
   private topRowCount: number;
   private bottomRowCount: number;
+  private charCellWidthPx: number | undefined;
 
   // Viewport state
   private viewport: ViewportState = {
@@ -74,12 +75,14 @@ export class FixedFocusViewportModel {
     totalHeightPx = 400,
     fontFamily = '"Syne Mono", Menlo, Monaco, monospace',
     topRowCount = 3,
-    bottomRowCount = 3
+    bottomRowCount = 3,
+    charCellWidthPx?: number
   ) {
     this.metrics = computeMetrics(fontSizePx, spacingPreset as any);
     this.fontFamily = fontFamily;
     this.topRowCount = topRowCount;
     this.bottomRowCount = bottomRowCount;
+    this.charCellWidthPx = charCellWidthPx;
     this.layout.totalHeightPx = totalHeightPx;
     this.recalculateLayout(containerWidthPx);
     this.updateWrapping(containerWidthPx);
@@ -276,7 +279,8 @@ export class FixedFocusViewportModel {
       this.text,
       containerWidthPx,
       this.metrics,
-      this.fontFamily
+      this.fontFamily,
+      this.charCellWidthPx
     );
   }
 

@@ -284,7 +284,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       drawableHeightPx,
       fontFamily,
       resolvedTopRowCount,
-      resolvedBottomRowCount
+      resolvedBottomRowCount,
+      charCellWidthPx
     );
     m.setText(text, contentWidthPx);
     return m;
@@ -297,6 +298,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     fontFamily,
     resolvedTopRowCount,
     resolvedBottomRowCount,
+    charCellWidthPx,
   ]);
 
   const wrappedLines = model.getWrappedLines();
