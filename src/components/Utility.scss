@@ -1,48 +1,115 @@
 :root {
-  --btn-bg: #f0f0f0;
-  --btn-border: #ccc;
-  --btn-hover-bg: #e0e0e0;
-  --danger-bg: #fff5f5;
-  --danger-border: #f5c2c2;
-  --danger-color: #8b0000;
-  --danger-hover-bg: #ffecec;
-  --utility-btn-radius: 6px;
+  --utility-btn-bg: #f6f6f6;
+  --utility-btn-border: #d5d5d5;
+  --utility-btn-hover-bg: #ededed;
+  --utility-btn-danger-bg: #fff5f5;
+  --utility-btn-danger-border: #e8c7c7;
+  --utility-btn-danger-hover-bg: #ffeaea;
+  --utility-flyout-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
 }
 
-.utility-controls {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+.utility-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  justify-content: flex-start;
   gap: 4px;
-  padding: 4px;
-}
-
-.utility-controls .toolbar-btn {
   width: 100%;
-  padding: 8px 10px;
+  min-height: 100%;
+  padding: 4px;
+  box-sizing: border-box;
 }
 
-.utility-controls .toolbar-btn.danger {
-  background: var(--danger-bg);
-  border-color: var(--danger-border);
-  color: var(--danger-color);
+.utility-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--utility-btn-border);
+  border-radius: 6px;
+  background: var(--utility-btn-bg);
+  cursor: pointer;
+  flex: 0 0 auto;
 }
 
-.utility-controls .toolbar-btn.danger:hover {
-  background: #ffecec;
+.utility-btn:hover {
+  background: var(--utility-btn-hover-bg);
 }
 
-.sync-btn {
-  border-radius: var(--utility-btn-radius) 0 0 0;
+.utility-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-.import-btn {
-  border-radius: 0 var(--utility-btn-radius)0 0;
+.utility-btn--danger {
+  background: var(--utility-btn-danger-bg);
+  border-color: var(--utility-btn-danger-border);
 }
 
-.pdf-btn {
-  border-radius: 0 0 0 var(--utility-btn-radius);
+.utility-btn--danger:hover {
+  background: var(--utility-btn-danger-hover-bg);
 }
 
-.trash-btn {
-  border-radius: 0 0 var(--utility-btn-radius) 0;
+.utility-btn--armed {
+  background: var(--utility-btn-danger-bg);
+  border-color: var(--utility-btn-danger-border);
+  box-shadow: inset 0 0 0 2px var(--utility-btn-danger-border);
 }
+
+.utility-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  background: #4b4b4b;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.utility-icon--sync {
+  mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M12 5V2L8 6l4 4V7c2.76 0 5 2.24 5 5 0 1.01-.3 1.95-.83 2.74l1.46 1.46A6.96 6.96 0 0 0 19 12c0-3.87-3.13-7-7-7Zm-5.17.26L5.37 3.8A6.96 6.96 0 0 0 5 12c0 3.87 3.13 7 7 7v3l4-4-4-4v3c-2.76 0-5-2.24-5-5 0-1.01.3-1.95.83-2.74Z"/></svg>');
+}
+
+.utility-icon--import {
+  mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M5 20h14v-2H5v2Zm7-16-5.5 5.5 1.42 1.42L11 7.84V16h2V7.84l3.08 3.08 1.42-1.42L12 4Z"/></svg>');
+}
+
+.utility-icon--pdf {
+  mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M6 2h9l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm8 1.5V8h4.5L14 3.5ZM8 13h2.5a2.5 2.5 0 1 0 0-5H8v10h2v-3h.5A2.5 2.5 0 0 0 13 12.5 2.5 2.5 0 0 0 10.5 10H10v3Zm6-5h2.5a2.5 2.5 0 1 1 0 5H16v3h-2V8Zm2 2v3h.5a1.5 1.5 0 0 0 0-3H16Z"/></svg>');
+}
+
+.utility-icon--clean {
+  mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M9 3h6l1 2h5v2H3V5h5l1-2Zm1 7h2v8h-2v-8Zm4 0h2v8h-2v-8ZM6 8h12l-1 13H7L6 8Z"/></svg>');
+}
+
+.utility-icon--history {
+  mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M13 3a9 9 0 1 0 8.95 10h-2.02A7 7 0 1 1 13 5V1l5 4-5 4V6a7 7 0 0 1 0 14 7 7 0 0 1-6.31-3.97l-1.8.87A9 9 0 0 0 13 21a9 9 0 0 0 0-18Zm-1 5h2v5l4.25 2.52-1 1.64L12 14V8Z"/></svg>');
+}
+
+.utility-history-group {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 10;
+}
+
+.history-count-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #cc2b2b;
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+

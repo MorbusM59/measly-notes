@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Note } from '../shared/types';
+import {
+  ArchivedParagraphHistoryEntry,
+  EditHistoryEntry,
+  EditSnapshot,
+  Note,
+  NoteEditHistoryState,
+  RecentEditHistoryEntry,
+} from '../shared/types';
 import { FixedFocusEditor } from './FixedFocusViewport';
 import './MarkdownEditor.scss';
 import './MarkdownThemes.scss';
@@ -11,6 +18,14 @@ type HighlightColorKey = 'caret' | 'selection' | 'leading' | 'trailing' | 'backg
 type HighlightColors = Record<HighlightColorKey, string>;
 
 type FixedFocusHighlightColors = HighlightColors & { grid: string };
+type HistoryBoundaryReason = 'space' | 'enter' | 'delete-boundary' | 'paste' | 'delete-selection' | 'tab';
+
+const EMPTY_EDIT_HISTORY_STATE: NoteEditHistoryState = {
+  recent: [],
+  archived: [],
+  redo: [],
+  storedChangeCount: 0,
+};
 
 const DEFAULT_HIGHLIGHT_COLORS: HighlightColors = {
   caret: 'rgba(0, 0, 0, 0.3)',
@@ -141,12 +156,130 @@ function getHighlightLabelColor(color: string): string {
   return luminance > 0.65 ? '#111' : '#fff';
 }
 
+function cloneEmptyEditHistoryState(): NoteEditHistoryState {
+  return {
+    recent: [],
+    archived: [],
+    redo: [],
+    storedChangeCount: 0,
+  };
+}
+
+function countLineBreaks(text: string): number {
+  return (text.match(/\n/g) || []).length;
+}
+
+function splitTextIntoLines(text: string): string[] {
+  return text.split('\n');
+}
+
+function createArchivedParagraphEntry(entry: RecentEditHistoryEntry): ArchivedParagraphHistoryEntry | null {
+  if (countLineBreaks(entry.after.content) <= countLineBreaks(entry.before.content)) return null;
+
+  const beforeLines = splitTextIntoLines(entry.before.content);
+  const afterLines = splitTextIntoLines(entry.after.content);
+
+  let startLine = 0;
+  while (
+    startLine < beforeLines.length
+    && startLine < afterLines.length
+    && beforeLines[startLine] === afterLines[startLine]
+  ) {
+    startLine += 1;
+  }
+
+  let commonSuffix = 0;
+  while (
+    commonSuffix < (beforeLines.length - startLine)
+    && commonSuffix < (afterLines.length - startLine)
+    && beforeLines[beforeLines.length - 1 - commonSuffix] === afterLines[afterLines.length - 1 - commonSuffix]
+  ) {
+    commonSuffix += 1;
+  }
+
+  const beforeEndLine = beforeLines.length - commonSuffix;
+  const afterEndLine = afterLines.length - commonSuffix;
+  if (beforeEndLine < startLine || afterEndLine < startLine) return null;
+
+  return {
+    storage: 'archived',
+    kind: 'paragraph',
+    reason: entry.reason,
+    startLine,
+    beforeEndLine,
+    afterEndLine,
+    beforeLines: beforeLines.slice(startLine, beforeEndLine),
+    afterLines: afterLines.slice(startLine, afterEndLine),
+    beforeSelection: {
+      selectionStart: entry.before.selectionStart,
+      selectionEnd: entry.before.selectionEnd,
+    },
+    afterSelection: {
+      selectionStart: entry.after.selectionStart,
+      selectionEnd: entry.after.selectionEnd,
+    },
+    timestamp: entry.timestamp,
+  };
+}
+
+function addRecentHistoryEntry(history: NoteEditHistoryState, entry: RecentEditHistoryEntry): NoteEditHistoryState {
+  const nextRecent = [...history.recent, entry];
+  const nextArchived = [...history.archived];
+  if (nextRecent.length > 10) {
+    const shifted = nextRecent.shift();
+    if (shifted) {
+      const archivedEntry = createArchivedParagraphEntry(shifted);
+      if (archivedEntry) {
+        nextArchived.push(archivedEntry);
+      }
+    }
+  }
+
+  return {
+    recent: nextRecent,
+    archived: nextArchived,
+    redo: [],
+    storedChangeCount: nextRecent.length + nextArchived.length,
+  };
+}
+
+function replaceLineRange(lines: string[], startLine: number, endLineExclusive: number, replacement: string[]): string[] {
+  return [
+    ...lines.slice(0, startLine),
+    ...replacement,
+    ...lines.slice(endLineExclusive),
+  ];
+}
+
+function applyHistoryEntry(currentContent: string, entry: EditHistoryEntry, direction: 'undo' | 'redo'): EditSnapshot {
+  if (entry.kind === 'full') {
+    return direction === 'undo' ? entry.before : entry.after;
+  }
+
+  const currentLines = splitTextIntoLines(currentContent);
+  if (direction === 'undo') {
+    return {
+      content: replaceLineRange(currentLines, entry.startLine, entry.afterEndLine, entry.beforeLines).join('\n'),
+      selectionStart: entry.beforeSelection.selectionStart,
+      selectionEnd: entry.beforeSelection.selectionEnd,
+    };
+  }
+
+  return {
+    content: replaceLineRange(currentLines, entry.startLine, entry.beforeEndLine, entry.afterLines).join('\n'),
+    selectionStart: entry.afterSelection.selectionStart,
+    selectionEnd: entry.afterSelection.selectionEnd,
+  };
+}
+
 interface MarkdownEditorProps {
   note: Note | null;
   onNoteUpdate?: (note: Note) => void;
   showPreview: boolean;
   onTogglePreview: (next: boolean) => void;
   hasAnyNotes?: boolean;
+  onEditHistoryCountChange?: (count: number) => void;
+  historyResetSignal?: number;
 }
 
 type EditState = {
@@ -157,7 +290,15 @@ type EditState = {
 
 const EDIT_STATE_KEY_PREFIX = 'md-edit-state-';
 
-export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpdate, showPreview, onTogglePreview, hasAnyNotes }) => {
+export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
+  note,
+  onNoteUpdate,
+  showPreview,
+  onTogglePreview,
+  hasAnyNotes,
+  onEditHistoryCountChange,
+  historyResetSignal = 0,
+}) => {
   const [content, setContent] = useState('');
   const [caretPos, setCaretPos] = useState(0);
   const [selectionStart, setSelectionStart] = useState(0);
@@ -186,6 +327,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   const [highlightColorInputInvalid, setHighlightColorInputInvalid] = useState(false);
 
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
+  const [editHistoryCount, setEditHistoryCount] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const editorContentRef = useRef<HTMLDivElement | null>(null);
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,6 +345,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   // Track all transient timeouts so they can be cleared on unmount
   const pendingTimeoutsRef = useRef<number[]>([]);
   const programmaticInsertRef = useRef(false);
+  const editHistoryRef = useRef<NoteEditHistoryState>(cloneEmptyEditHistoryState());
+  const lastCommittedSnapshotRef = useRef<EditSnapshot>({ content: '', selectionStart: 0, selectionEnd: 0 });
+  const pendingHistoryBoundaryRef = useRef<{ reason: HistoryBoundaryReason; before: EditSnapshot } | null>(null);
 
   const scheduleTimeout = (cb: () => void, ms: number) => {
     const id = window.setTimeout(cb, ms);
@@ -223,11 +368,96 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     setCaretPos(end);
   }, []);
 
+  const buildSnapshot = useCallback((snapshotContent: string, start: number, end: number): EditSnapshot => ({
+    content: snapshotContent,
+    selectionStart: start,
+    selectionEnd: end,
+  }), []);
+
+  const persistEditHistory = useCallback(async (noteId: number, history: NoteEditHistoryState) => {
+    try {
+      await window.electronAPI.saveNoteEditHistory(noteId, history);
+    } catch (err) {
+      console.warn('saveNoteEditHistory failed', err);
+    }
+  }, []);
+
+  const replaceEditHistory = useCallback((nextHistory: NoteEditHistoryState) => {
+    editHistoryRef.current = nextHistory;
+    setEditHistoryCount(nextHistory.storedChangeCount);
+    if (currentNoteIdRef.current != null) {
+      void persistEditHistory(currentNoteIdRef.current, nextHistory);
+    }
+  }, [persistEditHistory]);
+
+  const recordHistoryEntry = useCallback((reason: HistoryBoundaryReason, before: EditSnapshot, after: EditSnapshot) => {
+    if (!note || before.content === after.content) {
+      lastCommittedSnapshotRef.current = after;
+      return;
+    }
+
+    const nextHistory = addRecentHistoryEntry(editHistoryRef.current, {
+      storage: 'recent',
+      kind: 'full',
+      reason,
+      before,
+      after,
+      timestamp: new Date().toISOString(),
+    });
+    replaceEditHistory(nextHistory);
+    lastCommittedSnapshotRef.current = after;
+  }, [note, replaceEditHistory]);
+
   const syncSelectionState = useCallback((start: number, end: number) => {
     setSelectionStart(start);
     setSelectionEnd(end);
     setCaretPos(end);
   }, []);
+
+  useEffect(() => {
+    onEditHistoryCountChange?.(editHistoryCount);
+  }, [editHistoryCount, onEditHistoryCountChange]);
+
+  useEffect(() => {
+    if (!note) {
+      editHistoryRef.current = cloneEmptyEditHistoryState();
+      setEditHistoryCount(0);
+      pendingHistoryBoundaryRef.current = null;
+      lastCommittedSnapshotRef.current = { content: '', selectionStart: 0, selectionEnd: 0 };
+      return;
+    }
+
+    const noteId = note.id;
+    let isCancelled = false;
+    void window.electronAPI.getNoteEditHistory(noteId).then((history) => {
+      if (isCancelled) return;
+      const normalizedHistory = history ?? cloneEmptyEditHistoryState();
+      editHistoryRef.current = normalizedHistory;
+      setEditHistoryCount(normalizedHistory.storedChangeCount ?? 0);
+    }).catch((err) => {
+      console.warn('getNoteEditHistory failed', err);
+      if (isCancelled) return;
+      editHistoryRef.current = cloneEmptyEditHistoryState();
+      setEditHistoryCount(0);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [note]);
+
+  useEffect(() => {
+    editHistoryRef.current = cloneEmptyEditHistoryState();
+    setEditHistoryCount(0);
+    pendingHistoryBoundaryRef.current = null;
+    lastCommittedSnapshotRef.current = buildSnapshot(content, selectionStart, selectionEnd);
+  }, [buildSnapshot, historyResetSignal]);
+
+  useEffect(() => {
+    if (lastCommittedSnapshotRef.current.content === content) {
+      lastCommittedSnapshotRef.current = buildSnapshot(content, selectionStart, selectionEnd);
+    }
+  }, [buildSnapshot, content, selectionEnd, selectionStart]);
 
   // Editor style options — Syne and Red Hat (display labels simplified).
   const editorStyleOptions: { key: string; label: string; family: string }[] = [
@@ -358,6 +588,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       window.electronAPI.loadNote(note.id).then(noteContent => {
         lastSavedContentRef.current = noteContent;
         setContent(noteContent);
+        pendingHistoryBoundaryRef.current = null;
+        lastCommittedSnapshotRef.current = { content: noteContent, selectionStart: 0, selectionEnd: 0 };
         lastSavedTitleRef.current = note.title;
         setEditViewportStartRow(0);
         setCaretPos(0);
@@ -405,6 +637,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       lastSavedContentRef.current = '';
       lastSavedTitleRef.current = '';
       currentNoteIdRef.current = null;
+      pendingHistoryBoundaryRef.current = null;
+      lastCommittedSnapshotRef.current = { content: '', selectionStart: 0, selectionEnd: 0 };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note]);
@@ -865,17 +1099,21 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }, 0);
   };
 
-  const insertAtCursor = (text: string) => {
+  const insertAtCursor = (text: string, historyReason?: HistoryBoundaryReason) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const newText = content.substring(0, start) + text + content.substring(end);
+    const afterSnapshot = buildSnapshot(newText, start + text.length, start + text.length);
     // mark this as a programmatic insert so autosize/ensureCaretVisible
     // triggered by the content-change effect do not run and cause jumps
     programmaticInsertRef.current = true;
     setContent(newText);
     handleContentChange(newText);
+    if (historyReason) {
+      recordHistoryEntry(historyReason, lastCommittedSnapshotRef.current, afterSnapshot);
+    }
     scheduleTimeout(() => {
       textarea.focus();
       setTextareaSelection(start + text.length, start + text.length);
@@ -995,12 +1233,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
     }
     const sanitized = sanitizePastedText(plain);
     if (sanitized) {
-      insertAtCursor(sanitized);
+      insertAtCursor(sanitized, 'paste');
     }
   };
 
   // content change handler with debounced save
-  const handleContentChange = (newContent: string) => {
+  const handleContentChange = useCallback((newContent: string) => {
     setContent(newContent);
 
     if (autoSaveTimeoutRef.current) {
@@ -1016,7 +1254,98 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         void autoSave();
       }, 1000) as unknown as ReturnType<typeof setTimeout>;
     }
-  };
+  }, [autoSave, isOnFirstLine, note, scheduleTimeout, showPreview]);
+
+  const finalizePendingNativeBoundary = useCallback((newContent: string, newSelectionStart: number, newSelectionEnd: number) => {
+    const pendingBoundary = pendingHistoryBoundaryRef.current;
+    if (!pendingBoundary) return;
+    pendingHistoryBoundaryRef.current = null;
+    const afterSnapshot = buildSnapshot(newContent, newSelectionStart, newSelectionEnd);
+    recordHistoryEntry(pendingBoundary.reason, pendingBoundary.before, afterSnapshot);
+  }, [buildSnapshot, recordHistoryEntry]);
+
+  const applySnapshotProgrammatically = useCallback((snapshot: EditSnapshot) => {
+    const textarea = textareaRef.current;
+    programmaticInsertRef.current = true;
+    pendingHistoryBoundaryRef.current = null;
+    handleContentChange(snapshot.content);
+    syncSelectionState(snapshot.selectionStart, snapshot.selectionEnd);
+    lastCommittedSnapshotRef.current = snapshot;
+
+    scheduleTimeout(() => {
+      if (textarea) {
+        textarea.focus();
+        setTextareaSelection(snapshot.selectionStart, snapshot.selectionEnd);
+        autosizeTextarea(textarea);
+        ensureCaretVisible();
+        checkFormatting();
+      }
+      programmaticInsertRef.current = false;
+    }, 0);
+  }, [autosizeTextarea, checkFormatting, ensureCaretVisible, handleContentChange, setTextareaSelection, syncSelectionState]);
+
+  const handleUndo = useCallback(() => {
+    const history = editHistoryRef.current;
+    if (history.recent.length === 0 && history.archived.length === 0) return;
+
+    let entry: EditHistoryEntry;
+    let nextHistory: NoteEditHistoryState;
+    if (history.recent.length > 0) {
+      entry = history.recent[history.recent.length - 1];
+      nextHistory = {
+        recent: history.recent.slice(0, -1),
+        archived: history.archived,
+        redo: [...history.redo, entry],
+        storedChangeCount: (history.recent.length - 1) + history.archived.length,
+      };
+    } else {
+      entry = history.archived[history.archived.length - 1];
+      nextHistory = {
+        recent: history.recent,
+        archived: history.archived.slice(0, -1),
+        redo: [...history.redo, entry],
+        storedChangeCount: history.recent.length + (history.archived.length - 1),
+      };
+    }
+
+    replaceEditHistory(nextHistory);
+    applySnapshotProgrammatically(applyHistoryEntry(content, entry, 'undo'));
+  }, [applySnapshotProgrammatically, content, replaceEditHistory]);
+
+  const handleRedo = useCallback(() => {
+    const history = editHistoryRef.current;
+    if (history.redo.length === 0) return;
+
+    const entry = history.redo[history.redo.length - 1];
+    let restoredHistory: NoteEditHistoryState;
+    if (entry.storage === 'recent' && entry.kind === 'full') {
+      restoredHistory = addRecentHistoryEntry({
+        recent: history.recent,
+        archived: history.archived,
+        redo: history.redo.slice(0, -1),
+        storedChangeCount: history.recent.length + history.archived.length,
+      }, entry);
+      restoredHistory = { ...restoredHistory, redo: history.redo.slice(0, -1) };
+    } else {
+      const nextArchived = [...history.archived, entry];
+      restoredHistory = {
+        recent: history.recent,
+        archived: nextArchived,
+        redo: history.redo.slice(0, -1),
+        storedChangeCount: history.recent.length + nextArchived.length,
+      };
+    }
+
+    replaceEditHistory(restoredHistory);
+    applySnapshotProgrammatically(applyHistoryEntry(content, entry, 'redo'));
+  }, [applySnapshotProgrammatically, content, replaceEditHistory]);
+
+  const requestHistoryBoundary = useCallback((reason: HistoryBoundaryReason) => {
+    pendingHistoryBoundaryRef.current = {
+      reason,
+      before: lastCommittedSnapshotRef.current,
+    };
+  }, []);
 
   const handleTextareaKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
@@ -1031,6 +1360,21 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
   };
 
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!showPreview && (e.ctrlKey || e.metaKey) && !e.altKey) {
+      const lowerKey = e.key.toLowerCase();
+      if (lowerKey === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      if (lowerKey === 'y' || (lowerKey === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !showPreview) {
       // New behaviour:
       // - Enter: continue indentation and continue list (bullets keep '-'/'*'/'+', numbered lists increment).
@@ -1060,8 +1404,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const trimmedBefore = stripTrailingWhitespace(currentLineBeforeCursor);
         const newText = sourceText.substring(0, lineStart) + trimmedBefore + '\n\n' + sourceText.substring(end);
         const newCursorPos = lineStart + trimmedBefore.length + 2; // after the two newlines
+        const afterSnapshot = buildSnapshot(newText, newCursorPos, newCursorPos);
         programmaticInsertRef.current = true;
         handleContentChange(newText);
+        recordHistoryEntry('enter', lastCommittedSnapshotRef.current, afterSnapshot);
         syncSelectionState(newCursorPos, newCursorPos);
         scheduleTimeout(() => {
           textarea.focus();
@@ -1078,8 +1424,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const insert = '  \n' + leadingWhitespace;
         const newText = sourceText.substring(0, lineStart) + trimmedBefore + insert + sourceText.substring(end);
         const newCursorPos = lineStart + trimmedBefore.length + 3 + leadingWhitespace.length;
+        const afterSnapshot = buildSnapshot(newText, newCursorPos, newCursorPos);
         programmaticInsertRef.current = true;
         handleContentChange(newText);
+        recordHistoryEntry('enter', lastCommittedSnapshotRef.current, afterSnapshot);
         syncSelectionState(newCursorPos, newCursorPos);
         scheduleTimeout(() => {
           textarea.focus();
@@ -1104,8 +1452,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
       const insert = '\n' + leadingWhitespace + markerText;
       const newText = sourceText.substring(0, lineStart) + trimmedBefore + insert + sourceText.substring(end);
       const newCursorPos = lineStart + trimmedBefore.length + 1 + leadingWhitespace.length + markerText.length;
+      const afterSnapshot = buildSnapshot(newText, newCursorPos, newCursorPos);
       programmaticInsertRef.current = true;
       handleContentChange(newText);
+      recordHistoryEntry('enter', lastCommittedSnapshotRef.current, afterSnapshot);
       syncSelectionState(newCursorPos, newCursorPos);
       scheduleTimeout(() => {
         textarea.focus();
@@ -1137,9 +1487,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           // First line: remove it and place cursor at start
           const newLines = lines.slice(1);
           const newText = newLines.join('\n');
+          const afterSnapshot = buildSnapshot(newText, 0, 0);
           programmaticInsertRef.current = true;
           setContent(newText);
           handleContentChange(newText);
+          recordHistoryEntry('delete-boundary', lastCommittedSnapshotRef.current, afterSnapshot);
           scheduleTimeout(() => {
             textarea.focus();
             setTextareaSelection(0, 0);
@@ -1169,10 +1521,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
           newCursorPos += newLines[i].length + 1; // include newline
         }
         newCursorPos += prevTrimmed.length;
+        const afterSnapshot = buildSnapshot(newText, newCursorPos, newCursorPos);
 
         programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
+        recordHistoryEntry('delete-boundary', lastCommittedSnapshotRef.current, afterSnapshot);
         scheduleTimeout(() => {
           textarea.focus();
           setTextareaSelection(newCursorPos, newCursorPos);
@@ -1182,6 +1536,38 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         }, 0);
         return;
       }
+    }
+
+    if (!showPreview && (e.key === 'Backspace' || e.key === 'Delete')) {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+
+      if (start !== end) {
+        requestHistoryBoundary('delete-selection');
+        return;
+      }
+
+      if (e.key === 'Backspace' && start > 0) {
+        const deletedChar = content[start - 1];
+        if (deletedChar === ' ' || deletedChar === '\n') {
+          requestHistoryBoundary('delete-boundary');
+        }
+        return;
+      }
+
+      if (e.key === 'Delete' && start < content.length) {
+        const deletedChar = content[start];
+        if (deletedChar === ' ' || deletedChar === '\n') {
+          requestHistoryBoundary('delete-boundary');
+        }
+        return;
+      }
+    }
+
+    if (!showPreview && e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      requestHistoryBoundary('space');
     }
 
     if (e.key === 'Tab' && !showPreview) {
@@ -1220,11 +1606,17 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         });
 
         const newText = content.substring(0, lineStart) + newLines.join('\n') + content.substring(actualLineEnd);
+        const afterSnapshot = buildSnapshot(
+          newText,
+          Math.max(0, start - removedBeforeStart),
+          Math.max(0, end - removedBeforeEnd)
+        );
         // mark as programmatic change to avoid the autosize/ensureCaretVisible
         // effect from running and jumping the scroll; run manual reflow instead
         programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
+        recordHistoryEntry('tab', lastCommittedSnapshotRef.current, afterSnapshot);
 
         scheduleTimeout(() => {
           textarea.focus();
@@ -1256,10 +1648,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
         const linesBeforeEnd = content.substring(lineStart, end).split('\n').length;
         const newStart = start + addedPerLine * linesBeforeStart;
         const newEnd = end + addedPerLine * linesBeforeEnd;
+        const afterSnapshot = buildSnapshot(newText, newStart, newEnd);
 
         programmaticInsertRef.current = true;
         setContent(newText);
         handleContentChange(newText);
+        recordHistoryEntry('tab', lastCommittedSnapshotRef.current, afterSnapshot);
 
         scheduleTimeout(() => {
           textarea.focus();
@@ -1703,6 +2097,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ note, onNoteUpda
             onBottomRowCountChange={handleFixedFocusBottomRowCountChange}
             onTextChange={(newText, newSelectionStart, newSelectionEnd) => {
               handleContentChange(newText);
+              finalizePendingNativeBoundary(newText, newSelectionStart, newSelectionEnd);
               syncSelectionState(newSelectionStart, newSelectionEnd);
               checkCursorPosition();
             }}

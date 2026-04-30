@@ -14,10 +14,11 @@ import {
 import './Shared.scss';
 import './App.scss';
 import { SuggestedPanel } from './SuggestedPanel';
-import Utility from './Utility';
+import { Utility } from './Utility';
 
 export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [selectedNoteHistoryCount, setSelectedNoteHistoryCount] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [sidebarNoteUpdate, setSidebarNoteUpdate] = useState<Note | null>(null);
@@ -65,6 +66,7 @@ export const App: React.FC = () => {
   const [showPreview, setShowPreview] = useState<boolean>(() => {
     return localStorage.getItem('markdown-show-preview') === 'true';
   });
+  const [historyResetSignal, setHistoryResetSignal] = useState(0);
 
   const appRef = useRef<HTMLDivElement | null>(null);
   const isMountedRef = useRef(true);
@@ -192,6 +194,7 @@ export const App: React.FC = () => {
 
     if (!isMountedRef.current) return;
     setSelectedNote(note);
+    setSelectedNoteHistoryCount(0);
     // Ensure the sidebar shows the latest view when creating a new note
     setViewMode('latest');
     setRefreshKey(k => k + 1);
@@ -204,7 +207,23 @@ export const App: React.FC = () => {
     } catch (err) {
       console.warn('requestForceSave failed on note select', err);
     }
-    if (isMountedRef.current) setSelectedNote(note);
+    if (isMountedRef.current) {
+      setSelectedNote(note);
+      setSelectedNoteHistoryCount(0);
+    }
+  };
+
+  const handleClearCurrentHistory = async () => {
+    if (!selectedNote) return;
+    await window.electronAPI.clearNoteEditHistory(selectedNote.id);
+    setSelectedNoteHistoryCount(0);
+    setHistoryResetSignal((value) => value + 1);
+  };
+
+  const handleClearAllHistory = async () => {
+    await window.electronAPI.clearAllNoteEditHistories();
+    setSelectedNoteHistoryCount(0);
+    setHistoryResetSignal((value) => value + 1);
   };
 
   const handleNoteUpdate = (updatedNote: Note) => {
@@ -584,7 +603,15 @@ export const App: React.FC = () => {
       {/* Utility fixed */}
       <div className="utility-grid" style={{ gridArea: 'utility' }}>
         <div className="utility-area">
-          <Utility onActionComplete={() => setSidebarRefreshTrigger(t => t + 1)} onExportPdf={handleExportPdf} />
+          <Utility
+            onActionComplete={() => setSidebarRefreshTrigger(t => t + 1)}
+            onExportPdf={handleExportPdf}
+            currentHistoryCount={selectedNoteHistoryCount}
+            hasSelectedNote={selectedNote != null}
+            onClearCurrentHistory={handleClearCurrentHistory}
+            onClearAllHistory={handleClearAllHistory}
+          />
+
         </div>
       </div>
 
@@ -596,6 +623,8 @@ export const App: React.FC = () => {
           showPreview={showPreview}
           onTogglePreview={(next: boolean) => togglePreview(next)}
           hasAnyNotes={hasAnyNotes}
+          onEditHistoryCountChange={setSelectedNoteHistoryCount}
+          historyResetSignal={historyResetSignal}
         />
       </div>
     </div>
