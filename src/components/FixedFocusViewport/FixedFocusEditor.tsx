@@ -204,6 +204,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     steps: ViewportAnimationStep[];
   } | null>(null);
   const preferredCaretVisualColumnRef = useRef<number | null>(null);
+  const boundaryCaretRowPreferenceRef = useRef<number | null>(null);
   const pendingAutomaticCaretPosRef = useRef<number | null>(null);
   const pendingPreferredCaretVisualColumnRef = useRef<number | null>(null);
   const latestEffectiveViewportStartRowRef = useRef(0);
@@ -280,7 +281,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   // - rightmost 1 column is the scrollbar indicator
   // - next 2 columns are reserved visual-only columns (no text)
   // - text wraps within the remaining columns
-  const totalColumnCount = Math.max(1, Math.floor(contentWidthPx / charCellWidthPx));
+  // Use a tiny safety margin so sub-pixel measurement drift does not create
+  // an extra phantom terminal column at soft-wrap boundaries.
+  const wrapSafetyPx = 1;
+  const totalColumnCount = Math.max(1, Math.floor((contentWidthPx - wrapSafetyPx) / charCellWidthPx));
   const gridColumnCount = Math.max(0, totalColumnCount - 1);
   const reservedVisualOnlyColumns = 2;
   const textColumnCount = Math.max(1, gridColumnCount - reservedVisualOnlyColumns);
@@ -316,7 +320,11 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
   const wrappedLines = model.getWrappedLines();
   const provisionalViewport = model.getViewport();
-  const caretRow = findRowForCharIndex(caretPos, wrappedLines);
+  const caretRow = resolveRowForCaretIndex(
+    caretPos,
+    wrappedLines,
+    boundaryCaretRowPreferenceRef.current
+  );
 
   const maxStart = Math.max(0, wrappedLines.length - provisionalViewport.centerRowCount);
   const maxViewportStartRow = Math.max(0, wrappedLines.length - 1);
@@ -689,6 +697,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
     const preferredVisualColumn = preferredCaretVisualColumnRef.current ?? getVisualColumnForCaretPos(caretPos);
     const nextCaretPos = getCharIndexForVisualCell(targetRow, preferredVisualColumn);
+    boundaryCaretRowPreferenceRef.current = clampedTargetRowIndex;
     pendingAutomaticCaretPosRef.current = nextCaretPos;
     onCaretChange?.(nextCaretPos);
     return {
@@ -717,6 +726,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
     const relativeX = event.clientX - zoneBounds.left - horizontalPaddingPx;
     const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
+    boundaryCaretRowPreferenceRef.current = targetRowIndex;
     rememberPreferredCaretVisualColumn(targetCell);
     const nextCaretPos = getCharIndexForVisualCell(targetRow, targetCell);
     const nextViewportStartRow = zone === 'top'
@@ -895,6 +905,40 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         moveCaretToWrappedRow(targetRow);
         return;
       }
+
+      if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        if (wrappedLines.length === 0) return;
+
+        const currentRowIndex = resolveRowForCaretIndex(
+          caretPos,
+          wrappedLines,
+          boundaryCaretRowPreferenceRef.current
+        );
+        const currentRow = wrappedLines[currentRowIndex];
+        if (!currentRow) return;
+
+        const nextCaretPos = e.key === 'Home'
+          ? currentRow.startCharIndex
+          : currentRow.endCharIndex;
+
+        boundaryCaretRowPreferenceRef.current = currentRowIndex;
+
+        if (e.key === 'Home') {
+          rememberPreferredCaretVisualColumn(0);
+        } else {
+          const rowText = text.slice(currentRow.startCharIndex, currentRow.endCharIndex);
+          rememberPreferredCaretVisualColumn(countVisualCells(rowText));
+        }
+
+        if (selectionStart !== selectionEnd) {
+          onSelectionChange?.(nextCaretPos, nextCaretPos);
+          return;
+        }
+
+        onCaretChange?.(nextCaretPos);
+        return;
+      }
     }
 
     onKeyDown?.(e);
@@ -976,6 +1020,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const rootBounds = editorRoot.getBoundingClientRect();
     const relativeX = clientX - rootBounds.left - horizontalPaddingPx;
     const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
+    boundaryCaretRowPreferenceRef.current = targetRowIndex;
     return getCharIndexForVisualCell(targetRow, targetCell);
   }, [charCellWidthPx, getCharIndexForVisualCell, getVisibleRowIndexForPointer, horizontalPaddingPx, wrappedLines]);
 
@@ -1623,6 +1668,34 @@ function getVisualColumnForCaretPosition(charIndex: number, wrappedLines: Wrappe
 
   const clampedCharIndex = Math.max(row.startCharIndex, Math.min(charIndex, row.endCharIndex));
   return countVisualCells(text.slice(row.startCharIndex, clampedCharIndex));
+}
+
+function resolveRowForCaretIndex(
+  charIndex: number,
+  wrappedLines: WrappedLine[],
+  preferredBoundaryRow: number | null
+): number {
+  const baseRow = findRowForCharIndex(charIndex, wrappedLines);
+  if (wrappedLines.length === 0) return 0;
+
+  const row = wrappedLines[baseRow];
+  const nextRow = wrappedLines[baseRow + 1];
+  const isSharedBoundary = Boolean(
+    row &&
+    nextRow &&
+    row.endCharIndex === charIndex &&
+    nextRow.startCharIndex === charIndex
+  );
+
+  if (!isSharedBoundary || preferredBoundaryRow == null) {
+    return baseRow;
+  }
+
+  if (preferredBoundaryRow === baseRow || preferredBoundaryRow === baseRow + 1) {
+    return preferredBoundaryRow;
+  }
+
+  return baseRow;
 }
 
 function snapToDevicePixels(valuePx: number): number {

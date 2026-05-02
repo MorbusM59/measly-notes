@@ -235,7 +235,8 @@ export function findRowForCharIndex(
   }
 
   // Shared boundary between wrapped rows belongs to the previous visual row.
-  // This matches textarea caret placement for End/Home on soft wraps.
+  // This keeps Home/End behavior stable on upper wrapped rows while preserving
+  // a single caret index representation.
   for (let i = candidate; i < wrappedLines.length; i += 1) {
     const row = wrappedLines[i];
 
