@@ -854,44 +854,37 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (el.scrollLeft) el.scrollLeft = 0;
   }, [selectionEnd, selectionStart]);
 
-  // After every render, read the native caret rect and update the caret overlay
-  // div imperatively — no extra React render needed.
+  // After every render, update the caret overlay div imperatively using the
+  // model-based caret position.  Using caretGridCell / caretRow (which are derived
+  // from resolveRowForCaretIndex with boundaryCaretRowPreferenceRef) rather than
+  // getCaretBoundingRect() means the overlay always respects the boundary-row
+  // preference.  Chrome renders wrap-boundary positions (e.g. the start of a
+  // wrapped word) at the END of the previous visual row; the model correctly places
+  // them on the row the user navigated to, matching visual expectations.
+  // This also handles blank lines naturally (no special-case needed).
   useLayoutEffect(() => {
     const overlay = caretOverlayRef.current;
-    const container = editorRootRef.current;
     const el = centerInputRef.current;
-    if (!overlay || !container || !el) return;
+    if (!overlay || !el) return;
 
     if (selectionStart !== selectionEnd || document.activeElement !== el) {
       overlay.style.display = 'none';
       return;
     }
 
-    const caretRect = getCaretBoundingRect();
-
-    let cellCol: number;
-    let cellRow: number;
-
-    if (caretRect) {
-      const containerRect = container.getBoundingClientRect();
-      // Snap to grid cell so the box aligns with the background grid
-      const relLeft = caretRect.left - containerRect.left - horizontalPaddingPx;
-      const relTop = caretRect.top - containerRect.top;
-      cellCol = Math.max(0, Math.round(relLeft / charCellWidthPx));
-      cellRow = Math.max(0, Math.floor(relTop / metrics.rowHeightPx));
-    } else {
-      // Fallback for blank lines: Chrome returns an all-zero rect for a collapsed
-      // range sitting on a <br> node.  Derive position from the model instead.
-      cellCol = caretGridCell.gridColumn;
-      const relTopFallback = topInsetPx + layout.topHeightPx
-        + (caretRow - effectiveCenterStartRow) * metrics.rowHeightPx;
-      cellRow = Math.max(0, Math.floor(relTopFallback / metrics.rowHeightPx));
+    // gridRowWithinOverlay: row index relative to the top of fixed-focus-editor-content.
+    // Center zone rows start at layout.topHeightPx inside the content div.
+    const gridRowWithinOverlay = caretRow - effectiveCenterStartRow;
+    if (gridRowWithinOverlay < 0 || gridRowWithinOverlay >= viewport.centerRowCount) {
+      overlay.style.display = 'none';
+      return;
     }
 
+    const cellCol = caretGridCell.gridColumn;
     const cellLeftBoundaryPx = snapToDevicePixels(horizontalPaddingPx + cellCol * charCellWidthPx);
     const cellRightBoundaryPx = snapToDevicePixels(horizontalPaddingPx + (cellCol + 1) * charCellWidthPx);
-    const cellTopBoundaryPx = snapToDevicePixels(cellRow * metrics.rowHeightPx);
-    const cellBottomBoundaryPx = snapToDevicePixels((cellRow + 1) * metrics.rowHeightPx);
+    const cellTopBoundaryPx = snapToDevicePixels(layout.topHeightPx + gridRowWithinOverlay * metrics.rowHeightPx);
+    const cellBottomBoundaryPx = snapToDevicePixels(layout.topHeightPx + (gridRowWithinOverlay + 1) * metrics.rowHeightPx);
 
     overlay.style.display = 'block';
     overlay.style.left = `${cellLeftBoundaryPx + GRID_STROKE_WIDTH_PX}px`;
@@ -1106,7 +1099,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (!(e.shiftKey || e.ctrlKey || e.altKey)) {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        const caretRow = findRowForCharIndex(caretPos, wrappedLines);
+        const caretRow = resolveRowForCaretIndex(caretPos, wrappedLines, boundaryCaretRowPreferenceRef.current);
         if (caretRow > 0) {
           const prevRow = caretRow - 1;
           moveCaretToWrappedRow(prevRow);
@@ -1119,7 +1112,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        const caretRow = findRowForCharIndex(caretPos, wrappedLines);
+        const caretRow = resolveRowForCaretIndex(caretPos, wrappedLines, boundaryCaretRowPreferenceRef.current);
         if (caretRow < wrappedLines.length - 1) {
           const nextRow = caretRow + 1;
           moveCaretToWrappedRow(nextRow);
@@ -1133,7 +1126,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       if (e.key === 'PageUp') {
         e.preventDefault();
         const pageRowDelta = Math.max(1, viewport.centerRowCount);
-        const caretRow = findRowForCharIndex(caretPos, wrappedLines);
+        const caretRow = resolveRowForCaretIndex(caretPos, wrappedLines, boundaryCaretRowPreferenceRef.current);
         const targetRow = Math.max(0, caretRow - pageRowDelta);
         const targetViewportStartRow = Math.max(0, effectiveCenterStartRow - pageRowDelta);
         setViewportStartRow(targetViewportStartRow);
@@ -1144,7 +1137,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       if (e.key === 'PageDown') {
         e.preventDefault();
         const pageRowDelta = Math.max(1, viewport.centerRowCount);
-        const caretRow = findRowForCharIndex(caretPos, wrappedLines);
+        const caretRow = resolveRowForCaretIndex(caretPos, wrappedLines, boundaryCaretRowPreferenceRef.current);
         const targetRow = Math.min(wrappedLines.length - 1, caretRow + pageRowDelta);
         const targetViewportStartRow = Math.min(maxStartRef.current, effectiveCenterStartRow + pageRowDelta);
         setViewportStartRow(targetViewportStartRow);
@@ -1155,6 +1148,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       if (e.key === 'Home' || e.key === 'End') {
         e.preventDefault();
         if (wrappedLines.length === 0) return;
+
+        // ── Debug snapshot (before) ────────────────────────────────────────
+        const dbgBeforeRect = getCaretBoundingRect();
+        const dbgBeforeY = dbgBeforeRect?.top ?? null;
+        const dbgBeforePos = caretPos;
+        const dbgBoundaryBefore = boundaryCaretRowPreferenceRef.current;
+        // ──────────────────────────────────────────────────────────────────
 
         const currentRowIndex = resolveRowForCaretIndex(
           caretPos,
@@ -1168,12 +1168,11 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           ? currentRow.startCharIndex
           : currentRow.endCharIndex;
 
-        // For Home: position is at the start of this row (= end of previous row),
-        // which the browser renders at the start of currentRowIndex — set that.
-        // For End: position is at the end of this row (= start of next row),
-        // which the browser renders at the start of the next row — clear the
-        // preference so the downstream default (baseRow + 1) handles it.
-        boundaryCaretRowPreferenceRef.current = e.key === 'Home' ? currentRowIndex : null;
+        // Always record the row we resolved to as the boundary preference so that
+        // subsequent Up/Down/Home/End navigation works correctly on wrapped rows.
+        // For Home: keeps caret at visual start of currentRowIndex (not end of N-1).
+        // For End: keeps caret at visual end of currentRowIndex (not start of N+1).
+        boundaryCaretRowPreferenceRef.current = currentRowIndex;
 
         if (e.key === 'Home') {
           rememberPreferredCaretVisualColumn(0);
@@ -1182,12 +1181,56 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           rememberPreferredCaretVisualColumn(countVisualCells(rowText));
         }
 
+        // Guard handleSelect from clearing the boundary preference: mark this
+        // position as a programmatic move so the synchronous selectionchange
+        // event that fires when ceSetSelection is called inside onCaretChange
+        // does not wipe boundaryCaretRowPreferenceRef.
+        pendingAutomaticCaretPosRef.current = nextCaretPos;
+
         if (selectionStart !== selectionEnd) {
           onSelectionChange?.(nextCaretPos, nextCaretPos);
-          return;
+        } else {
+          onCaretChange?.(nextCaretPos);
         }
 
-        onCaretChange?.(nextCaretPos);
+        // ── Debug snapshot (after — next frame, after ceSetSelection) ──────
+        requestAnimationFrame(() => {
+          const dbgAfterRect = getCaretBoundingRect();
+          const dbgAfterY = dbgAfterRect?.top ?? null;
+          const yMoved = dbgBeforeY !== null && dbgAfterY !== null
+            && Math.abs(dbgAfterY - dbgBeforeY) > 0.5;
+          if (yMoved) {
+            const prevRow = wrappedLines[currentRowIndex - 1];
+            const nextRow = wrappedLines[currentRowIndex + 1];
+            const isSharedBoundaryStart = prevRow && prevRow.endCharIndex === currentRow.startCharIndex;
+            const isSharedBoundaryEnd   = nextRow && nextRow.startCharIndex === currentRow.endCharIndex;
+            console.warn(`[Home/End] Y moved unexpectedly`, {
+              key: e.key,
+              caretPosBefore: dbgBeforePos,
+              caretPosAfter: nextCaretPos,
+              resolvedRowIndex: currentRowIndex,
+              boundaryPreferenceBefore: dbgBoundaryBefore,
+              boundaryPreferenceAfter: boundaryCaretRowPreferenceRef.current,
+              row: { start: currentRow.startCharIndex, end: currentRow.endCharIndex, isLineStart: currentRow.isLineStart, isLineEnd: currentRow.isLineEnd },
+              isSharedBoundaryAtStart: isSharedBoundaryStart,
+              isSharedBoundaryAtEnd: isSharedBoundaryEnd,
+              beforeY: dbgBeforeY,
+              afterY: dbgAfterY,
+              deltaYPx: dbgAfterY !== null && dbgBeforeY !== null ? dbgAfterY - dbgBeforeY : null,
+            });
+          } else {
+            console.log(`[Home/End] Y stable`, {
+              key: e.key,
+              caretPosBefore: dbgBeforePos,
+              caretPosAfter: nextCaretPos,
+              resolvedRowIndex: currentRowIndex,
+              beforeY: dbgBeforeY,
+              afterY: dbgAfterY,
+            });
+          }
+        });
+        // ──────────────────────────────────────────────────────────────────
+
         return;
       }
     }
