@@ -145,21 +145,6 @@ export function ceGetText(el: HTMLElement): string {
   return result.endsWith('\n') && !result.endsWith('\n\n') ? result.slice(0, -1) : result;
 }
 
-/**
- * Returns the bounding DOMRect of the current collapsed caret selection,
- * or null if not available / selection is not collapsed.
- */
-function getCaretBoundingRect(): DOMRect | null {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  const range = sel.getRangeAt(0).cloneRange();
-  range.collapse(true);
-  const rect = range.getBoundingClientRect();
-  // A zero-size rect means the caret position couldn't be determined
-  if (rect.width === 0 && rect.height === 0) return null;
-  return rect;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 const charWidthCache = new Map<string, number>();
@@ -1149,13 +1134,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         e.preventDefault();
         if (wrappedLines.length === 0) return;
 
-        // ── Debug snapshot (before) ────────────────────────────────────────
-        const dbgBeforeRect = getCaretBoundingRect();
-        const dbgBeforeY = dbgBeforeRect?.top ?? null;
-        const dbgBeforePos = caretPos;
-        const dbgBoundaryBefore = boundaryCaretRowPreferenceRef.current;
-        // ──────────────────────────────────────────────────────────────────
-
         const currentRowIndex = resolveRowForCaretIndex(
           caretPos,
           wrappedLines,
@@ -1192,44 +1170,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         } else {
           onCaretChange?.(nextCaretPos);
         }
-
-        // ── Debug snapshot (after — next frame, after ceSetSelection) ──────
-        requestAnimationFrame(() => {
-          const dbgAfterRect = getCaretBoundingRect();
-          const dbgAfterY = dbgAfterRect?.top ?? null;
-          const yMoved = dbgBeforeY !== null && dbgAfterY !== null
-            && Math.abs(dbgAfterY - dbgBeforeY) > 0.5;
-          if (yMoved) {
-            const prevRow = wrappedLines[currentRowIndex - 1];
-            const nextRow = wrappedLines[currentRowIndex + 1];
-            const isSharedBoundaryStart = prevRow && prevRow.endCharIndex === currentRow.startCharIndex;
-            const isSharedBoundaryEnd   = nextRow && nextRow.startCharIndex === currentRow.endCharIndex;
-            console.warn(`[Home/End] Y moved unexpectedly`, {
-              key: e.key,
-              caretPosBefore: dbgBeforePos,
-              caretPosAfter: nextCaretPos,
-              resolvedRowIndex: currentRowIndex,
-              boundaryPreferenceBefore: dbgBoundaryBefore,
-              boundaryPreferenceAfter: boundaryCaretRowPreferenceRef.current,
-              row: { start: currentRow.startCharIndex, end: currentRow.endCharIndex, isLineStart: currentRow.isLineStart, isLineEnd: currentRow.isLineEnd },
-              isSharedBoundaryAtStart: isSharedBoundaryStart,
-              isSharedBoundaryAtEnd: isSharedBoundaryEnd,
-              beforeY: dbgBeforeY,
-              afterY: dbgAfterY,
-              deltaYPx: dbgAfterY !== null && dbgBeforeY !== null ? dbgAfterY - dbgBeforeY : null,
-            });
-          } else {
-            console.log(`[Home/End] Y stable`, {
-              key: e.key,
-              caretPosBefore: dbgBeforePos,
-              caretPosAfter: nextCaretPos,
-              resolvedRowIndex: currentRowIndex,
-              beforeY: dbgBeforeY,
-              afterY: dbgAfterY,
-            });
-          }
-        });
-        // ──────────────────────────────────────────────────────────────────
 
         return;
       }
