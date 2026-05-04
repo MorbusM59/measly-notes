@@ -348,6 +348,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const editHistoryRef = useRef<NoteEditHistoryState>(cloneEmptyEditHistoryState());
   const lastCommittedSnapshotRef = useRef<EditSnapshot>({ content: '', selectionStart: 0, selectionEnd: 0 });
   const pendingHistoryBoundaryRef = useRef<{ reason: HistoryBoundaryReason; before: EditSnapshot } | null>(null);
+  // Captures edit position when entering view mode for fast restoration (no async DB round-trip).
+  const savedEditPositionRef = useRef<{ selectionStart: number; selectionEnd: number; viewportStartRow: number } | null>(null);
+  // Latest wrapped row count reported by FixedFocusEditor, used for edit→view scroll sync.
+  const totalWrappedRowsRef = useRef(0);
+  // Always-current mirrors of state values, safe to read inside stale-closure effects.
+  const liveSelectionStartRef = useRef(0);
+  const liveSelectionEndRef = useRef(0);
+  const liveViewportStartRowRef = useRef(0);
 
   const scheduleTimeout = (cb: () => void, ms: number) => {
     const id = window.setTimeout(cb, ms);
@@ -408,7 +416,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     setSelectionStart(start);
     setSelectionEnd(end);
     setCaretPos(end);
+    liveSelectionStartRef.current = start;
+    liveSelectionEndRef.current = end;
   }, []);
+
+  // Keep live refs up-to-date whenever state changes (covers setTextareaSelection paths).
+  useEffect(() => { liveSelectionStartRef.current = selectionStart; }, [selectionStart]);
+  useEffect(() => { liveSelectionEndRef.current = selectionEnd; }, [selectionEnd]);
+  useEffect(() => { liveViewportStartRowRef.current = editViewportStartRow; }, [editViewportStartRow]);
 
   useEffect(() => {
     onEditHistoryCountChange?.(editHistoryCount);
@@ -491,11 +506,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     if (!editorContent) return;
     // Use live selection if element is focused, otherwise fall back to React state
     const liveSel = el ? (ceGetSelection(el) ?? { start: selectionStart, end: selectionEnd }) : { start: selectionStart, end: selectionEnd };
-    const persistedViewportStartRow = showPreview ? 0 : editViewportStartRow;
     const state: EditState = {
       selectionStart: liveSel.start,
-      scrollTop: showPreview ? editorContent.scrollTop : persistedViewportStartRow,
-      viewportStartRow: persistedViewportStartRow,
+      scrollTop: editViewportStartRow,
+      viewportStartRow: editViewportStartRow,
     };
     try {
       // persist to DB via preload API (best-effort)
@@ -541,35 +555,81 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     }
   };
 
-  // When entering view mode, clear any pending autosave so nothing runs during preview.
+  // When entering view mode: snapshot edit position, collapse selection state (avoids flash
+  // on return), persist to DB, and sync view scrollTop to the edit viewport position.
+  // When returning to edit mode: restore from snapshot (fast, no async round-trip) if available,
+  // otherwise load from DB (note was first opened in view mode).
   useEffect(() => {
     if (showPreview) {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current);
         autoSaveTimeoutRef.current = null;
       }
-      // Save edit state when we enter preview so it can be restored when returning to edit.
+      // Capture the full selection via live refs (immune to stale closure).
+      savedEditPositionRef.current = {
+        selectionStart: liveSelectionStartRef.current,
+        selectionEnd: liveSelectionEndRef.current,
+        viewportStartRow: liveViewportStartRowRef.current,
+      };
+      // Collapse to caret before unmounting FixedFocusEditor.  This is critical:
+      // FixedFocusEditor's caret/viewport sync effect early-returns when
+      // selectionStart !== selectionEnd, which prevents lastCaretViewportOffsetRef
+      // from being seeded on the first render after remount.  Without the correct
+      // offset, the wrapWidthJustChanged reanchor (fired by ResizeObserver when the
+      // container becomes visible) snaps the viewport to caretRow instead of the
+      // saved position.
+      const liveEnd = liveSelectionEndRef.current;
+      setSelectionStart(liveEnd);
+      setSelectionEnd(liveEnd);
+      setCaretPos(liveEnd);
+      // Persist to DB / localStorage.
       if (note?.id != null) void saveEditState(note.id);
+      // After ReactMarkdown renders, sync view scrollTop to match the edit viewport position.
+      scheduleTimeout(() => {
+        const editorContent = editorContentRef.current;
+        const totalRows = totalWrappedRowsRef.current;
+        if (!editorContent || totalRows <= 0) return;
+        const ratio = liveViewportStartRowRef.current / totalRows;
+        editorContent.scrollTop = ratio * Math.max(0, editorContent.scrollHeight - editorContent.clientHeight);
+      }, 50);
     } else {
-      // when entering edit mode, attempt to restore scroll/selection (handled in note load or note-change flow)
+      // Returning to edit mode.
       if (previewRestoreTimeoutRef.current) {
         clearTimeout(previewRestoreTimeoutRef.current);
         previewRestoreTimeoutRef.current = null;
       }
-      previewRestoreTimeoutRef.current = scheduleTimeout(async () => {
-        const ta = textareaRef.current;
-        const editorContent = editorContentRef.current;
-        if (!ta || !editorContent || !note) return;
-        const st = await loadEditState(note.id);
-        if (st) {
-          setTextareaSelection(st.selectionStart, st.selectionStart);
-          setEditViewportStartRow(st.viewportStartRow ?? st.scrollTop ?? 0);
-          if (showPreview) editorContent.scrollTop = st.scrollTop;
+      const saved = savedEditPositionRef.current;
+      if (saved) {
+        // Step 1: restore collapsed caret + viewport.  selectionStart === selectionEnd
+        // is required so FixedFocusEditor's sync effect runs (not early-returned) and
+        // seeds lastCaretViewportOffsetRef before wrapWidthJustChanged fires.
+        setSelectionStart(saved.selectionEnd);
+        setSelectionEnd(saved.selectionEnd);
+        setCaretPos(saved.selectionEnd);
+        setEditViewportStartRow(saved.viewportStartRow);
+        // Step 2: restore full selection range after focus + viewport have settled.
+        // The focus timeout fires at ~10 ms; 30 ms gives the ResizeObserver reanchor
+        // time to complete so the viewport is stable before we expand the selection.
+        if (saved.selectionStart !== saved.selectionEnd) {
+          scheduleTimeout(() => {
+            setSelectionStart(saved.selectionStart);
+            setSelectionEnd(saved.selectionEnd);
+            setCaretPos(saved.selectionEnd);
+          }, 30);
         }
-        // ensure proper sizing and visibility
-        autosizeTextarea(ta);
-        ensureCaretVisible();
-      }, 0) as unknown as ReturnType<typeof setTimeout>;
+      } else {
+        // Note was first opened in view mode — load saved state from DB.
+        previewRestoreTimeoutRef.current = scheduleTimeout(async () => {
+          if (!note) return;
+          const st = await loadEditState(note.id);
+          if (st) {
+            setSelectionStart(st.selectionStart);
+            setSelectionEnd(st.selectionStart);
+            setCaretPos(st.selectionStart);
+            setEditViewportStartRow(st.viewportStartRow ?? 0);
+          }
+        }, 0) as unknown as ReturnType<typeof setTimeout>;
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPreview]);
@@ -583,6 +643,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       }
 
       currentNoteIdRef.current = note.id;
+      savedEditPositionRef.current = null; // clear cached position so DB is loaded for this note
       window.electronAPI.loadNote(note.id).then(noteContent => {
         lastSavedContentRef.current = noteContent;
         setContent(noteContent);
@@ -636,6 +697,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       lastSavedTitleRef.current = '';
       currentNoteIdRef.current = null;
       pendingHistoryBoundaryRef.current = null;
+      savedEditPositionRef.current = null;
       lastCommittedSnapshotRef.current = { content: '', selectionStart: 0, selectionEnd: 0 };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2076,6 +2138,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             onViewportStartRowChange={setEditViewportStartRow}
             onTopRowCountChange={handleFixedFocusTopRowCountChange}
             onBottomRowCountChange={handleFixedFocusBottomRowCountChange}
+            onTotalWrappedRowCountChange={(count) => { totalWrappedRowsRef.current = count; }}
             onTextChange={(newText, newSelectionStart, newSelectionEnd) => {
               handleContentChange(newText);
               finalizePendingNativeBoundary(newText, newSelectionStart, newSelectionEnd);

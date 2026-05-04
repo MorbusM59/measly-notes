@@ -74,6 +74,9 @@ export function ceGetSelection(el: HTMLElement): { start: number; end: number } 
 export function ceSetSelection(el: HTMLElement, start: number, end: number): void {
   const sel = window.getSelection();
   if (!sel) return;
+  // If the element isn't connected to the document yet, the TreeWalker nodes won't be
+  // part of the document either, and addRange() will emit a console warning.  Bail early.
+  if (!el.isConnected) return;
   let charCount = 0;
   let startNode: Node | null = null; let startOff = 0;
   let endNode: Node | null = null; let endOff = 0;
@@ -261,6 +264,8 @@ interface FixedFocusEditorProps {
   onPaste?: (e: React.ClipboardEvent<HTMLDivElement>) => void;
   onCompositionStart?: React.CompositionEventHandler<HTMLDivElement>;
   onCompositionEnd?: React.CompositionEventHandler<HTMLDivElement>;
+  /** Called whenever the total wrapped row count changes (e.g. text reflows). */
+  onTotalWrappedRowCountChange?: (count: number) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -297,6 +302,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   onPaste,
   onCompositionStart,
   onCompositionEnd,
+  onTotalWrappedRowCountChange,
 }) => {
   const [uncontrolledViewportStartRow, setUncontrolledViewportStartRow] = useState(0);
   const [uncontrolledTopRowCount, setUncontrolledTopRowCount] = useState(topRowCount ?? 3);
@@ -307,6 +313,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [isViewportAnimating, setIsViewportAnimating] = useState(false);
   const [isCaretAnimationPaused, setIsCaretAnimationPaused] = useState(false);
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const scrollIndicatorRef = useRef<HTMLDivElement>(null);
   const centerInputRef = useRef<HTMLDivElement>(null);
@@ -401,7 +408,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (ceGetText(el) !== text) {
       const savedSel = ceGetSelection(el);
       ceSetText(el, text);
-      if (savedSel && document.activeElement === el) {
+      if (savedSel && isFocused) {
         ceSetSelection(el, savedSel.start, savedSel.end);
       }
     }
@@ -825,11 +832,17 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     };
   }, [applyAutomaticCaretPos, caretPos, getViewportBoundaryCaretPos, handleScrollIndicatorPointerMove, isScrollIndicatorDragging]);
 
+  // Report total wrapped row count to parent when it changes (used by MarkdownEditor
+  // to sync view-mode scroll position when toggling preview).
+  useEffect(() => {
+    onTotalWrappedRowCountChange?.(wrappedLines.length);
+  }, [wrappedLines.length, onTotalWrappedRowCountChange]);
+
   // Sync selection state into the contenteditable DOM (e.g. after programmatic
   // caret moves from Up/Down/Home/End keys and after undo/redo).
   useEffect(() => {
     const el = centerInputRef.current;
-    if (!el || document.activeElement !== el) return;
+    if (!el || !isFocused) return;
     const live = ceGetSelection(el);
     if (!live || live.start !== selectionStart || live.end !== selectionEnd) {
       ceSetSelection(el, selectionStart, selectionEnd);
@@ -837,7 +850,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     // Suppress any internal scroll the browser may apply
     if (el.scrollTop) el.scrollTop = 0;
     if (el.scrollLeft) el.scrollLeft = 0;
-  }, [selectionEnd, selectionStart]);
+  }, [isFocused, selectionEnd, selectionStart]);
 
   // After every render, update the caret overlay div imperatively using the
   // model-based caret position.  Using caretGridCell / caretRow (which are derived
@@ -852,7 +865,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const el = centerInputRef.current;
     if (!overlay || !el) return;
 
-    if (selectionStart !== selectionEnd || document.activeElement !== el) {
+    if (selectionStart !== selectionEnd || !isFocused) {
       overlay.style.display = 'none';
       return;
     }
@@ -1654,6 +1667,22 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             onPaste={onPaste}
             onCompositionStart={onCompositionStart}
             onCompositionEnd={onCompositionEnd}
+            onFocus={() => {
+              // Pre-set the native selection to match React state so that the
+              // selectionchange event that fires immediately after focus carries the
+              // correct position.  Without this, Chrome places the caret at offset 0
+              // on a freshly-mounted contenteditable, which causes handleSelect to
+              // overwrite the restored caret/selection with (0, 0).
+              // Skip during pointer-driven focus (click/tap): pointerdown sets
+              // selectionDragStateRef synchronously before focus fires, so we can
+              // detect it here and leave the click's selection untouched.
+              const el = centerInputRef.current;
+              if (el && !selectionDragStateRef.current) {
+                ceSetSelection(el, selectionStart, selectionEnd);
+              }
+              setIsFocused(true);
+            }}
+            onBlur={() => setIsFocused(false)}
             data-placeholder={placeholder}
             style={{
               position: 'absolute',
