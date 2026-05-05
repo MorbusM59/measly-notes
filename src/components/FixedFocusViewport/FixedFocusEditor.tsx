@@ -953,23 +953,24 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       }
 
       // Horizontal metrics
-      if (!rect) {
-        const fallbackLeft = Math.round(horizontalPaddingPx);
-        rect = new DOMRect(rootRect.left + fallbackLeft, rootRect.top + (topInsetPx + layout.topHeightPx), 0, metrics.rowHeightPx);
+      // If rect is unavailable (empty line, zero-width caret), fall back to
+      // computing left/top from the logical grid cell so the caret appears on
+      // the correct empty line rather than at the center zone origin.
+      let left: number;
+      if (rect) {
+        left = Math.round(rect.left - rootRect.left) + insetPx;
+      } else {
+        const gridCol = overlayCaretCell.gridColumn;
+        left = Math.round(horizontalPaddingPx + (gridCol * charCellWidthPx)) + insetPx;
       }
-      const left = Math.round(rect.left - rootRect.left) + insetPx;
       const width = Math.max(2, Math.round(charCellWidthPx) - (insetPx * 2));
       const height = Math.max(2, Math.round(metrics.rowHeightPx));
 
       // Vertical: prefer the live measured caret rect top for immediate response;
       // fall back to the grid-aligned row top when rect isn't available.
-      let top: number;
-      if (rect && rect.top != null && !Number.isNaN(rect.top)) {
-        top = Math.round(rect.top - rootRect.top) + insetPx;
-      } else {
-        const rowIndexInViewport = Math.max(0, Math.min(viewport.centerRowCount - 1, overlayCaretCell.gridRow - latestEffectiveViewportStartRowRef.current));
-        top = Math.round(topInsetPx + layout.topHeightPx + (rowIndexInViewport * metrics.rowHeightPx) + 1);
-      }
+      const top = rect && rect.top != null && !Number.isNaN(rect.top)
+        ? Math.round(rect.top - rootRect.top) + insetPx
+        : Math.round(topInsetPx + layout.topHeightPx + (Math.max(0, Math.min(viewport.centerRowCount - 1, overlayCaretCell.gridRow - latestEffectiveViewportStartRowRef.current)) * metrics.rowHeightPx) + 1);
 
       overlay.style.display = 'block';
       overlay.style.left = `${left}px`;
