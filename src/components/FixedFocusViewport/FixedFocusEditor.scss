@@ -55,6 +55,28 @@
     z-index: 10001; /* above grid */
   }
 
+  .fixed-focus-caret-rect {
+    position: absolute;
+    pointer-events: none;
+    z-index: 10002; /* above grid and canvas */
+    display: none;
+    background: var(--highlight-caret-bg, rgba(0,0,0,0.35));
+    opacity: 0.7; /* start at da (70%) */
+    transform-origin: center;
+    animation: ff-caret-heartbeat 1s infinite ease-in-out;
+  }
+
+  @keyframes ff-caret-heartbeat {
+    /* da (strong) at 0% -> opacity 0.7, quick drop, then dum (weaker) at 50% */
+    0%   { opacity: 0.7; transform: scaleY(1); }
+    10%  { opacity: 0.2; transform: scaleY(0.85); }
+    30%  { opacity: 0.45; transform: scaleY(0.95); }
+    50%  { opacity: 0.5; transform: scaleY(1); }
+    70%  { opacity: 0.25; transform: scaleY(0.9); }
+    90%  { opacity: 0.6; transform: scaleY(0.98); }
+    100% { opacity: 0.7; transform: scaleY(1); }
+  }
+
   .fixed-focus-scroll-indicator {
     position: absolute;
     top: 0;
@@ -188,7 +210,7 @@
         background: transparent;
         resize: none;
         	  outline: none;
-        	  caret-color: auto;
+        	  caret-color: transparent;
         box-sizing: border-box;
         white-space: pre-wrap;
         word-wrap: break-word;

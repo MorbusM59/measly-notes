@@ -352,7 +352,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const editorRootRef = useRef<HTMLDivElement>(null);
-  const caretCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // canvas POC removed; using DOM overlay caret instead
+  const caretOverlayRef = useRef<HTMLDivElement | null>(null);
   const scrollIndicatorRef = useRef<HTMLDivElement>(null);
   const centerInputRef = useRef<HTMLDivElement>(null);
   
@@ -918,58 +919,84 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (el.scrollLeft) el.scrollLeft = 0;
   }, [isFocused, selectionEnd, selectionStart]);
 
-  // Canvas overlay proof-of-concept: draw a 3px red dot at caret top-left
+  // Canvas POC removed — using DOM overlay caret only.
+
+  // Rectangle overlay caret with heartbeat animation.
   useEffect(() => {
-    const canvas = caretCanvasRef.current;
+    const overlay = caretOverlayRef.current;
     const root = editorRootRef.current;
-    if (!canvas || !root) return;
+    if (!overlay || !root) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    function resizeCanvas() {
-      const rect = root.getBoundingClientRect();
-      canvas.width = Math.max(1, Math.round(rect.width * dpr));
-      canvas.height = Math.max(1, Math.round(rect.height * dpr));
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
-    }
+    const insetPx = 1; // interior inset to avoid bleeding into grid lines
 
-    function drawDotAtCaret() {
+    function positionOverlay() {
       const el = centerInputRef.current;
       if (!el) return;
-      const rect = getCaretClientRectSafe(el);
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (!rect) return;
+
+      // If selection is not collapsed, hide the custom caret overlay so the
+      // native selection visuals remain primary.
+      if (selectionStart !== selectionEnd) {
+        overlay.style.display = 'none';
+        return;
+      }
+
+      // Always show the overlay caret. Prefer exact caret rect when available;
+      // otherwise use a fallback position at the center zone start.
+      let rect = getCaretClientRectSafe(el);
       const rootRect = root.getBoundingClientRect();
-      const x = (rect.left - rootRect.left) * dpr;
-      const y = (rect.top - rootRect.top) * dpr;
-      const radius = 3 * dpr;
-      ctx.fillStyle = 'red';
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fill();
+
+      if (!rect) {
+        const fallbackLeft = Math.round(horizontalPaddingPx);
+        rect = new DOMRect(rootRect.left + fallbackLeft, rootRect.top + (topInsetPx + layout.topHeightPx), 0, metrics.rowHeightPx);
+      }
+
+      const left = Math.round(rect.left - rootRect.left) + insetPx;
+      const width = Math.max(2, Math.round(charCellWidthPx) - (insetPx * 2));
+      // Use grid row height so caret and grid remain in sync. The row height
+      // already represents the interior cell height, so don't subtract extra
+      // pixels here which made the caret too short.
+      const height = Math.max(2, Math.round(metrics.rowHeightPx));
+      // Position the overlay to the exact grid cell top + 1px inset so the
+      // caret is perfectly aligned with the grid. While the user is doing a
+      // pointer drag selection, prefer the selection anchor (the starting
+      // collapsed caret position) so the caret remains fixed at the anchor
+      // rather than following the moving selection end.
+      let overlayCaretCell = caretGridCell;
+      if (isPointerSelecting) {
+        const anchorPos = selectionStart;
+        overlayCaretCell = getCaretGridCell(anchorPos, wrappedLines, text, boundaryCaretRowPreferenceRef.current);
+      }
+      const rowIndexInViewport = Math.max(0, Math.min(viewport.centerRowCount - 1, overlayCaretCell.gridRow - latestEffectiveViewportStartRowRef.current));
+      const top = Math.round(topInsetPx + layout.topHeightPx + (rowIndexInViewport * metrics.rowHeightPx) + 1);
+
+      overlay.style.display = 'block';
+      overlay.style.left = `${left}px`;
+      overlay.style.top = `${top}px`;
+      overlay.style.width = `${width}px`;
+      overlay.style.height = `${height}px`;
+      const cs = window.getComputedStyle(root);
+      const varColor = cs.getPropertyValue('--highlight-caret-bg') || '';
+      overlay.style.background = varColor.trim() || 'rgba(0,0,0,0.35)';
     }
 
     let raf: number | null = null;
-    function scheduleDraw() {
+    function schedule() {
       if (raf != null) return;
       raf = window.requestAnimationFrame(() => {
         raf = null;
-        resizeCanvas();
-        drawDotAtCaret();
+        positionOverlay();
       });
     }
 
-    const onSelectionChange = () => scheduleDraw();
-    const onResize = () => scheduleDraw();
-    const onScroll = () => scheduleDraw();
+    const onSelectionChange = () => schedule();
+    const onResize = () => schedule();
+    const onScroll = () => schedule();
 
     document.addEventListener('selectionchange', onSelectionChange);
     window.addEventListener('resize', onResize);
     root.addEventListener('scroll', onScroll, { passive: true });
 
-    scheduleDraw();
+    schedule();
 
     return () => {
       document.removeEventListener('selectionchange', onSelectionChange);
@@ -977,7 +1004,25 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       root.removeEventListener('scroll', onScroll);
       if (raf != null) window.cancelAnimationFrame(raf);
     };
-  }, [editorRootRef, caretCanvasRef, centerInputRef]);
+  }, [
+    editorRootRef,
+    caretOverlayRef,
+    centerInputRef,
+    charCellWidthPx,
+    metrics,
+    isFocused,
+    caretPos,
+    caretGridCell && caretGridCell.gridRow,
+    effectiveCenterStartRow,
+    layout.topHeightPx,
+    topInsetPx,
+    viewport.centerRowCount,
+    horizontalPaddingPx,
+    wrappedLines.length,
+    isPointerSelecting,
+    selectionStart,
+    selectionEnd,
+  ]);
 
   // Native caret: no imperative overlay positioning — rely on browser caret.
 
@@ -1530,7 +1575,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         '--highlight-caret-bg': highlightColors?.caret,
       } as React.CSSProperties}
     >
-      <canvas ref={caretCanvasRef} className="fixed-focus-caret-overlay" />
+      <div ref={caretOverlayRef} className="fixed-focus-caret-rect" aria-hidden />
 
       <div
         className="fixed-focus-editor-content"
@@ -1704,7 +1749,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               whiteSpace: 'pre-wrap',
               wordWrap: 'break-word',
               tabSize: 3,
-              caretColor: 'auto',
+              caretColor: 'transparent',
               ...textareaStyle,
             }}
           />
