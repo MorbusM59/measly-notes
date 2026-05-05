@@ -956,21 +956,25 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       // If rect is unavailable (empty line, zero-width caret), fall back to
       // computing left/top from the logical grid cell so the caret appears on
       // the correct empty line rather than at the center zone origin.
-      let left: number;
-      if (rect) {
-        left = Math.round(rect.left - rootRect.left) + insetPx;
-      } else {
-        const gridCol = overlayCaretCell.gridColumn;
-        left = Math.round(horizontalPaddingPx + (gridCol * charCellWidthPx)) + insetPx;
-      }
-      const width = Math.max(2, Math.round(charCellWidthPx) - (insetPx * 2));
-      const height = Math.max(2, Math.round(metrics.rowHeightPx));
+      // Compute left/width/height using grid metrics and snap to device pixels
+      // so the overlay matches the box interior exactly (subtract 2px for the
+      // top+bottom grid borders).
+      const leftRaw = rect ? (rect.left - rootRect.left) : (horizontalPaddingPx + (overlayCaretCell.gridColumn * charCellWidthPx));
+      const left = snapToDevicePixels(Math.round(leftRaw) + insetPx);
+      const width = snapToDevicePixels(Math.max(2, Math.round(charCellWidthPx) - (insetPx * 2)));
+      const desiredHeight = Math.max(2, metrics.rowHeightPx - 2); // remove 1px top+1px bottom borders
+      const height = snapToDevicePixels(desiredHeight);
 
-      // Vertical: prefer the live measured caret rect top for immediate response;
-      // fall back to the grid-aligned row top when rect isn't available.
-      const top = rect && rect.top != null && !Number.isNaN(rect.top)
-        ? Math.round(rect.top - rootRect.top) + insetPx
-        : Math.round(topInsetPx + layout.topHeightPx + (Math.max(0, Math.min(viewport.centerRowCount - 1, overlayCaretCell.gridRow - latestEffectiveViewportStartRowRef.current)) * metrics.rowHeightPx) + 1);
+      // Vertical: always align to the top of the grid box for the caret so it
+      // sits flush with the box top. Compute row index relative to viewport
+      // and position at the grid top + insetPx; snap to device pixels.
+      const rowIndexInViewport = Math.max(0, Math.min(viewport.centerRowCount - 1, overlayCaretCell.gridRow - latestEffectiveViewportStartRowRef.current));
+      const topRaw = topInsetPx + layout.topHeightPx + (rowIndexInViewport * metrics.rowHeightPx) + insetPx;
+      // Add a one-physical-pixel offset to ensure the caret sits below the
+      // grid line even when device-pixel rounding would otherwise place it
+      // on the line. Convert one physical pixel into CSS pixels (1 / dpr).
+      const dpr = typeof window === 'undefined' ? 1 : Math.max(1, window.devicePixelRatio || 1);
+      const top = snapToDevicePixels(topRaw + (1 / dpr));
 
       overlay.style.display = 'block';
       overlay.style.left = `${left}px`;
