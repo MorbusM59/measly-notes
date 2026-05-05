@@ -149,6 +149,49 @@ export function ceGetText(el: HTMLElement): string {
   return result;
 }
 
+/**
+ * Get a client rect for the current caret (collapsed selection) inside `el`.
+ * Returns a DOMRect in viewport coordinates or null.
+ * Uses Range.getClientRects() when available, falls back to inserting a
+ * temporary zero-width marker and measuring it. Avoids mutating selection by
+ * restoring selection offsets via `ceGetSelection`/`ceSetSelection` when used.
+ */
+function getCaretClientRectSafe(el: HTMLElement): DOMRect | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!el.contains(range.commonAncestorContainer)) return null;
+
+  // Prefer client rects if available
+  const rects = range.getClientRects();
+  if (rects && rects.length > 0) {
+    // Collapsed ranges often return a zero-width rect in rects[0]
+    return rects[0];
+  }
+
+  // Try boundingClientRect as a secondary option
+  const br = range.getBoundingClientRect();
+  if (br && (br.width > 0 || br.height > 0)) return br;
+
+  // Last resort: insert a temporary marker, measure, then remove and restore selection
+  try {
+    const savedSel = ceGetSelection(el);
+    const marker = document.createElement('span');
+    marker.style.display = 'inline-block';
+    marker.style.width = '0px';
+    marker.style.height = '0px';
+    marker.style.overflow = 'hidden';
+    // Insert marker at the range
+    range.insertNode(marker);
+    const mrect = marker.getBoundingClientRect();
+    marker.parentNode?.removeChild(marker);
+    if (savedSel) ceSetSelection(el, savedSel.start, savedSel.end);
+    return mrect.width === 0 && mrect.height === 0 ? null : mrect;
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const charWidthCache = new Map<string, number>();
@@ -309,6 +352,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const [resizeAnchorViewportStartRow, setResizeAnchorViewportStartRow] = useState<number | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const editorRootRef = useRef<HTMLDivElement>(null);
+  const caretCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const scrollIndicatorRef = useRef<HTMLDivElement>(null);
   const centerInputRef = useRef<HTMLDivElement>(null);
   
@@ -874,6 +918,67 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (el.scrollLeft) el.scrollLeft = 0;
   }, [isFocused, selectionEnd, selectionStart]);
 
+  // Canvas overlay proof-of-concept: draw a 3px red dot at caret top-left
+  useEffect(() => {
+    const canvas = caretCanvasRef.current;
+    const root = editorRootRef.current;
+    if (!canvas || !root) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    function resizeCanvas() {
+      const rect = root.getBoundingClientRect();
+      canvas.width = Math.max(1, Math.round(rect.width * dpr));
+      canvas.height = Math.max(1, Math.round(rect.height * dpr));
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+    }
+
+    function drawDotAtCaret() {
+      const el = centerInputRef.current;
+      if (!el) return;
+      const rect = getCaretClientRectSafe(el);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!rect) return;
+      const rootRect = root.getBoundingClientRect();
+      const x = (rect.left - rootRect.left) * dpr;
+      const y = (rect.top - rootRect.top) * dpr;
+      const radius = 3 * dpr;
+      ctx.fillStyle = 'red';
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    let raf: number | null = null;
+    function scheduleDraw() {
+      if (raf != null) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = null;
+        resizeCanvas();
+        drawDotAtCaret();
+      });
+    }
+
+    const onSelectionChange = () => scheduleDraw();
+    const onResize = () => scheduleDraw();
+    const onScroll = () => scheduleDraw();
+
+    document.addEventListener('selectionchange', onSelectionChange);
+    window.addEventListener('resize', onResize);
+    root.addEventListener('scroll', onScroll, { passive: true });
+
+    scheduleDraw();
+
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange);
+      window.removeEventListener('resize', onResize);
+      root.removeEventListener('scroll', onScroll);
+      if (raf != null) window.cancelAnimationFrame(raf);
+    };
+  }, [editorRootRef, caretCanvasRef, centerInputRef]);
+
   // Native caret: no imperative overlay positioning — rely on browser caret.
 
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
@@ -1244,7 +1349,36 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const getCharIndexForPointer = useCallback((clientX: number, clientY: number) => {
     const editorRoot = editorRootRef.current;
     if (!editorRoot || wrappedLines.length === 0) return 0;
+    // Try browser-provided caret-from-point APIs first for precise mapping
+    try {
+      // Standard: caretPositionFromPoint (returns { offsetNode, offset })
+      const doc: any = document as any;
+      if (typeof doc.caretPositionFromPoint === 'function') {
+        const pos = doc.caretPositionFromPoint(clientX, clientY);
+        if (pos && pos.offsetNode) {
+          // Only accept positions inside our editable
+          const el = centerInputRef.current;
+          if (el && el.contains(pos.offsetNode)) {
+            const charIndex = ceCharOffset(el, pos.offsetNode, pos.offset);
+            return Math.max(0, Math.min(text.length, charIndex));
+          }
+        }
+      } else if (typeof doc.caretRangeFromPoint === 'function') {
+        // WebKit / older: caretRangeFromPoint
+        const range: Range | null = doc.caretRangeFromPoint(clientX, clientY);
+        if (range && range.startContainer) {
+          const el = centerInputRef.current;
+          if (el && el.contains(range.startContainer)) {
+            const charIndex = ceCharOffset(el, range.startContainer, range.startOffset);
+            return Math.max(0, Math.min(text.length, charIndex));
+          }
+        }
+      }
+    } catch {
+      // ignore and fall back to grid math
+    }
 
+    // Fallback: approximate using visible row / cell grid math
     const targetRowIndex = getVisibleRowIndexForPointer(clientY);
     const targetRow = wrappedLines[targetRowIndex];
     if (!targetRow) return 0;
@@ -1392,8 +1526,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         fontSize: `${fontSizePx}px`,
         overflow: 'hidden',
         '--grid-column-width': `${charCellWidthPx}px`,
+        '--highlight-selection-bg': highlightColors?.selection,
+        '--highlight-caret-bg': highlightColors?.caret,
       } as React.CSSProperties}
     >
+      <canvas ref={caretCanvasRef} className="fixed-focus-caret-overlay" />
+
       <div
         className="fixed-focus-editor-content"
         style={{

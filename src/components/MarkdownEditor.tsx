@@ -2051,7 +2051,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           ) : (
             <>
               <div className="highlight-color-controls">
-                {(['caret', 'selection', 'leading', 'trailing', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
+                {(['caret', 'selection', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
                   <button
                     key={key}
                     className={`toolbar-btn-icon color-swatch-btn${activeHighlightColorKey === key ? ' is-open' : ''}`}
