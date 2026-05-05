@@ -942,32 +942,34 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
       // Always show the overlay caret. Prefer exact caret rect when available;
       // otherwise use a fallback position at the center zone start.
-      let rect = getCaretClientRectSafe(el);
       const rootRect = root.getBoundingClientRect();
+      let rect = getCaretClientRectSafe(el);
 
-      if (!rect) {
-        const fallbackLeft = Math.round(horizontalPaddingPx);
-        rect = new DOMRect(rootRect.left + fallbackLeft, rootRect.top + (topInsetPx + layout.topHeightPx), 0, metrics.rowHeightPx);
-      }
-
-      const left = Math.round(rect.left - rootRect.left) + insetPx;
-      const width = Math.max(2, Math.round(charCellWidthPx) - (insetPx * 2));
-      // Use grid row height so caret and grid remain in sync. The row height
-      // already represents the interior cell height, so don't subtract extra
-      // pixels here which made the caret too short.
-      const height = Math.max(2, Math.round(metrics.rowHeightPx));
-      // Position the overlay to the exact grid cell top + 1px inset so the
-      // caret is perfectly aligned with the grid. While the user is doing a
-      // pointer drag selection, prefer the selection anchor (the starting
-      // collapsed caret position) so the caret remains fixed at the anchor
-      // rather than following the moving selection end.
+      // Compute overlay anchor cell in case we need to fall back to the grid.
       let overlayCaretCell = caretGridCell;
       if (isPointerSelecting) {
         const anchorPos = selectionStart;
         overlayCaretCell = getCaretGridCell(anchorPos, wrappedLines, text, boundaryCaretRowPreferenceRef.current);
       }
-      const rowIndexInViewport = Math.max(0, Math.min(viewport.centerRowCount - 1, overlayCaretCell.gridRow - latestEffectiveViewportStartRowRef.current));
-      const top = Math.round(topInsetPx + layout.topHeightPx + (rowIndexInViewport * metrics.rowHeightPx) + 1);
+
+      // Horizontal metrics
+      if (!rect) {
+        const fallbackLeft = Math.round(horizontalPaddingPx);
+        rect = new DOMRect(rootRect.left + fallbackLeft, rootRect.top + (topInsetPx + layout.topHeightPx), 0, metrics.rowHeightPx);
+      }
+      const left = Math.round(rect.left - rootRect.left) + insetPx;
+      const width = Math.max(2, Math.round(charCellWidthPx) - (insetPx * 2));
+      const height = Math.max(2, Math.round(metrics.rowHeightPx));
+
+      // Vertical: prefer the live measured caret rect top for immediate response;
+      // fall back to the grid-aligned row top when rect isn't available.
+      let top: number;
+      if (rect && rect.top != null && !Number.isNaN(rect.top)) {
+        top = Math.round(rect.top - rootRect.top) + insetPx;
+      } else {
+        const rowIndexInViewport = Math.max(0, Math.min(viewport.centerRowCount - 1, overlayCaretCell.gridRow - latestEffectiveViewportStartRowRef.current));
+        top = Math.round(topInsetPx + layout.topHeightPx + (rowIndexInViewport * metrics.rowHeightPx) + 1);
+      }
 
       overlay.style.display = 'block';
       overlay.style.left = `${left}px`;
@@ -992,9 +994,21 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const onResize = () => schedule();
     const onScroll = () => schedule();
 
+    const onKeyDownDoc = (ev: KeyboardEvent) => {
+      const k = ev.key;
+      if (
+        k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight'
+        || k === 'Home' || k === 'End' || k === 'PageUp' || k === 'PageDown'
+      ) {
+        schedule();
+      }
+    };
+
     document.addEventListener('selectionchange', onSelectionChange);
     window.addEventListener('resize', onResize);
     root.addEventListener('scroll', onScroll, { passive: true });
+    document.addEventListener('keydown', onKeyDownDoc);
+    document.addEventListener('keyup', schedule);
 
     schedule();
 
@@ -1002,6 +1016,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       document.removeEventListener('selectionchange', onSelectionChange);
       window.removeEventListener('resize', onResize);
       root.removeEventListener('scroll', onScroll);
+      document.removeEventListener('keydown', onKeyDownDoc);
+      document.removeEventListener('keyup', schedule);
       if (raf != null) window.cancelAnimationFrame(raf);
     };
   }, [
