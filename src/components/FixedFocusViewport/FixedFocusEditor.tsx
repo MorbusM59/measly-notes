@@ -276,7 +276,10 @@ interface FixedFocusEditorProps {
   spacingPreset: string;
   highlightColors?: HighlightColors;
   fontFamily?: string;
-  horizontalPaddingPx?: number;
+  leftPaddingPx?: number;
+  rightPaddingPx?: number;
+  topPaddingPx?: number;
+  bottomPaddingPx?: number;
   topRowCount?: number;
   bottomRowCount?: number;
   minCenterRowCount?: number;
@@ -316,7 +319,10 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   spacingPreset,
   highlightColors,
   fontFamily = '"Syne Mono", Menlo, Monaco, monospace',
-  horizontalPaddingPx = 20,
+  leftPaddingPx = 10,
+  rightPaddingPx = 5,
+  topPaddingPx = 10,
+  bottomPaddingPx = 10,
   topRowCount,
   bottomRowCount,
   minCenterRowCount = 1,
@@ -398,9 +404,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
   const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
-  const contentWidthPx = Math.max(1, containerWidthPx - (horizontalPaddingPx * 2));
-  const topInsetPx = Math.max(0, computeTopInsetPx(spacingPreset));
-  const drawableHeightPx = Math.max(1, containerHeightPx - topInsetPx);
+  const contentWidthPx = Math.max(1, containerWidthPx - (leftPaddingPx + rightPaddingPx));
+  const topInsetPx = Math.max(0, topPaddingPx);
+  const drawableHeightPx = Math.max(1, containerHeightPx - topInsetPx - Math.max(0, bottomPaddingPx));
   const charCellWidthPx = useMemo(
     () => measureMonospaceCellWidthPx(fontSizePx, fontFamily),
     [fontFamily, fontSizePx]
@@ -516,8 +522,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const textColumnCount = Math.max(1, gridColumnCount - reservedVisualOnlyColumns);
   const wrapWidthPx = Math.max(1, textColumnCount * charCellWidthPx);
   const textareaRightPaddingPx = Math.max(
-    horizontalPaddingPx,
-    containerWidthPx - horizontalPaddingPx - wrapWidthPx
+    rightPaddingPx,
+    containerWidthPx - leftPaddingPx - wrapWidthPx
   );
   const model = useMemo(() => {
     const m = new FixedFocusViewportModel(
@@ -967,7 +973,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       // Compute left/width/height using grid metrics and snap to device pixels
       // so the overlay matches the box interior exactly (subtract 2px for the
       // top+bottom grid borders).
-      const leftRaw = rect ? (rect.left - rootRect.left) : (horizontalPaddingPx + (overlayCaretCell.gridColumn * charCellWidthPx));
+      const leftRaw = rect ? (rect.left - rootRect.left) : (leftPaddingPx + (overlayCaretCell.gridColumn * charCellWidthPx));
       const left = snapToDevicePixels(Math.round(leftRaw) + insetPx);
       const width = snapToDevicePixels(Math.max(2, Math.round(charCellWidthPx) - (insetPx * 2)));
       const desiredHeight = Math.max(2, metrics.rowHeightPx - 2); // remove 1px top+1px bottom borders
@@ -1046,7 +1052,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     layout.topHeightPx,
     topInsetPx,
     viewport.centerRowCount,
-    horizontalPaddingPx,
+    leftPaddingPx,
     wrappedLines.length,
     isPointerSelecting,
     selectionStart,
@@ -1125,7 +1131,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const targetRow = wrappedLines[targetRowIndex];
     if (!targetRow) return;
 
-    const relativeX = event.clientX - zoneBounds.left - horizontalPaddingPx;
+    const relativeX = event.clientX - zoneBounds.left - leftPaddingPx;
     const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
     boundaryCaretRowPreferenceRef.current = targetRowIndex;
     rememberPreferredCaretVisualColumn(targetCell);
@@ -1198,7 +1204,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const editorRoot = editorRootRef.current;
     const rootBounds = editorRoot?.getBoundingClientRect();
     const pointerCell = rootBounds
-      ? Math.max(0, Math.round((event.clientX - rootBounds.left - horizontalPaddingPx) / charCellWidthPx))
+      ? Math.max(0, Math.round((event.clientX - rootBounds.left - leftPaddingPx) / charCellWidthPx))
       : 0;
     rememberPreferredCaretVisualColumn(pointerCell);
     const clickedPos = getCharIndexForPointer(event.clientX, event.clientY);
@@ -1459,11 +1465,11 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (!targetRow) return 0;
 
     const rootBounds = editorRoot.getBoundingClientRect();
-    const relativeX = clientX - rootBounds.left - horizontalPaddingPx;
+    const relativeX = clientX - rootBounds.left - leftPaddingPx;
     const targetCell = Math.max(0, Math.round(relativeX / charCellWidthPx));
     boundaryCaretRowPreferenceRef.current = targetRowIndex;
     return getCharIndexForVisualCell(targetRow, targetCell);
-  }, [charCellWidthPx, getCharIndexForVisualCell, getVisibleRowIndexForPointer, horizontalPaddingPx, wrappedLines]);
+  }, [charCellWidthPx, getCharIndexForVisualCell, getVisibleRowIndexForPointer, leftPaddingPx, wrappedLines]);
 
   const getCenterZoneBounds = useCallback(() => {
     const editorRoot = editorRootRef.current;
@@ -1620,7 +1626,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           className="fixed-focus-box-background-overlay"
           aria-hidden
           style={{
-            '--grid-horizontal-padding': `${horizontalPaddingPx}px`,
+            '--grid-horizontal-padding': `${leftPaddingPx}px`,
             '--grid-quantized-width': `${quantizedGridWidthPx}px`,
             '--grid-background-width': `${quantizedBackgroundWidthPx}px`,
             '--grid-top-height': `${layout.topHeightPx}px`,
@@ -1644,7 +1650,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           style={{
             '--grid-row-height': `${metrics.rowHeightPx}px`,
             '--grid-column-width': `${charCellWidthPx}px`,
-            '--grid-horizontal-padding': `${horizontalPaddingPx}px`,
+            '--grid-horizontal-padding': `${leftPaddingPx}px`,
             '--grid-quantized-width': `${quantizedGridWidthPx}px`,
             '--grid-quantized-height': `${quantizedGridHeightPx}px`,
             '--grid-line-color': highlightColors?.grid,
@@ -1664,7 +1670,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
           style={{
             '--grid-row-height': `${metrics.rowHeightPx}px`,
             '--grid-column-width': `${charCellWidthPx}px`,
-            '--grid-horizontal-padding': `${horizontalPaddingPx}px`,
+            '--grid-horizontal-padding': `${leftPaddingPx}px`,
             '--grid-quantized-width': `${quantizedGridWidthPx}px`,
             '--grid-line-color': highlightColors?.grid,
             '--scroll-indicator-active-bg': highlightColors?.caret,
@@ -1707,7 +1713,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               visibleHeightPx={layout.topHeightPx}
               startRow={Math.max(0, effectiveCenterStartRow - topRows.length)}
               insetTopPx={topRowsInsetPx}
-              horizontalPaddingPx={horizontalPaddingPx}
+              leftPaddingPx={leftPaddingPx}
               rightPaddingPx={textareaRightPaddingPx}
               textareaClassName={textareaClassName}
               textareaStyle={textareaStyle}
@@ -1763,7 +1769,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               height: `${textareaHeightPx}px`,
               fontSize: `${fontSizePx}px`,
               lineHeight: `${metrics.rowHeightPx}px`,
-              padding: `0 ${textareaRightPaddingPx}px 0 ${horizontalPaddingPx}px`,
+              padding: `0 ${textareaRightPaddingPx}px 0 ${leftPaddingPx}px`,
               margin: 0,
               border: 'none',
               resize: 'none',
@@ -1806,7 +1812,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               visibleHeightPx={layout.bottomHeightPx}
               startRow={effectiveCenterStartRow + viewport.centerRowCount}
               insetTopPx={0}
-              horizontalPaddingPx={horizontalPaddingPx}
+              leftPaddingPx={leftPaddingPx}
               rightPaddingPx={textareaRightPaddingPx}
               textareaClassName={textareaClassName}
               textareaStyle={textareaStyle}
@@ -1839,7 +1845,7 @@ interface MirroredTextLayerProps {
   visibleHeightPx: number;
   startRow: number;
   insetTopPx?: number;
-  horizontalPaddingPx?: number;
+  leftPaddingPx?: number;
   rightPaddingPx?: number;
   textareaClassName?: string;
   textareaStyle?: React.CSSProperties;
@@ -1853,7 +1859,7 @@ const MirroredTextLayer: React.FC<MirroredTextLayerProps> = ({
   startRow,
   insetTopPx = 0,
   rightPaddingPx = 20,
-  horizontalPaddingPx = 20,
+  leftPaddingPx = 20,
   textareaClassName,
   textareaStyle,
 }) => (
@@ -1879,7 +1885,7 @@ const MirroredTextLayer: React.FC<MirroredTextLayerProps> = ({
         height: `${Math.max(visibleHeightPx, totalWrappedRowCount * metrics.rowHeightPx)}px`,
         fontSize: 'inherit',
         lineHeight: `${metrics.rowHeightPx}px`,
-        padding: `0 ${rightPaddingPx}px 0 ${horizontalPaddingPx}px`,
+        padding: `0 ${rightPaddingPx}px 0 ${leftPaddingPx}px`,
         margin: 0,
         border: 'none',
         resize: 'none',

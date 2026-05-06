@@ -293,7 +293,7 @@
   height: auto;
   min-width: 0;
   box-sizing: border-box;
-  padding: 20px;
+  padding: 10px 5px 10px 10px;
   border: none;
   resize: none;
   font-size: 16px;
@@ -339,7 +339,7 @@
 .markdown-textarea { font-variant-ligatures: none; }
 
 @media (max-width: 600px) {
-  .markdown-textarea { padding: 12px; }
+  .markdown-textarea { padding: 10px 5px 10px 10px; }
   .markdown-textarea.editor-style-redhat { background-size: 100% 28px; }
   .markdown-textarea.editor-style-syne { background-size: 100% 24px, auto; }
 }
