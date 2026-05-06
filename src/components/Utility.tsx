@@ -140,16 +140,23 @@ export const Utility: React.FC<UtilityProps> = ({
         onMouseLeave={handleMouseLeave}
       >
         <button
-          className={`utility-btn ${isArmedForCurrent || isArmedForAll ? 'utility-btn--armed' : ''}`}
+          className={`utility-btn utility-btn--history ${isArmedForCurrent || isArmedForAll ? 'utility-btn--armed' : ''}`}
           type="button"
           onClick={() => setArmedState('none')}
           onContextMenu={handleHistoryRightClick}
           title={historyButtonTitle}
           aria-label="Manage edit history"
         >
-          <span className="utility-icon utility-icon--history" />
-          {currentHistoryCount > 0 && <span className="history-count-badge">{currentHistoryCount}</span>}
+          {currentHistoryCount > 0 ? (
+            <span className="history-count">{currentHistoryCount}</span>
+          ) : (
+            <span className="utility-icon utility-icon--history" />
+          )}
         </button>
+      </div>
+
+      <div className="utility-btn utility-btn--placeholder">
+        <span className="utility-icon utility-icon--empty-set" />
       </div>
     </div>
   );
