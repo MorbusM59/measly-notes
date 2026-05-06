@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -584,19 +584,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       setCaretPos(liveEnd);
       // Persist to DB / localStorage.
       if (note?.id != null) void saveEditState(note.id);
-      // After ReactMarkdown renders, sync view scrollTop to match the edit viewport position.
-      scheduleTimeout(() => {
-        const editorContent = editorContentRef.current;
-        const totalRows = Math.max(1, totalWrappedRowsRef.current);
-        if (!editorContent) return;
-        
-        // Ratio calculation based on how many rows are visible
-        const visibleRows = editorContent.clientHeight / 24; // Approximation of view line height
-        const scrollableRows = Math.max(1, totalRows - visibleRows);
-        const ratio = Math.min(1, liveViewportStartRowRef.current / scrollableRows);
-        
-        editorContent.scrollTop = ratio * Math.max(0, editorContent.scrollHeight - editorContent.clientHeight);
-      }, 50);
     } else {
       // Returning to edit mode.
       if (previewRestoreTimeoutRef.current) {
@@ -637,6 +624,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPreview]);
+
+  // Synchronously update the preview scroll position before the browser paints,
+  // entirely eliminating the flash of the previous/incorrect scroll location.
+  useLayoutEffect(() => {
+    if (showPreview) {
+      const editorContent = editorContentRef.current;
+      const totalRows = Math.max(1, totalWrappedRowsRef.current);
+      if (!editorContent) return;
+      
+      // Force initial layout calculation and immediately apply scroll position
+      const visibleRows = editorContent.clientHeight / 24; 
+      const scrollableRows = Math.max(1, totalRows - visibleRows);
+      const ratio = Math.min(1, liveViewportStartRowRef.current / scrollableRows);
+      
+      editorContent.scrollTop = ratio * Math.max(0, editorContent.scrollHeight - editorContent.clientHeight);
+    }
   }, [showPreview]);
 
   // Load note content when note changes
