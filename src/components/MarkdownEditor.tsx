@@ -723,8 +723,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     const savedEditorStyle = localStorage.getItem('markdown-editor-style');
     const savedEditorFontSize = localStorage.getItem('markdown-editor-font-size');
     const savedEditorSpacing = localStorage.getItem('markdown-editor-spacing');
-    const savedFixedFocusTopRowCount = localStorage.getItem('markdown-editor-fixed-focus-top-rows');
-    const savedFixedFocusBottomRowCount = localStorage.getItem('markdown-editor-fixed-focus-bottom-rows');
     const savedHighlightColors: HighlightColors = {
       caret: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.caret) || DEFAULT_HIGHLIGHT_COLORS.caret,
       selection: localStorage.getItem(HIGHLIGHT_COLOR_STORAGE_KEYS.selection) || DEFAULT_HIGHLIGHT_COLORS.selection,
@@ -743,6 +741,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     if (savedEditorFontSize) setEditorFontSize(savedEditorFontSize);
     if (savedEditorSpacing) setEditorSpacing(savedEditorSpacing);
     setHighlightColors(savedHighlightColors);
+    
+    const initialSpacing = savedEditorSpacing || 'cozy';
+    const savedFixedFocusTopRowCount = localStorage.getItem(`markdown-editor-fixed-focus-top-rows-${initialSpacing}`) || localStorage.getItem('markdown-editor-fixed-focus-top-rows');
+    const savedFixedFocusBottomRowCount = localStorage.getItem(`markdown-editor-fixed-focus-bottom-rows-${initialSpacing}`) || localStorage.getItem('markdown-editor-fixed-focus-bottom-rows');
+
     if (savedFixedFocusTopRowCount) {
       const parsedTopRowCount = Number(savedFixedFocusTopRowCount);
       if (Number.isFinite(parsedTopRowCount) && parsedTopRowCount >= 0) {
@@ -783,6 +786,24 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const handleEditorSpacingChange = (spacingValue: string) => {
     setEditorSpacing(spacingValue);
     localStorage.setItem('markdown-editor-spacing', spacingValue);
+    
+    // Load per-spacing row counts if they exist
+    const savedTop = localStorage.getItem(`markdown-editor-fixed-focus-top-rows-${spacingValue}`);
+    const savedBottom = localStorage.getItem(`markdown-editor-fixed-focus-bottom-rows-${spacingValue}`);
+    
+    if (savedTop) {
+      const parsedTop = Number(savedTop);
+      if (Number.isFinite(parsedTop) && parsedTop >= 0) {
+        setFixedFocusTopRowCount(Math.floor(parsedTop));
+      }
+    }
+    
+    if (savedBottom) {
+      const parsedBottom = Number(savedBottom);
+      if (Number.isFinite(parsedBottom) && parsedBottom >= 0) {
+        setFixedFocusBottomRowCount(Math.floor(parsedBottom));
+      }
+    }
   };
   const openHighlightColorEditor = (key: HighlightColorKey) => {
     if (activeHighlightColorKey === key) {
@@ -826,11 +847,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   };
   const handleFixedFocusTopRowCountChange = (rowCount: number) => {
     setFixedFocusTopRowCount(rowCount);
-    localStorage.setItem('markdown-editor-fixed-focus-top-rows', String(rowCount));
+    localStorage.setItem(`markdown-editor-fixed-focus-top-rows-${editorSpacing}`, String(rowCount));
+    localStorage.setItem('markdown-editor-fixed-focus-top-rows', String(rowCount)); // fallback
   };
   const handleFixedFocusBottomRowCountChange = (rowCount: number) => {
     setFixedFocusBottomRowCount(rowCount);
-    localStorage.setItem('markdown-editor-fixed-focus-bottom-rows', String(rowCount));
+    localStorage.setItem(`markdown-editor-fixed-focus-bottom-rows-${editorSpacing}`, String(rowCount));
+    localStorage.setItem('markdown-editor-fixed-focus-bottom-rows', String(rowCount)); // fallback
   };
 
   // Preload the selected editor font so switching between edit/view is immediate.
