@@ -587,9 +587,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       // After ReactMarkdown renders, sync view scrollTop to match the edit viewport position.
       scheduleTimeout(() => {
         const editorContent = editorContentRef.current;
-        const totalRows = totalWrappedRowsRef.current;
-        if (!editorContent || totalRows <= 0) return;
-        const ratio = liveViewportStartRowRef.current / totalRows;
+        const totalRows = Math.max(1, totalWrappedRowsRef.current);
+        if (!editorContent) return;
+        
+        // Ratio calculation based on how many rows are visible
+        const visibleRows = editorContent.clientHeight / 24; // Approximation of view line height
+        const scrollableRows = Math.max(1, totalRows - visibleRows);
+        const ratio = Math.min(1, liveViewportStartRowRef.current / scrollableRows);
+        
         editorContent.scrollTop = ratio * Math.max(0, editorContent.scrollHeight - editorContent.clientHeight);
       }, 50);
     } else {
