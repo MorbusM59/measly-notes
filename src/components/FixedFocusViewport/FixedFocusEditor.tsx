@@ -13,6 +13,7 @@ import { FixedFocusViewportModel } from './viewportModel';
 import { WrappedLine, findRowForCharIndex } from './textWrapping';
 import { ComputedMetrics, heightForRows } from './lineMetrics';
 import './FixedFocusEditor.scss';
+import { Timeline } from '../Timeline';
 
 // ─── Contenteditable helpers ─────────────────────────────────────────────────
 
@@ -307,6 +308,7 @@ interface FixedFocusEditorProps {
   onCompositionEnd?: React.CompositionEventHandler<HTMLDivElement>;
   /** Called whenever the total wrapped row count changes (e.g. text reflows). */
   onTotalWrappedRowCountChange?: (count: number) => void;
+  timelineProps?: any;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,6 +351,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   onCompositionStart,
   onCompositionEnd,
   onTotalWrappedRowCountChange,
+  timelineProps,
 }) => {
   const [uncontrolledViewportStartRow, setUncontrolledViewportStartRow] = useState(0);
   const [uncontrolledTopRowCount, setUncontrolledTopRowCount] = useState(topRowCount ?? 3);
@@ -408,7 +411,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const resolvedBottomRowCount = bottomRowCount ?? uncontrolledBottomRowCount;
   const contentWidthPx = Math.max(1, containerWidthPx - (leftPaddingPx + rightPaddingPx));
   const topInsetPx = Math.max(0, topPaddingPx);
-  const drawableHeightPx = Math.max(1, containerHeightPx - topInsetPx - Math.max(0, bottomPaddingPx));
 
   const [fontsLoadedInc, setFontsLoadedInc] = useState(0);
   useEffect(() => {
@@ -424,6 +426,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     () => measureMonospaceCellWidthPx(fontSizePx, fontFamily),
     [fontFamily, fontSizePx, fontsLoadedInc]
   );
+
+  const effectiveBottomPaddingPx = timelineProps 
+    ? 5 + (charCellWidthPx * 2) 
+    : Math.max(0, bottomPaddingPx);
+
+  const drawableHeightPx = Math.max(1, containerHeightPx - topInsetPx - effectiveBottomPaddingPx);
 
   const setViewportStartRow = useCallback((nextViewportStartRow: number | ((prev: number) => number)) => {
     const resolvedNextRow = typeof nextViewportStartRow === 'function'
@@ -1854,11 +1862,26 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         style={{ top: `${bottomDividerTopPx}px` }}
         onPointerDown={startResize('bottom')}
       />
-    </div>
-  );
-};
 
-// ─────────────────────────────────────────────────────────────────────────────
+        {timelineProps && (
+          <div className="fixed-focus-timeline-slot" style={{
+            position: 'absolute',
+            bottom: '5px',
+            left: `${leftPaddingPx}px`,
+            width: `${quantizedGridWidthPx}px`,
+            height: `${charCellWidthPx}px`,
+            display: 'flex',
+          }}>
+            <Timeline 
+              {...timelineProps}
+              charWidth={charCellWidthPx}
+              gridWidth={quantizedGridWidthPx}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
 
 interface MirroredTextLayerProps {
   text: string;

@@ -151,14 +151,26 @@ function getHighlightLabelColor(color: string): string {
 }
 
 
+import { Timeline } from './Timeline';
+
+export interface TimelineProps {
+  snapshots: any[];
+  timeMachineIndex: number;
+  onNavigate: (index: number) => void;
+  onDeleteSnapshot: (snapshotId: number) => void;
+  onManualSnapshot: () => void;
+}
+
 interface MarkdownEditorProps {
   note: Note | null;
   onNoteUpdate?: (note: Note) => void;
   showPreview: boolean;
   onTogglePreview: (next: boolean) => void;
   hasAnyNotes?: boolean;
-  onEditHistoryCountChange?: (count: number) => void;
-  historyResetSignal?: number;
+  autoSaveEnabled?: boolean;
+  timeMachineSnapshotContent?: string | null;
+  onTimeMachineInterrupt?: () => void;
+  timelineProps?: TimelineProps;
 }
 
 type EditState = {
@@ -187,8 +199,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   showPreview,
   onTogglePreview,
   hasAnyNotes,
-  onEditHistoryCountChange,
-  historyResetSignal = 0,
+  autoSaveEnabled = true,
+  timeMachineSnapshotContent,
+  onTimeMachineInterrupt,
+  timelineProps
 }) => {
   const [content, setContent] = useState('');
   const [caretPos, setCaretPos] = useState(0);
@@ -223,6 +237,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const editorContentRef = useRef<HTMLDivElement | null>(null);
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedContentRef = useRef('');
+  const lastAutoSnapshotTimeRef = useRef(0);
   const lastSavedTitleRef = useRef('');
   const currentNoteIdRef = useRef<number | null>(null);
 
@@ -340,8 +355,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   useEffect(() => { liveViewportStartRowRef.current = editViewportStartRow; }, [editViewportStartRow]);
 
   useEffect(() => {
-    onEditHistoryCountChange?.(editHistoryCount);
-  }, [editHistoryCount, onEditHistoryCountChange]);
+    const handleManualSnapshot = async () => {
+      if (!note || content == null) return;
+      await window.electronAPI.saveNoteSnapshot(note.id, content, true);
+      lastAutoSnapshotTimeRef.current = Date.now();
+      document.dispatchEvent(new CustomEvent('manual-snapshot-completed'));
+    };
+    document.addEventListener('request-manual-snapshot', handleManualSnapshot);
+    return () => document.removeEventListener('request-manual-snapshot', handleManualSnapshot);
+  }, [note, content]);
 
   useEffect(() => {
     if (!note) {
@@ -354,7 +376,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       return;
     }
 
-    const noteId = note.id;
     let isCancelled = false;
     // History is now ephemeral across edits.
     undoStackRef.current = [];
@@ -362,20 +383,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     undoTotalDiffRef.current = 0;
     setEditHistoryCount(0);
 
-
     return () => {
       isCancelled = true;
     };
   }, [note]);
-
-  useEffect(() => {
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    undoTotalDiffRef.current = 0;
-    setEditHistoryCount(0);
-    pendingHistoryBoundaryRef.current = null;
-    lastCommittedSnapshotRef.current = buildSnapshot(content, selectionStart, selectionEnd);
-  }, [buildSnapshot, historyResetSignal]);
 
   useEffect(() => {
     if (lastCommittedSnapshotRef.current.content === content) {
@@ -593,6 +604,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       savedEditPositionRef.current = null; // clear cached position so DB is loaded for this note
       window.electronAPI.loadNote(note.id).then(noteContent => {
         lastSavedContentRef.current = noteContent;
+        lastAutoSnapshotTimeRef.current = Date.now();
         setContent(noteContent);
         pendingHistoryBoundaryRef.current = null;
         lastCommittedSnapshotRef.current = { content: noteContent, selectionStart: 0, selectionEnd: 0 };
@@ -971,12 +983,22 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
   // autoSave (returns a promise)
   const autoSave = useCallback(async () => {
-    if (!note || content == null) return;
+    if (!autoSaveEnabled || !note || content == null) return;
     const diskContent = content;
     if (diskContent === lastSavedContentRef.current) return;
 
     const savedNote = await window.electronAPI.saveNote(note.id, diskContent);
     lastSavedContentRef.current = diskContent;
+
+    const now = Date.now();
+    if (now - lastAutoSnapshotTimeRef.current >= 5 * 60 * 1000) {
+      window.electronAPI.saveNoteSnapshot(note.id, diskContent, false)
+        .then(() => {
+          lastAutoSnapshotTimeRef.current = Date.now();
+          document.dispatchEvent(new CustomEvent('auto-snapshot-completed'));
+        })
+        .catch(err => console.warn('snapshot save failed', err));
+    }
 
     const newTitle = extractTitle(diskContent);
     // Only notify parent about the saved note when the title actually
@@ -991,7 +1013,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         onNoteUpdate(payload);
       }
     }
-  }, [note, content, extractTitle, onNoteUpdate]);
+  }, [autoSaveEnabled, note, content, extractTitle, onNoteUpdate]);
 
   // Register force-save listener from preload API; accept requestId and respond when done
   useEffect(() => {
@@ -1930,7 +1952,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         {!showPreview ? (
           <FixedFocusEditor
             key={`${editorStyle}-${editorFontSize}-${editorSpacing}-${layoutRevision}`}
-            text={content}
+            text={timeMachineSnapshotContent ?? content}
             caretPos={caretPos}
             selectionStart={selectionStart}
             selectionEnd={selectionEnd}
@@ -1952,7 +1974,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             onTopRowCountChange={handleFixedFocusTopRowCountChange}
             onBottomRowCountChange={handleFixedFocusBottomRowCountChange}
             onTotalWrappedRowCountChange={(count) => { totalWrappedRowsRef.current = count; }}
+            timelineProps={timelineProps}
             onTextChange={(newText, newSelectionStart, newSelectionEnd) => {
+              onTimeMachineInterrupt?.();
               const beforeSnapshot = lastCommittedSnapshotRef.current;
               if (beforeSnapshot.content !== newText) {
                 const diff = Math.abs(newText.length - beforeSnapshot.content.length);
@@ -1965,6 +1989,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
               checkCursorPosition();
             }}
             onSelectionChange={(start, end) => {
+              onTimeMachineInterrupt?.();
               // Programmatic transforms (Enter/list continuation/etc.) set an explicit
               // target selection. Ignore transient browser select events in that window.
               if (programmaticInsertRef.current) return;
@@ -2023,7 +2048,7 @@ Start typing your note here...`}
                 }
               }}
             >
-              {content}
+              {(timeMachineSnapshotContent ?? content) || '_No content_'}
             </ReactMarkdown>
           </div>
         )}

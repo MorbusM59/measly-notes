@@ -76,6 +76,22 @@ const electronAPI: IElectronAPI & {
     return (await ipcRenderer.invoke('delete-note', id)) as void;
   },
 
+  saveNoteSnapshot: async (noteId: number, content: string, isManual?: boolean) => {
+    assertPositiveInteger(noteId, 'noteId');
+    if (typeof content !== 'string') throw new Error('Invalid content');
+    return (await ipcRenderer.invoke('save-note-snapshot', noteId, content, isManual)) as void;
+  },
+
+  getNoteSnapshots: async (noteId: number) => {
+    assertPositiveInteger(noteId, 'noteId');
+    return (await ipcRenderer.invoke('get-note-snapshots', noteId)) as any[];
+  },
+
+  deleteNoteSnapshot: async (snapshotId: number) => {
+    assertPositiveInteger(snapshotId, 'snapshotId');
+    return (await ipcRenderer.invoke('delete-note-snapshot', snapshotId)) as void;
+  },
+
   // Tags
   addTagToNote: async (noteId: number, tagName: string, position: number) => {
     assertPositiveInteger(noteId, 'noteId');

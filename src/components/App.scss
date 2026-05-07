@@ -94,7 +94,9 @@
   margin: 0;
   grid-area: viewer;
   box-sizing: border-box;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Minimal layout constraints — append only (do not replace file) */

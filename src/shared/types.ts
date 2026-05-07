@@ -93,6 +93,14 @@ export interface CategoryHierarchyResult {
   uncategorizedNotes: Note[];
 }
 
+export interface NoteSnapshot {
+  id: number;
+  noteId: number;
+  content: string;
+  timestamp: string;
+  isManual?: boolean;
+}
+
 /**
  * Electron preload/IPC API interface (used in global.d.ts and preload.ts)
  */
@@ -104,6 +112,11 @@ export interface IElectronAPI {
   getAllNotes: () => Promise<Note[]>;
   getNotesPage: (page: number, perPage: number) => Promise<{ notes: Note[]; total: number }>;
   deleteNote: (id: number) => Promise<void>;
+
+  // Time Machine
+  saveNoteSnapshot: (noteId: number, content: string, isManual?: boolean) => Promise<void>;
+  getNoteSnapshots: (noteId: number) => Promise<NoteSnapshot[]>;
+  deleteNoteSnapshot: (snapshotId: number) => Promise<void>;
 
   // Tag operations
   addTagToNote: (noteId: number, tagName: string, position: number) => Promise<NoteTag>;

@@ -45,6 +45,16 @@ export async function initDatabase(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_note_tags_note ON note_tags(noteId);
     CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tagId);
+
+    CREATE TABLE IF NOT EXISTS note_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      noteId INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      isManual INTEGER DEFAULT 0,
+      FOREIGN KEY (noteId) REFERENCES notes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_note_snapshots_note ON note_snapshots(noteId);
   `);
 
   // Ensure UI state columns exist on `notes` table. Use a migration-friendly approach
@@ -1310,3 +1320,82 @@ export async function reconcileNotesWithFs(opts?: { markMissingAsDeleted?: boole
 
   return results;
 }
+export function saveNoteSnapshot(noteId: number, content: string, isManual: boolean = false): void {
+  const timestamp = new Date().toISOString();
+  db.prepare('INSERT INTO note_snapshots (noteId, content, timestamp, isManual) VALUES (?, ?, ?, ?)').run(noteId, content, timestamp, isManual ? 1 : 0);
+  compactNoteSnapshots(noteId);
+}
+
+export function getNoteSnapshots(noteId: number): import('../shared/types').NoteSnapshot[] {
+  const rows = db.prepare('SELECT * FROM note_snapshots WHERE noteId = ? ORDER BY timestamp DESC').all(noteId) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    noteId: r.noteId,
+    content: r.content,
+    timestamp: r.timestamp,
+    isManual: r.isManual === 1
+  }));
+}
+
+export function deleteNoteSnapshot(snapshotId: number): void {
+  db.prepare('DELETE FROM note_snapshots WHERE id = ?').run(snapshotId);
+}
+
+function compactNoteSnapshots(noteId: number): void {
+  const snapshots = db.prepare('SELECT * FROM note_snapshots WHERE noteId = ? ORDER BY timestamp DESC').all(noteId) as import('../shared/types').NoteSnapshot[];
+  if (snapshots.length === 0) return;
+
+  const now = Date.now();
+  const toDelete: number[] = [];
+  const keptSnapshots: any[] = [];
+
+  let lastKeptContent: string | null = null;
+  
+  let lastKeptAge = -1;
+  const MAX_CHECK_AGE = 12 * 60 * 60 * 1000;
+
+  for (const snap of snapshots) {
+    const age = now - new Date(snap.timestamp).getTime();
+
+    if ((snap as any).isManual === 1) {
+      keptSnapshots.push(snap);
+      lastKeptContent = snap.content;
+      lastKeptAge = age;
+      continue;
+    }
+    
+    if (lastKeptContent !== null && lastKeptContent === snap.content) {
+      toDelete.push(snap.id);
+      continue;
+    }
+
+    let kept = false;
+
+    if (lastKeptAge === -1) {
+      kept = true;
+    } else {
+      const timeDiff = age - lastKeptAge;
+      const threshold = Math.min(age / 2, MAX_CHECK_AGE);
+      if (timeDiff >= threshold) {
+        kept = true;
+      }
+    }
+
+    if (kept) {
+      lastKeptContent = snap.content;
+      lastKeptAge = age;
+      keptSnapshots.push(snap);
+    } else {
+      toDelete.push(snap.id);
+    }
+  }
+
+  if (toDelete.length > 0) {
+    const deleteStmt = db.prepare('DELETE FROM note_snapshots WHERE id = ?');
+    const transaction = db.transaction((ids: number[]) => {
+      for (const id of ids) deleteStmt.run(id);
+    });
+    transaction(toDelete);
+  }
+}
+

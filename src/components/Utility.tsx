@@ -1,24 +1,23 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import './Utility.scss';
 
 interface UtilityProps {
   onActionComplete?: () => void;
   onExportPdf?: (chooseFolder?: boolean) => Promise<void>;
-  currentHistoryCount?: number;
+  
+  autoSaveEnabled?: boolean;
+  onToggleAutoSave?: () => void;
+
   hasSelectedNote?: boolean;
-  onClearCurrentHistory?: () => void | Promise<void>;
-  onClearAllHistory?: () => void | Promise<void>;
 }
 
 export const Utility: React.FC<UtilityProps> = ({
   onActionComplete,
   onExportPdf,
-  currentHistoryCount = 0,
+  autoSaveEnabled = true,
+  onToggleAutoSave,
   hasSelectedNote = false,
-  onClearCurrentHistory,
-  onClearAllHistory,
 }) => {
-  const [armedState, setArmedState] = useState<'none' | 'current' | 'all'>('none');
   const historyGroupRef = useRef<HTMLDivElement>(null);
 
   const handleSync = async () => {
@@ -58,43 +57,7 @@ export const Utility: React.FC<UtilityProps> = ({
     }
   };
 
-  const handleHistoryRightClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    if (event.shiftKey) {
-      // Handle "all" history
-      if (armedState === 'all') {
-        onClearAllHistory?.();
-        setArmedState('none');
-      } else {
-        setArmedState('all');
-      }
-    } else {
-      // Handle "current" history
-      if (armedState === 'current') {
-        if (canClearCurrentHistory) {
-          onClearCurrentHistory?.();
-        }
-        setArmedState('none');
-      } else {
-        setArmedState('current');
-      }
-    }
-  };
-
-  const handleMouseLeave = () => {
-    setArmedState('none');
-  };
-
-  const canClearCurrentHistory = hasSelectedNote && currentHistoryCount > 0;
-  const isArmedForAll = armedState === 'all';
-  const isArmedForCurrent = armedState === 'current' && canClearCurrentHistory;
-
-  let historyButtonTitle = 'Right-click to arm history clearing. Shift + Right-click to arm for all notes.';
-  if (isArmedForCurrent) {
-    historyButtonTitle = 'Right-click again to clear history for this note.';
-  } else if (isArmedForAll) {
-    historyButtonTitle = 'Shift + Right-click again to clear history for ALL notes.';
-  }
+  let historyButtonTitle = autoSaveEnabled ? "Auto-Save: ON" : "Auto-Save: OFF";
 
   return (
     <div className="utility-panel">
@@ -136,22 +99,18 @@ export const Utility: React.FC<UtilityProps> = ({
       </button>
 
       <div
+        ref={historyGroupRef}
         className="utility-history-group"
-        onMouseLeave={handleMouseLeave}
       >
         <button
-          className={`utility-btn utility-btn--history ${isArmedForCurrent || isArmedForAll ? 'utility-btn--armed' : ''}`}
+          className={`utility-btn utility-btn--history ${!autoSaveEnabled ? 'utility-btn--armed' : ''}`}
           type="button"
-          onClick={() => setArmedState('none')}
-          onContextMenu={handleHistoryRightClick}
+          onClick={onToggleAutoSave}
           title={historyButtonTitle}
-          aria-label="Manage edit history"
+          aria-label="Toggle Auto-Save"
+          disabled={!hasSelectedNote}
         >
-          {currentHistoryCount > 0 ? (
-            <span className="history-count">{currentHistoryCount}</span>
-          ) : (
-            <span className="utility-icon utility-icon--history" />
-          )}
+          <span className="utility-icon utility-icon--history" style={{ opacity: autoSaveEnabled ? 1 : 0.5 }} />
         </button>
       </div>
 

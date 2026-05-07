@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Note } from '../shared/types';
 import { Sidebar } from './Sidebar';
-import { MarkdownEditor } from './MarkdownEditor';
+import { MarkdownEditor, TimelineProps } from './MarkdownEditor';
 import { TagInput } from './TagInput';
 import {
   FILTER_MONTHS,
@@ -18,7 +18,26 @@ import { Utility } from './Utility';
 
 export const App: React.FC = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
-  const [selectedNoteHistoryCount, setSelectedNoteHistoryCount] = useState(0);
+  
+  // Time Machine State
+  const [snapshots, setSnapshots] = useState<import('../shared/types').NoteSnapshot[]>([]);
+  const [timeMachineIndex, setTimeMachineIndex] = useState<number>(-1);
+
+  useEffect(() => {
+    const handleSnap = async () => {
+      if (selectedNote && isMountedRef.current) {
+        const snaps = await window.electronAPI.getNoteSnapshots(selectedNote.id);
+        setSnapshots(snaps);
+      }
+    };
+    document.addEventListener('manual-snapshot-completed', handleSnap);
+    document.addEventListener('auto-snapshot-completed', handleSnap);
+    return () => {
+      document.removeEventListener('manual-snapshot-completed', handleSnap);
+      document.removeEventListener('auto-snapshot-completed', handleSnap);
+    };
+  }, [selectedNote]);
+    const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [sidebarNoteUpdate, setSidebarNoteUpdate] = useState<Note | null>(null);
@@ -194,7 +213,8 @@ export const App: React.FC = () => {
 
     if (!isMountedRef.current) return;
     setSelectedNote(note);
-    setSelectedNoteHistoryCount(0);
+    setSnapshots([]);
+    setTimeMachineIndex(-1);
     // Ensure the sidebar shows the latest view when creating a new note
     setViewMode('latest');
     setRefreshKey(k => k + 1);
@@ -209,14 +229,26 @@ export const App: React.FC = () => {
     }
     if (isMountedRef.current) {
       setSelectedNote(note);
-      setSelectedNoteHistoryCount(0);
+      setTimeMachineIndex(-1);
+      // Fetch snapshots
+      window.electronAPI.getNoteSnapshots(note.id).then(snaps => {
+        if (isMountedRef.current) {
+          setSnapshots(snaps);
+        }
+      });
     }
   };
 
-  const handleClearCurrentHistory = async () => {};
-
-  const handleClearAllHistory = async () => {
-    // Clear history feature removed for now
+  const handleTimeMachineNavigate = (direction: 'back' | 'forward' | 'latest') => {
+    if (snapshots.length === 0) return;
+    
+    if (direction === 'latest') {
+      setTimeMachineIndex(-1);
+    } else if (direction === 'back') {
+      setTimeMachineIndex(prev => Math.min(prev + 1, snapshots.length - 1));
+    } else if (direction === 'forward') {
+      setTimeMachineIndex(prev => Math.max(-1, prev - 1));
+    }
   };
 
   const handleNoteUpdate = (updatedNote: Note) => {
@@ -599,12 +631,10 @@ export const App: React.FC = () => {
           <Utility
             onActionComplete={() => setSidebarRefreshTrigger(t => t + 1)}
             onExportPdf={handleExportPdf}
-            currentHistoryCount={selectedNoteHistoryCount}
+            autoSaveEnabled={autoSaveEnabled}
+            onToggleAutoSave={() => setAutoSaveEnabled(!autoSaveEnabled)}
             hasSelectedNote={selectedNote != null}
-            onClearCurrentHistory={handleClearCurrentHistory}
-            onClearAllHistory={handleClearAllHistory}
           />
-
         </div>
       </div>
 
@@ -616,8 +646,26 @@ export const App: React.FC = () => {
           showPreview={showPreview}
           onTogglePreview={(next: boolean) => togglePreview(next)}
           hasAnyNotes={hasAnyNotes}
-          onEditHistoryCountChange={setSelectedNoteHistoryCount}
-          historyResetSignal={historyResetSignal}
+          autoSaveEnabled={autoSaveEnabled}
+          timeMachineSnapshotContent={timeMachineIndex >= 0 && snapshots[timeMachineIndex] ? snapshots[timeMachineIndex].content : null}
+          onTimeMachineInterrupt={() => {
+            if (timeMachineIndex !== -1) {
+              setTimeMachineIndex(-1);
+            }
+          }}
+          timelineProps={selectedNote ? {
+            snapshots,
+            timeMachineIndex,
+            onNavigate: (index: number) => setTimeMachineIndex(index),
+            onDeleteSnapshot: async (id: number) => {
+              await window.electronAPI.deleteNoteSnapshot(id);
+              const snaps = await window.electronAPI.getNoteSnapshots(selectedNote.id);
+              if (isMountedRef.current) setSnapshots(snaps);
+            },
+            onManualSnapshot: () => {
+              document.dispatchEvent(new CustomEvent('request-manual-snapshot'));
+            }
+          } : undefined}
         />
       </div>
     </div>

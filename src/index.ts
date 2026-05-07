@@ -9,7 +9,8 @@ import {
   getAllTags, getTopTags, searchNotesByTag, getNotesByPrimaryTag, getCategoryHierarchy, getLastEditedNote,
   upsertNoteFts, removeNoteFts, searchNotes, saveNoteUiState, getNoteUiState, getHierarchyForTag, getNotesInTrash,
   
-  generateUniqueFileToken, setNoteFileToken, getNoteByToken, reconcileNotesWithFs, updateNoteCreatedAt, updateNoteLastEdited, renameTag } from './main/database';
+  generateUniqueFileToken, setNoteFileToken, getNoteByToken, reconcileNotesWithFs, updateNoteCreatedAt, updateNoteLastEdited, renameTag,
+  saveNoteSnapshot, getNoteSnapshots, deleteNoteSnapshot } from './main/database';
 
 import { initFileSystem, saveNoteContent, loadNoteContent, deleteNoteFile, copyFileToNotes } from './main/fileSystem';
 import { SearchResult } from './shared/types';
@@ -457,6 +458,22 @@ app.whenReady().then(async () => {
         deleteNote(Number(id));
         try { removeNoteFts(Number(id)); } catch (err) { console.warn('[main] failed to remove FTS entry for deleted note', id, err); }
       }
+    });
+
+    ipcMain.handle('save-note-snapshot', async (_event, noteId: unknown, content: unknown, isManual: unknown) => {
+      if (!isPositiveInteger(noteId)) throw new Error('Invalid noteId');
+      if (typeof content !== 'string') throw new Error('Invalid content');
+      saveNoteSnapshot(Number(noteId), content, Boolean(isManual));
+    });
+
+    ipcMain.handle('get-note-snapshots', async (_event, noteId: unknown) => {
+      if (!isPositiveInteger(noteId)) throw new Error('Invalid noteId');
+      return getNoteSnapshots(Number(noteId));
+    });
+
+    ipcMain.handle('delete-note-snapshot', async (_event, snapshotId: unknown) => {
+      if (!isPositiveInteger(snapshotId)) throw new Error('Invalid snapshotId');
+      deleteNoteSnapshot(Number(snapshotId));
     });
 
     ipcMain.handle('update-note-title', async (_event, id: unknown, title: unknown) => {
