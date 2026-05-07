@@ -27,7 +27,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   // Snapshots are sorted DESC by timestamp (0 is newest).
   // However, we may want to render present at the right, oldest at the left.
   
-  const presentDate = Date.now();
+  const presentDate = React.useMemo(() => Date.now(), [snapshots]);
   const oldestDate = new Date(snapshots.length > 0 ? snapshots[snapshots.length - 1].timestamp : presentDate).getTime();
   const presentDateNum = presentDate;
   const totalDuration = Math.max(1000, presentDateNum - oldestDate); // prevent div by zero
@@ -52,15 +52,11 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const handleBoxRightClick = (e: React.MouseEvent, index: number, snap: NoteSnapshot) => {
     e.preventDefault();
-    if (timeMachineIndex !== index) {
-      // 1st right click: Navigate (color green)
-      onNavigate(index);
-      setArmedSnapshotId(null);
-    } else if (armedSnapshotId !== snap.id) {
-      // 2nd right click: Arm (color red)
+    if (armedSnapshotId !== snap.id) {
+      // 1st right click: Arm (color red)
       setArmedSnapshotId(snap.id);
     } else {
-      // 3rd right click: Delete
+      // 2nd right click: Delete
       onDeleteSnapshot(snap.id);
       setArmedSnapshotId(null);
     }
