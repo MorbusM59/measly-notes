@@ -539,7 +539,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const wrapSafetyPx = 1;
   const totalColumnCount = Math.max(1, Math.floor((contentWidthPx - wrapSafetyPx) / charCellWidthPx));
   const gridColumnCount = Math.max(0, totalColumnCount - 1);
-  const reservedVisualOnlyColumns = 2;
+  const reservedVisualOnlyColumns = 1;
   const textColumnCount = Math.max(1, gridColumnCount - reservedVisualOnlyColumns);
   const wrapWidthPx = Math.max(1, textColumnCount * charCellWidthPx);
   const textareaRightPaddingPx = Math.max(
@@ -602,6 +602,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const bottomRows = model.getBottomZoneRows();
   const gridRowCount = Math.max(0, Math.floor(drawableHeightPx / metrics.rowHeightPx));
   const quantizedGridWidthPx = gridColumnCount * charCellWidthPx;
+  const timelineWidthPx = totalColumnCount * charCellWidthPx;
   const quantizedBackgroundWidthPx = Math.floor(Math.max(0, quantizedGridWidthPx - charCellWidthPx));
   const quantizedGridHeightPx = gridRowCount * metrics.rowHeightPx;
   const totalVisibleRows = viewport.topRowCount + viewport.centerRowCount + viewport.bottomRowCount;
@@ -1868,14 +1869,14 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             position: 'absolute',
             bottom: '5px',
             left: `${leftPaddingPx}px`,
-            width: `${quantizedGridWidthPx}px`,
+            width: `${timelineWidthPx}px`,
             height: `${charCellWidthPx}px`,
             display: 'flex',
           }}>
             <Timeline 
               {...timelineProps}
               charWidth={charCellWidthPx}
-              gridWidth={quantizedGridWidthPx}
+              gridWidth={timelineWidthPx}
             />
           </div>
         )}

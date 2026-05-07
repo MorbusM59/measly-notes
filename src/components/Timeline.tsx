@@ -40,8 +40,9 @@ export const Timeline: React.FC<TimelineProps> = ({
     const logAge = Math.log(age + 1);
     const logTotal = Math.log(totalDuration + 1);
     const perc = (logTotal - logAge) / logTotal;
-    const rawCol = Math.floor(perc * numCols);
-    return Math.max(0, Math.min(numCols - 1, rawCol));
+    const numSnapshotCols = Math.max(1, numCols - 2); // Exclude present box and gap
+    const rawCol = Math.floor(perc * numSnapshotCols);
+    return Math.max(0, Math.min(numSnapshotCols - 1, rawCol));
   };
 
 
@@ -94,9 +95,11 @@ export const Timeline: React.FC<TimelineProps> = ({
         {Array.from({ length: numCols }).map((_, colIndex) => {
           const items = clusters[colIndex] || [];
           const isPresentBox = colIndex === numCols - 1;
+          const isGapBox = colIndex === numCols - 2;
           const isActive = items.some(i => i.index === timeMachineIndex) || (isPresentBox && timeMachineIndex === -1);
           const isArmed = items.some(i => i.snapshot.id === armedSnapshotId);
-          const isEmpty = items.length === 0 && !isPresentBox;
+          const isEmpty = items.length === 0 && !isPresentBox && !isGapBox;
+          const hasItems = items.length > 0;
           const primary = items[0];
 
           return (
@@ -111,16 +114,16 @@ export const Timeline: React.FC<TimelineProps> = ({
               }}
             >
               <div 
-                className={`timeline-box ${isEmpty && !isPresentBox ? 'empty-box' : 'base-box'} ${isActive ? 'active' : ''} ${isArmed && !isEmpty ? 'armed' : ''}`}
+                className={`timeline-box ${isEmpty && !isPresentBox && !isGapBox ? 'empty-box' : 'base-box'} ${isGapBox ? 'gap-box' : ''} ${isActive ? 'active' : ''} ${isArmed && !isEmpty ? 'armed' : ''}`}
                 style={{ width: '100%', height: '100%' }}
-                onClick={isPresentBox ? handlePresentLeftClick : (!isEmpty ? () => handleBoxLeftClick(primary.index) : undefined)}
-                onContextMenu={!isEmpty && !isPresentBox ? (e) => handleBoxRightClick(e, primary.index, primary.snapshot) : undefined}
-                title={isPresentBox ? (timeMachineIndex === -1 ? "Present (Auto)" : "Return to Present") : (!isEmpty ? new Date(primary.snapshot.timestamp).toLocaleString() : undefined)}
+                  onClick={isPresentBox ? handlePresentLeftClick : (hasItems ? () => handleBoxLeftClick(primary.index) : undefined)}
+                  onContextMenu={hasItems && !isPresentBox ? (e) => handleBoxRightClick(e, primary.index, primary.snapshot) : undefined}
+                  title={isPresentBox ? (timeMachineIndex === -1 ? "Present (Auto)" : "Return to Present") : (hasItems ? new Date(primary.snapshot.timestamp).toLocaleString() : undefined)}
               >
-                {!isEmpty && !isPresentBox && primary.snapshot.isManual && <div className="manual-dot" />}
+                  {hasItems && !isPresentBox && primary.snapshot.isManual && <div className="manual-dot" />}
               </div>
 
-              {!isEmpty && !isPresentBox && (
+                {hasItems && !isPresentBox && (
                  <>
                   {items.length > 1 && (
                     <div className="timeline-flyout">

@@ -28,7 +28,7 @@
   height: 14px;
   /* background simulates scrollbar thumb */
   background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(249, 246, 244, 1);
   margin-bottom: 0px; 
   cursor: pointer;
   display: flex;
@@ -38,13 +38,20 @@
 }
 
 .timeline-box.empty-box {
-  background: transparent;
-  border-color: transparent;
+  background: var(--markdown-editor-highlight-background, rgba(0, 0, 0, 0.05));
+  border: 1px solid rgba(249, 246, 244, 1);
   cursor: default;
 }
 
+.timeline-box.gap-box {
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+  pointer-events: none;
+}
+
 .timeline-box.empty-box:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--markdown-editor-highlight-background, rgba(0, 0, 0, 0.05));
 }
 
 .timeline-box:hover {
@@ -53,7 +60,6 @@
 
 .timeline-box.active {
   background: #28a745; /* Green as requested for active state */
-  border-color: #1e7e34;
 }
 
 .timeline-box.armed {
@@ -68,7 +74,6 @@
   flex-direction: column-reverse;
   background: transparent;
   z-index: 100;
-  box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
 }
 
 .timeline-cluster:hover .timeline-flyout,
@@ -87,12 +92,11 @@
 
 .present-box.active {
   background: #28a745; 
-  border-color: #1e7e34;
 }
 
 .manual-dot {
-  width: 4px;
-  height: 4px;
+  width: 2px;
+  height: 2px;
   background: #222; /* Matches text/caret */
   border-radius: 50%;
 }
