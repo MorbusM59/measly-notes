@@ -5,6 +5,7 @@ import './Timeline.scss';
 interface TimelineProps {
   snapshots: NoteSnapshot[];
   timeMachineIndex: number;
+  logBase?: number;
   onNavigate: (index: number) => void;
   onDeleteSnapshot: (snapshotId: number) => void;
   onManualSnapshot: () => void;
@@ -16,6 +17,7 @@ interface TimelineProps {
 export const Timeline: React.FC<TimelineProps> = ({
   snapshots,
   timeMachineIndex,
+  logBase = 10,
   onNavigate,
   onDeleteSnapshot,
   onManualSnapshot,
@@ -34,15 +36,23 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const numCols = charWidth && gridWidth ? Math.floor(gridWidth / charWidth) : 50;
 
-  const calculateCol = (timestamp: string) => {
-    const age = presentDate - new Date(timestamp).getTime();
-    if (age <= 0) return numCols - 1; // rightmost col
-    const logAge = Math.log(age + 1);
-    const logTotal = Math.log(totalDuration + 1);
-    const perc = (logTotal - logAge) / logTotal;
-    const numSnapshotCols = Math.max(1, numCols - 2); // Exclude present box and gap
-    const rawCol = Math.floor(perc * numSnapshotCols);
-    return Math.max(0, Math.min(numSnapshotCols - 1, rawCol));
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    const ONE_YEAR = 365 * ONE_DAY;
+
+    const calculateCol = (timestamp: string) => {
+      const age = presentDate - new Date(timestamp).getTime();
+      if (age <= 0) return numCols - 1; // rightmost col
+      
+      const numSnapshotCols = Math.max(1, numCols - 2); // Exclude present box and gap
+      
+      if (age <= ONE_DAY) return numSnapshotCols - 1;
+      if (age >= ONE_YEAR) return 0;
+      
+      const logAge = Math.log(age) / Math.log(logBase);
+      const logMin = Math.log(ONE_DAY) / Math.log(logBase);
+      const logMax = Math.log(ONE_YEAR) / Math.log(logBase);
+      const perc = (logMax - logAge) / (logMax - logMin);
+      
   };
 
 

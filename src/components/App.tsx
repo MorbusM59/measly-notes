@@ -38,6 +38,7 @@ export const App: React.FC = () => {
     };
   }, [selectedNote]);
     const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+    const [logBase, setLogBase] = useState(10);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [sidebarNoteUpdate, setSidebarNoteUpdate] = useState<Note | null>(null);
@@ -642,6 +643,8 @@ export const App: React.FC = () => {
             autoSaveEnabled={autoSaveEnabled}
             onToggleAutoSave={() => setAutoSaveEnabled(!autoSaveEnabled)}
             hasSelectedNote={selectedNote != null}
+            logBase={logBase}
+            onLogBaseChange={setLogBase}
           />
         </div>
       </div>
@@ -664,6 +667,7 @@ export const App: React.FC = () => {
           timelineProps={selectedNote ? {
             snapshots,
             timeMachineIndex,
+            logBase,
             onNavigate: (index: number) => setTimeMachineIndex(index),
             onDeleteSnapshot: async (id: number) => {
               await window.electronAPI.deleteNoteSnapshot(id);

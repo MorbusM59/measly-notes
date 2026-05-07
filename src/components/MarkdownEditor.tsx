@@ -156,6 +156,7 @@ import { Timeline } from './Timeline';
 export interface TimelineProps {
   snapshots: any[];
   timeMachineIndex: number;
+  logBase?: number;
   onNavigate: (index: number) => void;
   onDeleteSnapshot: (snapshotId: number) => void;
   onManualSnapshot: () => void;

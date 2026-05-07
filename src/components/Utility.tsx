@@ -9,6 +9,9 @@ interface UtilityProps {
   onToggleAutoSave?: () => void;
 
   hasSelectedNote?: boolean;
+
+  logBase?: number;
+  onLogBaseChange?: (base: number) => void;
 }
 
 export const Utility: React.FC<UtilityProps> = ({
@@ -17,7 +20,11 @@ export const Utility: React.FC<UtilityProps> = ({
   autoSaveEnabled = true,
   onToggleAutoSave,
   hasSelectedNote = false,
+  logBase = 10,
+  onLogBaseChange,
 }) => {
+  const [isEditingBase, setIsEditingBase] = React.useState(false);
+  const [baseInput, setBaseInput] = React.useState(logBase.toString());
   const historyGroupRef = useRef<HTMLDivElement>(null);
 
   const handleSync = async () => {
@@ -102,16 +109,49 @@ export const Utility: React.FC<UtilityProps> = ({
         ref={historyGroupRef}
         className="utility-history-group"
       >
-        <button
-          className={`utility-btn utility-btn--history ${!autoSaveEnabled ? 'utility-btn--armed' : ''}`}
-          type="button"
-          onClick={onToggleAutoSave}
-          title={historyButtonTitle}
-          aria-label="Toggle Auto-Save"
-          disabled={!hasSelectedNote}
-        >
-          <span className="utility-icon utility-icon--history" style={{ opacity: autoSaveEnabled ? 1 : 0.5 }} />
-        </button>
+        {isEditingBase ? (
+          <input
+            className="utility-btn utility-btn--history"
+            style={{ width: '40px', padding: '0 4px', textAlign: 'center', background: 'var(--markdown-editor-background)', color: 'var(--markdown-editor-foreground)', border: 'none' }}
+            autoFocus
+            value={baseInput}
+            onChange={e => setBaseInput(e.target.value)}
+            onBlur={() => {
+              setIsEditingBase(false);
+              setBaseInput(logBase.toString());
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                const parsed = parseFloat(baseInput);
+                if (!isNaN(parsed) && parsed > 0 && parsed !== 1) {
+                  onLogBaseChange?.(parsed);
+                } else {
+                  setBaseInput(logBase.toString());
+                }
+                setIsEditingBase(false);
+              } else if (e.key === 'Escape') {
+                setIsEditingBase(false);
+                setBaseInput(logBase.toString());
+              }
+            }}
+          />
+        ) : (
+          <button
+            className={`utility-btn utility-btn--history ${!autoSaveEnabled ? 'utility-btn--armed' : ''}`}
+            type="button"
+            onClick={onToggleAutoSave}
+            onContextMenu={e => {
+              e.preventDefault();
+              setIsEditingBase(true);
+              setBaseInput(logBase.toString());
+            }}
+            title={historyButtonTitle}
+            aria-label="Toggle Auto-Save"
+            disabled={!hasSelectedNote}
+          >
+            <span className="utility-icon utility-icon--history" style={{ opacity: autoSaveEnabled ? 1 : 0.5 }} />
+          </button>
+        )}
       </div>
 
       <div className="utility-btn utility-btn--placeholder">
