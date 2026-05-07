@@ -37,12 +37,13 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const numCols = charWidth && gridWidth ? Math.floor(gridWidth / charWidth) : 50;
 
+    const ONE_MINUTE = 60 * 1000;
     const ONE_DAY = 24 * 60 * 60 * 1000;
     const ONE_YEAR = 365 * ONE_DAY;
 
     const calculateCol = (timestamp: string) => {
       const age = presentDate - new Date(timestamp).getTime();
-      if (age <= 0) return numCols - 1; // rightmost col
+      if (age <= ONE_MINUTE) return numCols - 1; // 1 min or newer maps to rightmost col
       
       const numSnapshotCols = Math.max(1, numCols - 2); // Exclude present box and gap
       
@@ -51,10 +52,15 @@ export const Timeline: React.FC<TimelineProps> = ({
 
       if (age >= timelineSpan) return 0;
       
-      const b = Math.max(1, logBase);
-      const logAge = Math.log(age / b + 1);
-      const logSpan = Math.log(timelineSpan / b + 1);
-      const perc = (logSpan - logAge) / logSpan;
+      // Convert logBase into a curvature exponent (k).
+      // k=1 (base 1) is linear. As base increases, curvature separates recent saves more heavily.
+      const k = 1 / Math.max(1.0001, logBase);
+      const minK = Math.pow(ONE_MINUTE, k);
+      const spanK = Math.pow(timelineSpan, k);
+      const ageK = Math.pow(age, k);
+      
+      const f_curve = (ageK - minK) / (spanK - minK);
+      const perc = 1 - f_curve;
       
       const rawCol = Math.floor(perc * numSnapshotCols);
       return Math.max(0, Math.min(numSnapshotCols - 1, rawCol));
