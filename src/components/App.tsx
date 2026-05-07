@@ -100,7 +100,13 @@ export const App: React.FC = () => {
     (async () => {
       try {
         const last = await window.electronAPI.getLastEditedNote();
-        if (last && isMountedRef.current) setSelectedNote(last);
+        if (last && isMountedRef.current) {
+          setSelectedNote(last);
+          const snaps = await window.electronAPI.getNoteSnapshots(last.id);
+          if (isMountedRef.current) {
+            setSnapshots(snaps);
+          }
+        }
         // determine whether any notes exist
         try {
           const all = await window.electronAPI.getAllNotes();
@@ -175,6 +181,8 @@ export const App: React.FC = () => {
 
             if (!isMountedRef.current) return;
             setSelectedNote(note);
+            setSnapshots([]);
+            setTimeMachineIndex(-1);
             setViewMode('latest');
             setRefreshKey(k => k + 1);
             setHasAnyNotes(true);
