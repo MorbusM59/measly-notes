@@ -127,7 +127,10 @@ export const Timeline: React.FC<TimelineProps> = ({
   });
 
   return (
-    <div className="timeline-container" style={{ height: charWidth ? `${charWidth}px` : '14px' }}>
+    <div className="timeline-container" style={{ 
+      height: charWidth ? `${charWidth}px` : '14px',
+      '--cell-size': charWidth ? `${charWidth}px` : '14px'
+    } as React.CSSProperties}>
       <div className="timeline-track" style={{ 
         display: 'flex', 
         width: '100%', 
@@ -158,7 +161,6 @@ export const Timeline: React.FC<TimelineProps> = ({
             >
               <div 
                 className={`timeline-box ${isEmpty && !isPresentBox && !isGapBox ? 'empty-box' : 'base-box'} ${isGapBox ? 'gap-box' : ''} ${isActive ? 'active' : ''} ${isArmed && !isEmpty ? 'armed' : ''}`}
-                style={{ width: '100%', height: '100%' }}
                   onClick={isPresentBox ? handlePresentLeftClick : (hasItems ? (e) => handleBoxLeftClick(e, primary.index, items.length > 1, colIndex) : undefined)}
                   onContextMenu={hasItems && !isPresentBox ? (e) => handleBoxRightClick(e, primary.index, primary.snapshot) : undefined}
                   title={isPresentBox ? (timeMachineIndex === -1 ? "Present (Auto)" : "Return to Present") : (hasItems ? new Date(primary.snapshot.timestamp).toLocaleString() : undefined)}
@@ -174,7 +176,6 @@ export const Timeline: React.FC<TimelineProps> = ({
                         <div 
                           key={item.snapshot.id} 
                           className={`timeline-box base-flyout-box ${item.index === timeMachineIndex ? 'active' : ''} ${item.snapshot.id === armedSnapshotId ? 'armed' : ''}`}
-                          style={{ width: charWidth ? `${charWidth}px` : '100%', height: charWidth ? `${charWidth}px` : '100%' }}
                           onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); handleFlyoutItemClick(item.index); }}
                           onContextMenu={(e) => handleBoxRightClick(e, item.index, item.snapshot)}
                           title={new Date(item.snapshot.timestamp).toLocaleString()}
