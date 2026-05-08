@@ -325,7 +325,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const [editorSpacing, setEditorSpacing] = useState<string>('cozy');
   const [highlightColors, setHighlightColors] = useState<HighlightColors>(DEFAULT_HIGHLIGHT_COLORS);
   const [editorPanelGridColor, setEditorPanelGridColor] = useState<string>('rgb(255, 255, 255)');
-  const [activeHighlightColorKey, setActiveHighlightColorKey] = useState<HighlightColorKey | null>(null);
   const [secondaryToolbarPanel, setSecondaryToolbarPanel] = useState<'color-settings' | null>(null);
   const [colorSliderHsva, setColorSliderHsva] = useState<HSVA | null>(null);
   const [activeSliderInputKey, setActiveSliderInputKey] = useState<ColorSliderKey | null>(null);
@@ -864,32 +863,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       }
     }
   };
-  const openHighlightColorEditor = (key: HighlightColorKey) => {
-    if (activeHighlightColorKey === key) {
-      setActiveHighlightColorKey(null);
-      setColorSliderHsva(null);
-      setSecondaryToolbarPanel(null);
-      return;
-    }
-
+  const setPreviewColorFromElement = (key: HighlightColorKey) => {
     const currentHsva = colorToHsva(highlightColors[key]) ?? { h: 210, s: 10, v: 90, a: 1 };
-    setActiveHighlightColorKey(key);
     setColorSliderHsva(currentHsva);
     setSecondaryToolbarPanel('color-settings');
   };
 
-  const updateColorSliderValue = (next: HSVA) => {
-    if (!activeHighlightColorKey) return;
-    setColorSliderHsva(next);
-    const rgba = hsvaToRgbaString(next);
-    setHighlightColors((previousColors) => ({
-      ...previousColors,
-      [activeHighlightColorKey]: rgba,
-    }));
-    localStorage.setItem(HIGHLIGHT_COLOR_STORAGE_KEYS[activeHighlightColorKey], rgba);
-  };
-
-  const applySelectedColorToKey = (key: HighlightColorKey) => {
+  const applyPreviewColorToElement = (key: HighlightColorKey) => {
     if (!colorSliderHsva) return;
     const rgba = hsvaToRgbaString(colorSliderHsva);
     setHighlightColors((previousColors) => ({
@@ -897,6 +877,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       [key]: rgba,
     }));
     localStorage.setItem(HIGHLIGHT_COLOR_STORAGE_KEYS[key], rgba);
+  };
+
+  const updateColorSliderValue = (next: HSVA) => {
+    setColorSliderHsva(next);
   };
 
   const openSliderKeyInput = (key: ColorSliderKey) => {
@@ -972,6 +956,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       setSecondaryToolbarPanel(null);
     }
   }, [showPreview, secondaryToolbarPanel]);
+
+  useEffect(() => {
+    if (secondaryToolbarPanel === 'color-settings' && !colorSliderHsva) {
+      const firstKey: HighlightColorKey = 'caret';
+      const currentHsva = colorToHsva(highlightColors[firstKey]) ?? { h: 210, s: 10, v: 90, a: 1 };
+      setColorSliderHsva(currentHsva);
+    }
+  }, [secondaryToolbarPanel, colorSliderHsva, highlightColors]);
 
   const handleFixedFocusTopRowCountChange = (rowCount: number) => {
     setFixedFocusTopRowCount(rowCount);
@@ -2093,16 +2085,16 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                 {(['caret', 'selection', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
                   <button
                     key={key}
-                    className={`toolbar-btn-icon color-swatch-btn${activeHighlightColorKey === key ? ' is-open' : ''}`}
+                    className="toolbar-btn-icon color-swatch-btn"
                     style={{
                       background: highlightColors[key],
                       color: getHighlightLabelColor(highlightColors[key]),
                     }}
-                    onClick={() => openHighlightColorEditor(key)}
+                    onClick={() => setPreviewColorFromElement(key)}
                     onContextMenu={(e) => {
                       if (!colorSliderHsva) return;
                       e.preventDefault();
-                      applySelectedColorToKey(key);
+                      applyPreviewColorToElement(key);
                     }}
                     title={HIGHLIGHT_COLOR_TITLES[key]}
                   >
@@ -2111,7 +2103,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                 ))}
               </div>
 
-              {activeHighlightColorKey && colorSliderHsva && (
+              {colorSliderHsva && (
                 <div className="highlight-color-panel">
                   <div className="highlight-color-sliders-row">
                     {([
