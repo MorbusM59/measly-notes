@@ -141,7 +141,7 @@
 .highlight-color-controls {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   margin-right: 4px;
 }
 
@@ -154,7 +154,7 @@
 .highlight-color-panel {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   margin-top: 0;
   flex-wrap: nowrap;
 }
@@ -173,11 +173,29 @@
   gap: 6px;
 }
 
-.slider-label {
-  width: 18px;
-  text-align: center;
+.slider-key-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.slider-key-input {
+  width: 54px;
+  min-width: 54px;
+  height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  color: #111;
   font-size: 12px;
-  color: #444;
+  text-align: center;
+  outline: none;
+}
+
+.slider-key-input:focus {
+  border-color: #007bff;
 }
 
 .highlight-color-slider-cell input[type="range"] {
