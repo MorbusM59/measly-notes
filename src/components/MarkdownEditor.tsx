@@ -226,6 +226,56 @@ function sliderKeyToHsvaProp(key: ColorSliderKey): keyof HSVA {
   }
 }
 
+function sliderKeyBackground(key: ColorSliderKey, hsva: HSVA): string {
+  switch (key) {
+    case 'hue': {
+      const rgb = hsvToRgb(hsva.h, 1, 1);
+      return `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, 1)`;
+    }
+    case 'saturation': {
+      const gray = Math.round(255 - ((hsva.s / 100) * 255));
+      return `rgb(${gray}, ${gray}, ${gray})`;
+    }
+    case 'vibrancy': {
+      const gray = Math.round(255 - ((hsva.v / 100) * 255));
+      return `rgb(${gray}, ${gray}, ${gray})`;
+    }
+    case 'alpha': {
+      const gray = Math.round((1 - hsva.a) * 255);
+      return `rgb(${gray}, ${gray}, ${gray})`;
+    }
+  }
+}
+
+function sliderKeyTextStyle(key: ColorSliderKey, hsva: HSVA): React.CSSProperties | undefined {
+  if (key === 'hue') return undefined;
+  let brightness: number;
+  if (key === 'saturation') {
+    brightness = 1 - hsva.s / 100;
+  } else if (key === 'vibrancy') {
+    brightness = 1 - hsva.v / 100;
+  } else {
+    brightness = 1 - hsva.a;
+  }
+
+  if (brightness > 0.5) {
+    return {
+      color: '#111',
+      textShadow: '0 0 4px rgba(255,255,255,0.9)',
+    };
+  }
+
+  return {
+    color: '#fff',
+    textShadow: '0 0 4px rgba(0,0,0,0.7)',
+  };
+}
+
+function getSliderValueFromHsva(key: ColorSliderKey, hsva: HSVA): number {
+  const prop = sliderKeyToHsvaProp(key);
+  return prop === 'a' ? hsva.a : hsva[prop];
+}
+
 function inputValueToSliderValue(key: ColorSliderKey, value: number): number {
   const clamped = Math.max(0, Math.min(255, value));
   switch (key) {
@@ -2139,6 +2189,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                           <button
                             className="toolbar-btn-icon slider-key-btn"
                             type="button"
+                            style={colorSliderHsva ? {
+                              backgroundColor: sliderKeyBackground(slider.key, colorSliderHsva),
+                              ...sliderKeyTextStyle(slider.key, colorSliderHsva),
+                            } : undefined}
                             onClick={() => openSliderKeyInput(slider.key)}
                             onContextMenu={(e) => {
                               if (!colorSliderHsva) return;
@@ -2166,7 +2220,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                             if (slider.key === 'alpha') next.a = numeric / 100;
                             updateColorSliderValue(next);
                             if (activeSliderInputKey === slider.key) {
-                              setSliderInputValue(String(sliderKeyToInputValue(slider.key, next[slider.key])));
+                              setSliderInputValue(String(sliderKeyToInputValue(slider.key, getSliderValueFromHsva(slider.key, next))));
                             }
                           }}
                         />
