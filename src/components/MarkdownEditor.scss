@@ -58,7 +58,7 @@
 .secondary-toolbar-panel {
   display: none;
   margin: 0 4px;
-  padding: 10px 12px 8px;
+  padding: 10px 4px 8px;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -171,8 +171,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 14px;
+  padding: 0 14px 0 14px;
   min-width: 0;
+}
+
+.highlight-color-column:first-child {
+  padding-left: 0;
 }
 
 .highlight-color-column + .highlight-color-column {
