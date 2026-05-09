@@ -2578,6 +2578,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                 </div>
               </div>
 
+              <div className="highlight-color-spacer" />
+
               {colorSliderHsva && (
                 <ColorSettingsPanel
                   initialColorSliderHsva={colorSliderHsva}

@@ -152,18 +152,23 @@
 
 .highlight-color-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto 1fr auto auto;
   gap: 10px;
-  align-items: start;
+  align-items: stretch;
   width: 100%;
   min-width: 0;
 }
 
+.highlight-color-spacer {
+  min-width: 0;
+  align-self: stretch;
+}
+
 .highlight-color-buttons-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(4, minmax(120px, auto));
   gap: 0;
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
 }
 
@@ -198,7 +203,7 @@
 }
 
 .highlight-color-panel {
-  grid-column: 2 / 3;
+  grid-column: 3;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -270,6 +275,7 @@
 .highlight-color-slider-cell input[type="range"] {
   width: 100%;
   accent-color: #007bff;
+  appearance: none;
   -webkit-appearance: none;
   background: transparent;
   height: 10px;
@@ -318,11 +324,13 @@
 }
 
 .color-preview-btn {
-  grid-column: 3 / 4;
+  grid-column: 4;
   align-self: stretch;
   width: auto;
+  min-width: 0;
   height: 100%;
   aspect-ratio: 1 / 1;
+  min-height: 0;
   border-radius: var(--border-radius-regular);
   pointer-events: none;
   display: inline-flex;
