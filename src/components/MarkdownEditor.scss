@@ -103,9 +103,10 @@
 }
 
 .toolbar-btn-icon {
-  min-width: 28px;
-  height: 28px;
-  padding: 4px 6px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
   border: 1px solid #ddd;
   background: white;
   border-radius: var(--border-radius-regular);
@@ -115,6 +116,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
 }
 .toolbar-btn-icon:hover {
   background: #e8e8e8;
@@ -314,9 +317,12 @@
 }
 
 .color-swatch-btn {
-  min-width: 28px;
-  padding: 0 6px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
   text-shadow: none;
+  aspect-ratio: 1 / 1;
 
   &.is-open {
     border-color: var(--color-border-selected);
