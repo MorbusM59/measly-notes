@@ -2274,25 +2274,163 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           <div className="secondary-toolbar-content">
             <div className="highlight-color-controls">
               <div className="highlight-color-buttons-row">
-                {(['caret', 'selection', 'background', 'topBackground', 'bottomBackground'] as HighlightColorKey[]).map((key) => (
-                  <button
-                    key={key}
-                    className="toolbar-btn-icon color-swatch-btn"
-                    style={{
-                      background: highlightColors[key],
-                      color: getHighlightLabelColor(highlightColors[key]),
-                    }}
-                    onClick={() => setPreviewColorFromElement(key)}
-                    onContextMenu={(e) => {
-                      if (!colorSliderHsva) return;
-                      e.preventDefault();
-                      applyPreviewColorToElement(key);
-                    }}
-                    title={HIGHLIGHT_COLOR_TITLES[key]}
-                  >
-                    {HIGHLIGHT_COLOR_LABELS[key]}
-                  </button>
-                ))}
+                <div className="highlight-color-column">
+                  <div className="highlight-color-column-title">Tools</div>
+                  <div className="highlight-color-column-buttons">
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      style={{
+                        background: highlightColors.caret,
+                        color: getHighlightLabelColor(highlightColors.caret),
+                      }}
+                      onClick={() => setPreviewColorFromElement('caret')}
+                      onContextMenu={(e) => {
+                        if (!colorSliderHsva) return;
+                        e.preventDefault();
+                        applyPreviewColorToElement('caret');
+                      }}
+                      title={HIGHLIGHT_COLOR_TITLES.caret}
+                    >
+                      {HIGHLIGHT_COLOR_LABELS.caret}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      style={{
+                        background: highlightColors.selection,
+                        color: getHighlightLabelColor(highlightColors.selection),
+                      }}
+                      onClick={() => setPreviewColorFromElement('selection')}
+                      onContextMenu={(e) => {
+                        if (!colorSliderHsva) return;
+                        e.preventDefault();
+                        applyPreviewColorToElement('selection');
+                      }}
+                      title={HIGHLIGHT_COLOR_TITLES.selection}
+                    >
+                      {HIGHLIGHT_COLOR_LABELS.selection}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="highlight-color-column">
+                  <div className="highlight-color-column-title">Background</div>
+                  <div className="highlight-color-column-buttons">
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      style={{
+                        background: highlightColors.background,
+                        color: getHighlightLabelColor(highlightColors.background),
+                      }}
+                      onClick={() => setPreviewColorFromElement('background')}
+                      onContextMenu={(e) => {
+                        if (!colorSliderHsva) return;
+                        e.preventDefault();
+                        applyPreviewColorToElement('background');
+                      }}
+                      title={HIGHLIGHT_COLOR_TITLES.background}
+                    >
+                      {HIGHLIGHT_COLOR_LABELS.background}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      style={{
+                        background: highlightColors.topBackground,
+                        color: getHighlightLabelColor(highlightColors.topBackground),
+                      }}
+                      onClick={() => setPreviewColorFromElement('topBackground')}
+                      onContextMenu={(e) => {
+                        if (!colorSliderHsva) return;
+                        e.preventDefault();
+                        applyPreviewColorToElement('topBackground');
+                      }}
+                      title={HIGHLIGHT_COLOR_TITLES.topBackground}
+                    >
+                      {HIGHLIGHT_COLOR_LABELS.topBackground}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      style={{
+                        background: highlightColors.bottomBackground,
+                        color: getHighlightLabelColor(highlightColors.bottomBackground),
+                      }}
+                      onClick={() => setPreviewColorFromElement('bottomBackground')}
+                      onContextMenu={(e) => {
+                        if (!colorSliderHsva) return;
+                        e.preventDefault();
+                        applyPreviewColorToElement('bottomBackground');
+                      }}
+                      title={HIGHLIGHT_COLOR_TITLES.bottomBackground}
+                    >
+                      {HIGHLIGHT_COLOR_LABELS.bottomBackground}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="highlight-color-column">
+                  <div className="highlight-color-column-title">Scrollbar</div>
+                  <div className="highlight-color-column-buttons">
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      title="Scrollbar background boxes"
+                    >
+                      BG
+                    </button>
+
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      title="Scrollbar handle box"
+                    >
+                      H
+                    </button>
+                  </div>
+                </div>
+
+                <div className="highlight-color-column">
+                  <div className="highlight-color-column-title">Timeline</div>
+                  <div className="highlight-color-column-buttons">
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      title="Timeline background box"
+                    >
+                      B
+                    </button>
+
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      title="Timeline active box"
+                    >
+                      A
+                    </button>
+
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      title="Timeline manual save point box"
+                    >
+                      M
+                    </button>
+
+                    <button
+                      type="button"
+                      className="toolbar-btn-icon color-swatch-btn"
+                      title="Timeline automatic save point box"
+                    >
+                      A
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {colorSliderHsva && (

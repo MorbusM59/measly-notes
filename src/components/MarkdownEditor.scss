@@ -157,10 +157,36 @@
 }
 
 .highlight-color-buttons-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.highlight-color-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 10px;
+}
+
+.highlight-color-column + .highlight-color-column {
+  border-left: 1px solid rgba(0,0,0,0.14);
+}
+
+.highlight-color-column-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.highlight-color-column-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 4px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .highlight-color-panel {
@@ -287,9 +313,8 @@
 }
 
 .color-swatch-btn {
-  width: 28px;
   min-width: 28px;
-  padding: 0;
+  padding: 0 6px;
   text-shadow: none;
 
   &.is-open {
