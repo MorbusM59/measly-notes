@@ -315,12 +315,26 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
   const [localHsva, setLocalHsva] = useState<HSVA>(initialColorSliderHsva);
   const [activeSliderInputKey, setActiveSliderInputKey] = useState<ColorSliderKey | null>(null);
   const [sliderInputValue, setSliderInputValue] = useState<string>('');
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setLocalHsva(initialColorSliderHsva);
     setActiveSliderInputKey(null);
     setSliderInputValue('');
   }, [initialColorSliderHsva]);
+
+  useEffect(() => {
+    if (!activeSliderInputKey) return;
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      if (!panelRef.current) return;
+      if (!panelRef.current.contains(event.target as Node)) {
+        setActiveSliderInputKey(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
+  }, [activeSliderInputKey]);
 
   useEffect(() => {
     onHsvaChange(localHsva);
@@ -405,7 +419,7 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
   }, [sliderInputValue, onApplySliderInputValueToAllElements]);
 
   return (
-    <div className="highlight-color-panel">
+    <div className="highlight-color-panel" ref={panelRef}>
       <div className="highlight-color-sliders-row">
         {sliderSettings.map((slider) => (
           <div key={slider.key} className="highlight-color-slider-cell">
