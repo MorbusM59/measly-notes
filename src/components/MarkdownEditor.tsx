@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMe
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { visit } from 'unist-util-visit';
-import { Node } from 'unist';
+import type { Node } from 'unist';
 import {
   EditSnapshot,
   Note,
@@ -312,13 +312,11 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
   onApplyCurrentSliderValueToAllElements,
   onHsvaChange,
 }: ColorSettingsPanelProps) {
-  const [localHsva, setLocalHsva] = useState<HSVA>(initialColorSliderHsva);
   const [activeSliderInputKey, setActiveSliderInputKey] = useState<ColorSliderKey | null>(null);
   const [sliderInputValue, setSliderInputValue] = useState<string>('');
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setLocalHsva(initialColorSliderHsva);
     setActiveSliderInputKey(null);
     setSliderInputValue('');
   }, [initialColorSliderHsva]);
@@ -326,8 +324,9 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
   useEffect(() => {
     if (!activeSliderInputKey) return;
     const handleDocumentMouseDown = (event: MouseEvent) => {
-      if (!panelRef.current) return;
-      if (!panelRef.current.contains(event.target as Node)) {
+      const target = event.target;
+      if (!panelRef.current || !target || !(target instanceof Node)) return;
+      if (!panelRef.current.contains(target)) {
         setActiveSliderInputKey(null);
       }
     };
@@ -336,46 +335,42 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
     return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
   }, [activeSliderInputKey]);
 
-  useEffect(() => {
-    onHsvaChange(localHsva);
-  }, [localHsva, onHsvaChange]);
-
   const sliderSettings = useMemo<Array<{ key: ColorSliderKey; label: string; min: number; max: number; step: number; value: number }>>(() => [
-    { key: 'hue', label: 'H', min: 0, max: 360, step: 1, value: localHsva.h },
-    { key: 'saturation', label: 'S', min: 0, max: 100, step: 1, value: localHsva.s },
-    { key: 'value', label: 'V', min: 0, max: 100, step: 1, value: localHsva.v },
-    { key: 'alpha', label: 'A', min: 0, max: 100, step: 1, value: Math.round(localHsva.a * 100) },
-  ], [localHsva]);
+    { key: 'hue', label: 'H', min: 0, max: 360, step: 1, value: initialColorSliderHsva.h },
+    { key: 'saturation', label: 'S', min: 0, max: 100, step: 1, value: initialColorSliderHsva.s },
+    { key: 'value', label: 'V', min: 0, max: 100, step: 1, value: initialColorSliderHsva.v },
+    { key: 'alpha', label: 'A', min: 0, max: 100, step: 1, value: Math.round(initialColorSliderHsva.a * 100) },
+  ], [initialColorSliderHsva]);
 
   const handleSliderRangeChange = useCallback((key: ColorSliderKey, numeric: number) => {
-    setLocalHsva((prev) => {
-      const next = { ...prev };
-      if (key === 'hue') next.h = numeric;
-      if (key === 'saturation') next.s = numeric;
-      if (key === 'value') next.v = numeric;
-      if (key === 'alpha') next.a = numeric / 100;
-      return next;
-    });
+    const nextHsva = {
+      ...initialColorSliderHsva,
+      ...(key === 'hue' ? { h: numeric } : {}),
+      ...(key === 'saturation' ? { s: numeric } : {}),
+      ...(key === 'value' ? { v: numeric } : {}),
+      ...(key === 'alpha' ? { a: numeric / 100 } : {}),
+    } as HSVA;
 
+    onHsvaChange(nextHsva);
     if (activeSliderInputKey === key) {
       setSliderInputValue(String(sliderKeyToInputValue(key, numeric)));
     }
-  }, [activeSliderInputKey]);
+  }, [activeSliderInputKey, initialColorSliderHsva, onHsvaChange]);
 
   const handleSliderButtonClick = useCallback((key: ColorSliderKey) => {
     if (activeSliderInputKey === key) {
       setActiveSliderInputKey(null);
       return;
     }
-    const value = getSliderValueFromHsva(key, localHsva);
+    const value = getSliderValueFromHsva(key, initialColorSliderHsva);
     setActiveSliderInputKey(key);
     setSliderInputValue(String(sliderKeyToInputValue(key, value)));
-  }, [activeSliderInputKey, localHsva]);
+  }, [activeSliderInputKey, initialColorSliderHsva]);
 
   const handleSliderButtonContextMenu = useCallback((key: ColorSliderKey, e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    onApplyCurrentSliderValueToAllElements(key, localHsva);
-  }, [localHsva, onApplyCurrentSliderValueToAllElements]);
+    onApplyCurrentSliderValueToAllElements(key, initialColorSliderHsva);
+  }, [initialColorSliderHsva, onApplyCurrentSliderValueToAllElements]);
 
   const handleSliderInputChange = useCallback((value: string) => {
     setSliderInputValue(value);
@@ -389,14 +384,15 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
     const numeric = Number(sliderInputValue);
     if (Number.isFinite(numeric)) {
       const prop = sliderKeyToHsvaProp(activeSliderInputKey);
-      setLocalHsva((prev) => ({
-        ...prev,
+      const nextHsva = {
+        ...initialColorSliderHsva,
         [prop]: inputValueToSliderValue(activeSliderInputKey, numeric),
-      } as HSVA));
+      } as HSVA;
+      onHsvaChange(nextHsva);
     }
 
     setActiveSliderInputKey(null);
-  }, [activeSliderInputKey, sliderInputValue]);
+  }, [activeSliderInputKey, initialColorSliderHsva, onHsvaChange, sliderInputValue]);
 
   const handleSliderInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -435,8 +431,8 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
               className="toolbar-btn-icon slider-key-btn"
               type="button"
               style={{
-                backgroundColor: sliderKeyBackground(slider.key, localHsva),
-                ...sliderKeyTextStyle(slider.key, localHsva),
+                backgroundColor: sliderKeyBackground(slider.key, initialColorSliderHsva),
+                ...sliderKeyTextStyle(slider.key, initialColorSliderHsva),
               }}
               onClick={() => handleSliderButtonClick(slider.key)}
               onContextMenu={(e) => handleSliderButtonContextMenu(slider.key, e)}
@@ -1143,6 +1139,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
   const handleSliderPanelHsvaChange = useCallback((nextHsva: HSVA) => {
     currentPreviewHsvaRef.current = nextHsva;
+    setColorSliderHsva(nextHsva);
   }, []);
 
   useEffect(() => {
