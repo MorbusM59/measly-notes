@@ -1694,57 +1694,28 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const handleCenterContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const editor = event.currentTarget;
     const sel = ceGetSelection(editor);
-    console.debug('[FixedFocusEditor] contextmenu', {
-      sel,
-      button: event.button,
-      clientX: event.clientX,
-      clientY: event.clientY,
-    });
     if (!sel || sel.start === sel.end) return;
     const selectionStart = Math.min(sel.start, sel.end);
     const selectionEnd = Math.max(sel.start, sel.end);
 
     const expanded = getRightClickExpandedSelection(selectionStart, selectionEnd);
     const skipped = !expanded || (expanded.start === selectionStart && expanded.end === selectionEnd);
-    console.debug('[FixedFocusEditor] contextmenu expanded selection', {
-      selectionStart,
-      selectionEnd,
-      expandedStart: expanded?.start,
-      expandedEnd: expanded?.end,
-      skipped,
-    });
     if (skipped) return;
-
-    console.debug('[FixedFocusEditor] contextmenu would have applied expanded selection on mouseup', expanded);
   }, [getRightClickExpandedSelection]);
 
   const handleCenterPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 2) return;
     const editor = event.currentTarget;
     const sel = ceGetSelection(editor);
-    const clickedPos = getCharIndexForPointer(event.clientX, event.clientY);
-    console.debug('[FixedFocusEditor] pointerup button=2', {
-      sel,
-      clickedPos,
-      clientX: event.clientX,
-      clientY: event.clientY,
-    });
     if (sel && sel.start !== sel.end) {
       const selectionStart = Math.min(sel.start, sel.end);
       const selectionEnd = Math.max(sel.start, sel.end);
       const expanded = getRightClickExpandedSelection(selectionStart, selectionEnd);
-      console.debug('[FixedFocusEditor] right-click selection range on mouseup', {
-        selectionStart,
-        selectionEnd,
-        expanded,
-      });
       if (expanded && (expanded.start !== selectionStart || expanded.end !== selectionEnd)) {
         event.preventDefault();
         event.stopPropagation();
         editor.focus();
         ceSetSelection(editor, expanded.start, expanded.end);
-        const afterSel = ceGetSelection(editor);
-        console.debug('[FixedFocusEditor] pointerup after selection update', afterSel);
         onSelectionChange?.(expanded.start, expanded.end);
       }
     }
