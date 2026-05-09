@@ -74,6 +74,7 @@
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  width: 100%;
 }
 .secondary-toolbar-section-title {
   font-size: 13px;
@@ -147,31 +148,29 @@
 }
 
 .highlight-color-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-right: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
 }
 
 .highlight-color-buttons-row {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 10px 4px;
+  align-items: flex-start;
 }
 
 .highlight-color-panel {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 0;
-  flex-wrap: nowrap;
-}
-
-.highlight-color-sliders-row {
+  grid-column: 2 / 3;
   display: grid;
-  grid-template-columns: repeat(4, minmax(96px, 1fr));
+  grid-template-columns: repeat(2, 150px);
+  grid-template-rows: auto auto;
   gap: 10px;
-  flex: 1 1 auto;
+  align-items: stretch;
+  justify-content: start;
   min-width: 0;
 }
 
@@ -269,11 +268,18 @@
 }
 
 .color-preview-btn {
-  min-width: 28px;
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
+  grid-column: 3 / 4;
+  align-self: stretch;
+  width: auto;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--border-radius-regular);
   pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-items: center;
+  justify-content: center;
 }
 
 .color-swatch-btn {

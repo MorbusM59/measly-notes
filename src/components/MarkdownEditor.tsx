@@ -347,11 +347,6 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
     { key: 'alpha', label: 'A', min: 0, max: 100, step: 1, value: Math.round(localHsva.a * 100) },
   ], [localHsva]);
 
-  const previewStyle = useMemo(() => ({
-    background: hsvaToRgbaString(localHsva),
-    color: getHighlightLabelColor(hsvaToRgbaString(localHsva)),
-  }), [localHsva]);
-
   const handleSliderRangeChange = useCallback((key: ColorSliderKey, numeric: number) => {
     setLocalHsva((prev) => {
       const next = { ...prev };
@@ -420,57 +415,47 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
 
   return (
     <div className="highlight-color-panel" ref={panelRef}>
-      <div className="highlight-color-sliders-row">
-        {sliderSettings.map((slider) => (
-          <div key={slider.key} className="highlight-color-slider-cell">
-            {activeSliderInputKey === slider.key ? (
-              <input
-                className="slider-key-input"
-                value={sliderInputValue}
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                onChange={(e) => handleSliderInputChange(e.target.value.replace(/[^0-9]/g, ''))}
-                onBlur={handleSliderInputBlur}
-                onKeyDown={handleSliderInputKeyDown}
-                onContextMenu={(e) => handleSliderInputContextMenu(slider.key, e)}
-                title="Right click to apply this channel value to all elements"
-              />
-            ) : (
-              <button
-                className="toolbar-btn-icon slider-key-btn"
-                type="button"
-                style={{
-                  backgroundColor: sliderKeyBackground(slider.key, localHsva),
-                  ...sliderKeyTextStyle(slider.key, localHsva),
-                }}
-                onClick={() => handleSliderButtonClick(slider.key)}
-                onContextMenu={(e) => handleSliderButtonContextMenu(slider.key, e)}
-                title="Click to enter exact 0–255 value; right click to apply this channel value to all elements"
-              >
-                {slider.label}
-              </button>
-            )}
+      {sliderSettings.map((slider) => (
+        <div key={slider.key} className="highlight-color-slider-cell">
+          {activeSliderInputKey === slider.key ? (
             <input
-              id={`color-slider-${slider.key}`}
-              type="range"
-              min={slider.min}
-              max={slider.max}
-              step={slider.step}
-              value={slider.value}
-              onChange={(e) => handleSliderRangeChange(slider.key, Number(e.target.value))}
+              className="slider-key-input"
+              value={sliderInputValue}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              onChange={(e) => handleSliderInputChange(e.target.value.replace(/[^0-9]/g, ''))}
+              onBlur={handleSliderInputBlur}
+              onKeyDown={handleSliderInputKeyDown}
+              onContextMenu={(e) => handleSliderInputContextMenu(slider.key, e)}
+              title="Right click to apply this channel value to all elements"
             />
-          </div>
-        ))}
-      </div>
-
-      <button
-        className="toolbar-btn-icon color-preview-btn"
-        style={previewStyle}
-        title="Preview"
-        aria-label="Current color preview"
-        disabled
-      />
+          ) : (
+            <button
+              className="toolbar-btn-icon slider-key-btn"
+              type="button"
+              style={{
+                backgroundColor: sliderKeyBackground(slider.key, localHsva),
+                ...sliderKeyTextStyle(slider.key, localHsva),
+              }}
+              onClick={() => handleSliderButtonClick(slider.key)}
+              onContextMenu={(e) => handleSliderButtonContextMenu(slider.key, e)}
+              title="Click to enter exact 0–255 value; right click to apply this channel value to all elements"
+            >
+              {slider.label}
+            </button>
+          )}
+          <input
+            id={`color-slider-${slider.key}`}
+            type="range"
+            min={slider.min}
+            max={slider.max}
+            step={slider.step}
+            value={slider.value}
+            onChange={(e) => handleSliderRangeChange(slider.key, Number(e.target.value))}
+          />
+        </div>
+      ))}
     </div>
   );
 });
@@ -566,6 +551,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const [editorPanelGridColor, setEditorPanelGridColor] = useState<string>('rgb(255, 255, 255)');
   const [secondaryToolbarPanel, setSecondaryToolbarPanel] = useState<'color-settings' | null>(null);
   const [colorSliderHsva, setColorSliderHsva] = useState<HSVA | null>(null);
+  const previewStyle = useMemo(() => {
+    if (!colorSliderHsva) return { background: 'transparent', color: '#111' };
+    const rgba = hsvaToRgbaString(colorSliderHsva);
+    return {
+      background: rgba,
+      color: getHighlightLabelColor(rgba),
+    };
+  }, [colorSliderHsva]);
   const currentPreviewHsvaRef = useRef<HSVA | null>(null);
 
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
@@ -2311,6 +2304,16 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                   onApplySliderInputValueToAllElements={applySliderInputValueToAllElements}
                   onApplyCurrentSliderValueToAllElements={applyCurrentSliderValueToAllElements}
                   onHsvaChange={handleSliderPanelHsvaChange}
+                />
+              )}
+
+              {colorSliderHsva && (
+                <button
+                  className="toolbar-btn-icon color-preview-btn"
+                  style={previewStyle}
+                  title="Preview"
+                  aria-label="Current color preview"
+                  disabled
                 />
               )}
             </div>
