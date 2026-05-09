@@ -456,6 +456,16 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
     ['value', 'alpha'],
   ];
 
+  const sliderKeyIconClass = (sliderKey: ColorSliderKey): string => {
+    switch (sliderKey) {
+      case 'hue': return 'fa-rainbow';
+      case 'saturation': return 'fa-droplet';
+      case 'value': return 'fa-circle-half-stroke';
+      case 'alpha': return 'fa-eye';
+      default: return 'fa-circle';
+    }
+  };
+
   const renderSliderButton = (sliderKey: ColorSliderKey) => {
     const slider = sliderSettingsByKey[sliderKey];
     return activeSliderInputKey === sliderKey ? (
@@ -483,7 +493,7 @@ const ColorSettingsPanel = React.memo(function ColorSettingsPanel({
         onContextMenu={(e) => handleSliderButtonContextMenu(sliderKey, e)}
         title="Click to enter exact 0–255 value; right click to apply this channel value to all elements"
       >
-        {slider.label}
+        <i className={`fa-solid ${sliderKeyIconClass(sliderKey)}`} aria-hidden="true" />
       </button>
     );
   };
