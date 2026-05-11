@@ -166,6 +166,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           const hasItems = items.length > 0;
           const primary = items[0];
           const isPrimaryManual = primary?.snapshot?.isManual === true;
+          const isCurrentMultiToggle = items.length > 1 && openFlyoutCol === colIndex;
 
           if (items.length > 1 || openFlyoutCol === colIndex) {
             console.debug('[Timeline] render column', {
@@ -193,7 +194,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               }}
             >
               <div 
-                className={`timeline-box ${isEmpty && !isPresentBox && !isGapBox ? 'empty-box' : 'base-box'} ${isGapBox ? 'gap-box' : ''} ${hasItems && !isPresentBox ? (isPrimaryManual ? 'manual-box' : 'automatic-box') : ''} ${isActive ? 'active' : ''} ${isArmed && !isEmpty ? 'armed' : ''}`}
+                className={`timeline-box ${isEmpty && !isPresentBox && !isGapBox ? 'empty-box' : 'base-box'} ${isGapBox ? 'gap-box' : ''} ${hasItems && !isPresentBox ? (isPrimaryManual ? 'manual-box' : 'automatic-box') : ''} ${isCurrentMultiToggle ? 'multi-toggle-box' : ''} ${isActive ? 'active' : ''} ${isArmed && !isEmpty ? 'armed' : ''}`}
                   onPointerDown={(e) => e.preventDefault()}
                   onClick={isPresentBox ? handlePresentLeftClick : (hasItems ? (e) => handleBoxLeftClick(e, primary.index, items.length > 1, colIndex) : undefined)}
                   onContextMenu={hasItems && !isPresentBox ? (e) => handleBoxRightClick(e, primary.index, primary.snapshot) : undefined}

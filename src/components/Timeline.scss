@@ -69,6 +69,14 @@
   background: var(--timeline-automatic-bg, rgba(0, 0, 0, 0.25));
 }
 
+.timeline-box.multi-toggle-box {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: calc(100% - 4px);
+  height: calc(100% - 4px);
+}
+
 .timeline-box.active {
   background: var(--timeline-active-bg, #28a745); /* Green as requested for active state */
 }
