@@ -1497,22 +1497,43 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   }, [autoSave, note, content]);
 
   // formatting detection
+  const findMarker = (marker: string, index: number, backward: boolean) => {
+    if (backward) {
+      return content.lastIndexOf(marker, Math.max(0, index - 1));
+    }
+    return content.indexOf(marker, index);
+  };
+
+  const isInlineFormatActive = (marker: string, start: number, end: number) => {
+    const isWrapped =
+      start >= marker.length &&
+      end <= content.length - marker.length &&
+      content.substring(start - marker.length, start) === marker &&
+      content.substring(end, end + marker.length) === marker;
+    if (isWrapped) return true;
+
+    const open = findMarker(marker, start, true);
+    const close = findMarker(marker, end, false);
+    if (open === -1 || close === -1 || open >= close) return false;
+
+    const span = content.substring(open, close + marker.length);
+    if (span.includes('\n')) return false;
+
+    if (marker === '*') {
+      if (content.substring(open - 1, open) === '*') return false;
+      if (content.substring(close + marker.length, close + marker.length + 1) === '*') return false;
+    }
+
+    return open < start && close >= end;
+  };
+
   const checkFormatting = useCallback((start = selectionStart, end = selectionEnd) => {
     const active = new Set<string>();
 
-    if (start >= 2 && end <= content.length - 2) {
-      if (content.substring(start - 2, start) === '**' && content.substring(end, end + 2) === '**') active.add('bold');
-    }
-    if (start >= 1 && end <= content.length - 1) {
-      const beforeChar = content.substring(start - 1, start);
-      const afterChar = content.substring(end, end + 1);
-      const beforeBefore = start >= 2 ? content.substring(start - 2, start - 1) : '';
-      const afterAfter = end <= content.length - 2 ? content.substring(end + 1, end + 2) : '';
-      if (beforeChar === '*' && afterChar === '*' && beforeBefore !== '*' && afterAfter !== '*') active.add('italic');
-    }
-    if (start >= 2 && end <= content.length - 2) {
-      if (content.substring(start - 2, start) === '~~' && content.substring(end, end + 2) === '~~') active.add('strikethrough');
-    }
+    if (isInlineFormatActive('**', start, end)) active.add('bold');
+    if (isInlineFormatActive('*', start, end)) active.add('italic');
+    if (isInlineFormatActive('~~', start, end)) active.add('strikethrough');
+
     if (start >= 1 && end <= content.length - 1) {
       if (content.substring(start - 1, start) === '`' && content.substring(end, end + 1) === '`') active.add('code');
     }
