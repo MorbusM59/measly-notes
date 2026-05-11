@@ -82,22 +82,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         handleViewModeChange('trash');
         // clear any standing mass-delete arm for trash
         if (armed.kind === 'permanent' && armed.category === 'deleted') setArmed({ kind: 'none' });
-        return;
-      }
-
-      // If we're already in trash view -> arm on first click, purge on second
-      if (armed.kind === 'permanent' && armed.category === 'deleted') {
-        try {
-          const res = await window.electronAPI.purgeTrash();
-          console.log('Purge result', res);
-          setArmed({ kind: 'none' });
-          if (onNotesUpdate) onNotesUpdate();
-          await loadTrashNotes();
-        } catch (err) {
-          console.warn('purgeTrash failed', err);
-        }
-      } else {
-        setArmed({ kind: 'permanent', category: 'deleted' });
       }
     } catch (err) {
       console.warn('trash toggle failed', err);
@@ -1126,7 +1110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             aria-label="Archived"
           />
           <button
-            className={`toggle-btn icon-btn btn-deleted ${viewMode === 'trash' ? 'active' : ''} ${armed.kind === 'permanent' && armed.category === 'deleted' ? 'armed' : ''}`}
+            className={`toggle-btn icon-btn btn-deleted ${viewMode === 'trash' ? 'active' : ''}`}
             onClick={() => handleTrashToggleClick()}
             title="Trash"
             aria-label="Trash"

@@ -166,7 +166,6 @@ export const Timeline: React.FC<TimelineProps> = ({
                   onContextMenu={hasItems && !isPresentBox ? (e) => handleBoxRightClick(e, primary.index, primary.snapshot) : undefined}
                   title={isPresentBox ? (timeMachineIndex === -1 ? "Present (Auto)" : "Return to Present") : (hasItems ? new Date(primary.snapshot.timestamp).toLocaleString() : undefined)}
               >
-                  {hasItems && !isPresentBox && isPrimaryManual && <div className="manual-dot" />}
               </div>
 
                 {hasItems && !isPresentBox && (
@@ -181,7 +180,6 @@ export const Timeline: React.FC<TimelineProps> = ({
                           onContextMenu={(e) => handleBoxRightClick(e, item.index, item.snapshot)}
                           title={new Date(item.snapshot.timestamp).toLocaleString()}
                         >
-                          {item.snapshot.isManual && <div className="manual-dot" />}
                         </div>
                       ))}
                     </div>
