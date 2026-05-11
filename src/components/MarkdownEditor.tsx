@@ -37,19 +37,19 @@ type UndoEntry = { type: 'char' | 'paste' | 'bundled' | 'boundary'; snapshot: Ed
 const MAX_UNDO_CHARS = 1000;
 
 const DEFAULT_HIGHLIGHT_COLORS: HighlightColors = {
-  caret: 'rgba(0, 0, 0, 0.3)',
-  selection: 'rgba(0, 0, 0, 0.1)',
+  caret: 'rgba(120, 115, 112, 0.49)',
+  selection: 'rgba(199, 94, 0, 0.49)',
   leading: 'rgba(0, 0, 0, 0)',
   trailing: 'rgba(0, 0, 0, 0)',
-  background: 'rgba(0, 0, 0, 0.05)',
-  topBackground: 'rgba(0, 0, 0, 0.08)',
-  bottomBackground: 'rgba(0, 0, 0, 0.08)',
-  scrollbarBackground: 'rgba(0, 0, 0, 0.08)',
-  scrollbarHandle: 'rgba(0, 0, 0, 0.25)',
-  timelineBackground: 'rgba(0, 0, 0, 0.05)',
-  timelineActive: 'rgba(40, 167, 69, 1)',
-  timelineManual: 'rgba(0, 123, 255, 0.75)',
-  timelineAutomatic: 'rgba(0, 0, 0, 0.25)',
+  background: 'rgba(230, 220, 214, 0.49)',
+  topBackground: 'rgba(196, 187, 182, 0.49)',
+  bottomBackground: 'rgba(196, 187, 182, 0.49)',
+  scrollbarBackground: 'rgba(230, 220, 214, 0.49)',
+  scrollbarHandle: 'rgba(120, 115, 112, 0.49)',
+  timelineBackground: 'rgba(230, 220, 214, 0.49)',
+  timelineActive: 'rgba(247, 94, 0, 1)',
+  timelineManual: 'rgba(145, 55, 0, 1)',
+  timelineAutomatic: 'rgba(120, 115, 112, 0.49)',
 };
 
 const HIGHLIGHT_COLOR_STORAGE_KEYS: Record<HighlightColorKey, string> = {
