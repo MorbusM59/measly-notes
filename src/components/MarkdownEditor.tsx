@@ -1409,12 +1409,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   }, [autosizeTextarea]);
 
   // cursor / first line detection
-  const checkCursorPosition = useCallback(() => {
-    const cursorPos = selectionStart;
+  const checkCursorPosition = useCallback((cursorPos = selectionStart) => {
     const textBeforeCursor = content.substring(0, cursorPos);
     const lines = textBeforeCursor.split('\n');
     setIsOnFirstLine(lines.length === 1);
-  }, [content, selectionStart]);
+  }, [content]);
 
   // extract title
   const extractTitle = useCallback((text: string): string => {
@@ -1498,15 +1497,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   }, [autoSave, note, content]);
 
   // formatting detection
-  const checkFormatting = useCallback(() => {
-    const start = selectionStart;
-    const end = selectionEnd;
+  const checkFormatting = useCallback((start = selectionStart, end = selectionEnd) => {
     const active = new Set<string>();
-
-    if (start === end && start === 0) {
-      setActiveFormats(active);
-      return;
-    }
 
     if (start >= 2 && end <= content.length - 2) {
       if (content.substring(start - 2, start) === '**' && content.substring(end, end + 2) === '**') active.add('bold');
@@ -1526,7 +1518,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     }
 
     const lineStart = content.lastIndexOf('\n', start - 1) + 1;
-    const lineEnd = content.indexOf('\n', end);
+    const lineEnd = content.indexOf('\n', end === 0 ? 0 : end);
     const actualLineEnd = lineEnd === -1 ? content.length : lineEnd;
 
     if (lineStart >= 4) {
@@ -1543,15 +1535,32 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
     const currentLineContent = content.substring(lineStart, actualLineEnd);
     const currentLineNorm = normalizeForChecks(currentLineContent);
+
+    const selectionLineEndIndex = Math.max(end - 1, 0);
+    const selectionLineEnd = content.indexOf('\n', selectionLineEndIndex);
+    const selectionActualEnd = selectionLineEnd === -1 ? content.length : selectionLineEnd;
+    const selectedLines = content
+      .substring(lineStart, selectionActualEnd)
+      .split('\n')
+      .map(normalizeForChecks);
+
+    const allBlockquote = selectedLines.length > 0 && selectedLines.every(line => line.startsWith('> '));
+    const allBullet = selectedLines.length > 0 && selectedLines.every(line => line.match(/^- /));
+    const allNumber = selectedLines.length > 0 && selectedLines.every(line => line.match(/^\d+\. /));
+
     if (currentLineNorm.startsWith('# ')) active.add('h1');
     else if (currentLineNorm.startsWith('## ')) active.add('h2');
     else if (currentLineNorm.startsWith('### ')) active.add('h3');
-    else if (currentLineNorm.startsWith('> ')) active.add('blockquote');
-    else if (currentLineNorm.match(/^- /)) active.add('bullet');
-    else if (currentLineNorm.match(/^\d+\. /)) active.add('number');
+    if (allBlockquote || currentLineNorm.startsWith('> ')) active.add('blockquote');
+    if (allBullet || currentLineNorm.match(/^- /)) active.add('bullet');
+    if (allNumber || currentLineNorm.match(/^\d+\. /)) active.add('number');
 
     setActiveFormats(active);
   }, [content, selectionEnd, selectionStart]);
+
+  useEffect(() => {
+    checkFormatting();
+  }, [checkFormatting, content, selectionStart, selectionEnd]);
 
   // Formatting helpers
   const wrapSelection = (before: string, after: string = before) => {
@@ -1585,7 +1594,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     scheduleTimeout(() => {
       textareaRef.current?.focus();
       setTextareaSelection(newSelectionStart, newSelectionEnd);
-      checkFormatting();
     }, 0);
   };
 
@@ -1644,7 +1652,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
     scheduleTimeout(() => {
       textareaRef.current?.focus();
-      checkFormatting();
     }, 0);
   };
 
@@ -1677,7 +1684,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     scheduleTimeout(() => {
       textareaRef.current?.focus();
       setTextareaSelection(newCursorPos, newCursorPos);
-      checkFormatting();
     }, 0);
   };
 
@@ -1761,7 +1767,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         setTextareaSelection(snapshot.selectionStart, snapshot.selectionEnd);
         autosizeTextarea(el);
         ensureCaretVisible();
-        checkFormatting();
       }
       programmaticInsertRef.current = false;
     }, 0);
@@ -1990,9 +1995,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     const handleSelectionChange = () => {
       const sel = ceGetSelection(el);
       if (!sel) return;
-      checkCursorPosition();
-      checkFormatting();
       syncSelectionState(sel.start, sel.end);
+      checkCursorPosition(sel.start);
+      checkFormatting(sel.start, sel.end);
 
       // debounce save edit state for current note
       if (note?.id != null) {
