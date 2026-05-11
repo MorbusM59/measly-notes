@@ -1530,8 +1530,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const checkFormatting = useCallback((start = selectionStart, end = selectionEnd) => {
     const active = new Set<string>();
 
-    if (isInlineFormatActive('**', start, end)) active.add('bold');
-    if (isInlineFormatActive('*', start, end)) active.add('italic');
+    if (isInlineFormatActive('***', start, end)) {
+      active.add('bold');
+      active.add('italic');
+    } else {
+      if (isInlineFormatActive('**', start, end)) active.add('bold');
+      if (isInlineFormatActive('*', start, end)) active.add('italic');
+    }
     if (isInlineFormatActive('~~', start, end)) active.add('strikethrough');
 
     if (start >= 1 && end <= content.length - 1) {
