@@ -25,6 +25,7 @@ export const Utility: React.FC<UtilityProps> = ({
 }) => {
   const [isEditingBase, setIsEditingBase] = React.useState(false);
   const [baseInput, setBaseInput] = React.useState(logBase.toString());
+  const [trashArmed, setTrashArmed] = React.useState(false);
   const historyGroupRef = useRef<HTMLDivElement>(null);
 
   const handleSync = async () => {
@@ -51,6 +52,23 @@ export const Utility: React.FC<UtilityProps> = ({
       onActionComplete?.();
     } catch (err) {
       console.warn('purgeTrash failed', err);
+    }
+  };
+
+  const handleCleanClick = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    if (!trashArmed) {
+      setTrashArmed(true);
+      return;
+    }
+
+    try {
+      await handleClean();
+    } finally {
+      setTrashArmed(false);
     }
   };
 
@@ -96,15 +114,15 @@ export const Utility: React.FC<UtilityProps> = ({
         <i className="fa-solid fa-file-pdf" aria-hidden="true" />
       </button>
       <button
-        className="utility-btn utility-btn--danger"
+        className={`utility-btn${trashArmed ? ' utility-btn--armed' : ''}`}
         type="button"
-        onClick={handleClean}
-        title="Permanently purge Trash"
-        aria-label="Permanently purge Trash"
+        onClick={handleCleanClick}
+        onPointerLeave={() => setTrashArmed(false)}
+        title={trashArmed ? 'Click again to permanently purge Trash' : 'Empty Trash'}
+        aria-label="Empty Trash"
       >
         <i className="fa-solid fa-trash-can" aria-hidden="true" />
       </button>
-
       <div
         ref={historyGroupRef}
         className="utility-history-group"
