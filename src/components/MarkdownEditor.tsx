@@ -2278,6 +2278,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
               <button className={`toolbar-btn-icon ${activeFormats.has('number') ? 'active' : ''}`} onClick={() => prependToLines('', true)} title="Numbered List">#</button>
               <button className={`toolbar-btn-icon ${activeFormats.has('blockquote') ? 'active' : ''}`} onClick={() => prependToLines('> ')} title="Blockquote">&quot;</button>
               <button className="toolbar-btn-icon" onClick={() => insertAtCursor('\n---\n')} title="Horizontal Rule">—</button>
+              <span className="toolbar-divider">|</span>
               <button
                 className={`toolbar-btn-icon ${showLineBreaks ? 'active' : ''}`}
                 onClick={() => {
@@ -2287,7 +2288,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                 }}
                 title="Toggle visible line break markers"
               >
-                ⏎
+                ¶
               </button>
             </div>
           )}
