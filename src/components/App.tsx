@@ -220,9 +220,9 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showPreview]);
 
-  // Handle opening .md files from external sources
+  // Handle opening .md files from external sources (IPC from main + drag-and-drop)
   useEffect(() => {
-    const handleOpenMdFile = async (_event: any, filePath: string) => {
+    const openMdFileByPath = async (filePath: string) => {
       try {
         // Check if we already have a temp note for this file
         const tempNotes = await window.electronAPI.getTempNotes();
@@ -240,8 +240,11 @@ export const App: React.FC = () => {
 
         // Read the file content
         const content = await window.electronAPI.readFileContent(filePath);
+        if (content === null) {
+          console.warn('Failed to read .md file content:', filePath);
+          return;
+        }
         const title = await window.electronAPI.getFileBasename(filePath);
-        const titleWithoutExt = title.replace(/\.md$/, '');
 
         // Create a temp note
         const tempNote = await window.electronAPI.createTempNote(title, filePath, 'utf8');
@@ -263,10 +266,38 @@ export const App: React.FC = () => {
     };
 
     // Listen for open-md-file events from main process
-    (window as any).electronAPI.onOpenMdFile(handleOpenMdFile);
+    (window as any).electronAPI.onOpenMdFile((_event: any, filePath: string) => openMdFileByPath(filePath));
+
+    // Handle drag-and-drop of .md files from Windows Explorer.
+    // Calling e.preventDefault() on dragover/drop stops Chromium from navigating
+    // to the file:// URL, which would wipe the app.
+    const handleDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      if (!e.dataTransfer) return;
+      const files = Array.from(e.dataTransfer.files);
+      const mdFile = files.find(f => f.name.toLowerCase().endsWith('.md'));
+      if (mdFile) {
+        e.preventDefault();
+        // Resolve the real filesystem path via webUtils (File.path was removed in Electron 28)
+        const filePath = window.electronAPI.getPathForFile(mdFile);
+        if (filePath) {
+          openMdFileByPath(filePath);
+        }
+      }
+    };
+
+    document.addEventListener('dragover', handleDragOver);
+    document.addEventListener('drop', handleDrop);
 
     return () => {
-      // Cleanup if needed
+      document.removeEventListener('dragover', handleDragOver);
+      document.removeEventListener('drop', handleDrop);
     };
   }, []);
 

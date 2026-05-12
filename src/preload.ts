@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent, webUtils } from 'electron';
 import { IElectronAPI, Note, NoteTag, Tag, SearchResult, CategoryHierarchyResult } from './shared/types';
 
 /**
@@ -365,6 +365,12 @@ const electronAPI: IElectronAPI & {
     return {
       unsubscribe: () => ipcRenderer.removeListener('open-md-file', listener)
     };
+  },
+
+  // Resolve the real filesystem path for a File object from a drag-and-drop event.
+  // File.path was removed in Electron 28; webUtils.getPathForFile is the replacement.
+  getPathForFile: (file: File): string => {
+    return webUtils.getPathForFile(file);
   },
 };
 

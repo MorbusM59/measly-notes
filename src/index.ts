@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, session, shell, Menu, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import { getDataDir } from './main/paths';
 import {
   initDatabase, createNote, getAllNotes, updateNote, updateNoteTitle, deleteNote,
@@ -138,14 +139,38 @@ const createWindow = (): void => {
         if (shouldOpenExternally(url, internalHosts)) {
           try { shell.openExternal(url); console.log('[main] opened external URL from will-navigate:', url); }
           catch (err) { console.warn('[main] failed to open external URL from will-navigate:', url, err); }
+        } else if (url.startsWith('file:') && url.toLowerCase().endsWith('.md')) {
+          // .md file dragged from Windows Explorer — open as a temp note
+          try {
+            const filePath = fileURLToPath(url);
+            if (fs.existsSync(filePath)) {
+              mainWindow?.webContents.send('open-md-file', filePath);
+              console.log('[main] handling dragged .md file:', filePath);
+            } else {
+              console.warn('[main] dragged .md file does not exist:', filePath);
+            }
+          } catch (err) { console.warn('[main] failed to resolve dragged .md file URL:', url, err); }
         } else {
           console.log('[main] blocked internal navigation attempt to:', url);
         }
       });
     } else {
-      // In dev, allow all internal navigation for smooth hot reloading
-      mainWindow.webContents.on('will-navigate', (_event, url) => {
-        // No action, allow navigation for fast refresh
+      // In dev, allow all internal navigation for smooth hot reloading,
+      // but still intercept .md file:// drops so they don't wipe the app.
+      mainWindow.webContents.on('will-navigate', (event, url) => {
+        if (url.startsWith('file:') && url.toLowerCase().endsWith('.md')) {
+          event.preventDefault();
+          try {
+            const filePath = fileURLToPath(url);
+            if (fs.existsSync(filePath)) {
+              mainWindow?.webContents.send('open-md-file', filePath);
+              console.log('[main] handling dragged .md file (dev):', filePath);
+            } else {
+              console.warn('[main] dragged .md file does not exist (dev):', filePath);
+            }
+          } catch (err) { console.warn('[main] failed to resolve dragged .md file URL (dev):', url, err); }
+        }
+        // No action for other URLs in dev, allow navigation for fast refresh
       });
     }
 

@@ -649,6 +649,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const lastAutoSnapshotTimeRef = useRef(0);
   const lastSavedTitleRef = useRef('');
   const [tempNoteBasename, setTempNoteBasename] = useState<string>('');
+  const [isDragOver, setIsDragOver] = useState(false);
   const currentNoteIdRef = useRef<number | null>(null);
 
   // Short-lived UI timeouts that should be cleared on unmount
@@ -793,6 +794,83 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
     loadTempNoteBasename();
   }, [note]);
+
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    console.log('Dropped files:', files.length, 'files');
+    files.forEach((f, i) => console.log(`File ${i}:`, f.name, f.size, f.type, 'has path:', 'path' in f));
+    if (files.length === 0) return;
+
+    // Only handle the first file for now
+    const file = files[0];
+    console.log('File object type:', typeof file, 'constructor:', file.constructor.name, 'instanceof File:', file instanceof File);
+    
+    // Check if it's a markdown file
+    if (!file.name.toLowerCase().endsWith('.md')) {
+      console.warn('Only .md files are supported for drag and drop');
+      return;
+    }
+
+    try {
+      // Resolve the real filesystem path via webUtils (File.path was removed in Electron 28)
+      const filePath = window.electronAPI.getPathForFile(file);
+      if (!filePath) {
+        console.warn('Could not resolve filesystem path for dropped file:', file.name);
+        return;
+      }
+
+      // Read the file content
+      const content = await window.electronAPI.readFileContent(filePath);
+      if (content === null) {
+        console.warn('Failed to read file content from:', filePath);
+        return;
+      }
+
+      // Check for special characters that don't fit monospace layout
+      const hasSpecialChars = /[^\x20-\x7E\n\r\t]/.test(content); // Only allow printable ASCII, newlines, tabs
+
+      // Create a temp note
+      const title = await window.electronAPI.getFileBasename(filePath);
+      const newNote = await window.electronAPI.createTempNote(title, filePath, 'utf8');
+      
+      // Save the content to the temp note
+      if (newNote) {
+        await window.electronAPI.saveNote(newNote.id, content);
+        
+        // Switch to the new note
+        if (onNoteUpdate) {
+          onNoteUpdate(newNote);
+        }
+
+        // If content has special characters, mark as having unsaved changes
+        if (hasSpecialChars) {
+          console.log('File contains special characters, marking as having unsaved changes');
+          await window.electronAPI.updateTempNoteState(newNote.id, true, newNote.syncMode || false);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to create temp note from dropped file:', err);
+      // Log the full error for debugging
+      console.error('Full error details:', err);
+    }
+  }, [onNoteUpdate]);
 
   useEffect(() => {
     if (!note) {
@@ -2321,7 +2399,20 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   };
 
   return (
-    <div className="markdown-editor">
+    <div 
+      className={`markdown-editor ${isDragOver ? 'drag-over' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragOver && (
+        <div className="drag-overlay">
+          <div className="drag-message">
+            <span className="drag-icon">📄</span>
+            <span>Drop markdown file here</span>
+          </div>
+        </div>
+      )}
       <div className="editor-toolbar" style={toolbarStyle}>
         <div style={leftToolsStyle}>
           <button
