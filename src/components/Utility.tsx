@@ -11,6 +11,12 @@ interface UtilityProps {
 
   hasSelectedNote?: boolean;
 
+  isTempNote?: boolean;
+  tempHasUnsavedChanges?: boolean;
+  tempSyncMode?: boolean;
+  onTempSave?: () => void;
+  onTempSyncToggle?: () => void;
+
   logBase?: number;
   onLogBaseChange?: (base: number) => void;
 }
@@ -22,6 +28,11 @@ export const Utility: React.FC<UtilityProps> = ({
   autoSaveEnabled = true,
   onToggleAutoSave,
   hasSelectedNote = false,
+  isTempNote = false,
+  tempHasUnsavedChanges = false,
+  tempSyncMode = false,
+  onTempSave,
+  onTempSyncToggle,
   logBase = 10,
   onLogBaseChange,
 }) => {
@@ -175,7 +186,23 @@ export const Utility: React.FC<UtilityProps> = ({
         ref={historyGroupRef}
         className="utility-history-group"
       >
-        {isEditingBase ? (
+        {isTempNote ? (
+          <button
+            className={`utility-btn${tempHasUnsavedChanges ? ' utility-btn--armed' : ''}`}
+            type="button"
+            onClick={onTempSave}
+            onContextMenu={e => { e.preventDefault(); onTempSyncToggle?.(); }}
+            title={tempSyncMode
+              ? `Auto-sync: ON — saves to disk on every auto-save${tempHasUnsavedChanges ? ' (unsaved changes)' : ''}`
+              : `Save to disk${tempHasUnsavedChanges ? ' (unsaved changes)' : ''}. Right-click to enable auto-sync`}
+            aria-label="Save temp note to disk"
+            disabled={!hasSelectedNote}
+          >
+            {tempSyncMode
+              ? <i className="fa-solid fa-rotate" aria-hidden="true" />
+              : <i className="fa-solid fa-floppy-disk" style={{ opacity: tempHasUnsavedChanges ? 1 : 0.5 }} aria-hidden="true" />}
+          </button>
+        ) : isEditingBase ? (
           <input
             className="utility-btn utility-btn--history"
             style={{ width: '40px', padding: '0 4px', textAlign: 'center', background: 'var(--markdown-editor-background)', color: 'var(--markdown-editor-foreground)', border: 'none' }}

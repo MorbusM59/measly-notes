@@ -648,7 +648,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const lastSavedContentRef = useRef('');
   const lastAutoSnapshotTimeRef = useRef(0);
   const lastSavedTitleRef = useRef('');
-  const [tempNoteBasename, setTempNoteBasename] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState(false);
   const currentNoteIdRef = useRef<number | null>(null);
 
@@ -776,25 +775,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     return () => document.removeEventListener('request-manual-snapshot', handleManualSnapshot);
   }, [note, content]);
 
-  // Load basename for temp notes
-  useEffect(() => {
-    const loadTempNoteBasename = async () => {
-      if (note?.isTemp && note.externalPath) {
-        try {
-          const basename = await window.electronAPI.getFileBasename(note.externalPath);
-          setTempNoteBasename(basename);
-        } catch (err) {
-          console.warn('Failed to get basename for temp note', err);
-          setTempNoteBasename('');
-        }
-      } else {
-        setTempNoteBasename('');
-      }
-    };
-
-    loadTempNoteBasename();
-  }, [note]);
-
   // Drag and drop handlers
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -829,10 +809,78 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     }
 
     try {
-      // Resolve the real filesystem path via webUtils (File.path was removed in Electron 28)
-      const filePath = window.electronAPI.getPathForFile(file);
-      if (!filePath) {
-        console.warn('Could not resolve filesystem path for dropped file:', file.name);
+      // Get the file path from the File object (Electron-specific)
+      // Try multiple ways to access the path
+      let filePath = (file as any).path;
+      
+      // Fallback: try other properties that might contain the path
+      if (!filePath && (file as any).fullPath) {
+        filePath = (file as any).fullPath;
+      }
+      if (!filePath && (file as any).filePath) {
+        filePath = (file as any).filePath;
+      }
+      
+      // Debug logging - log all properties of the file object
+      console.log('Dropped file object:', {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        path: filePath,
+        hasPath: 'path' in file,
+        hasFullPath: 'fullPath' in file,
+        hasFilePath: 'filePath' in file,
+        pathType: typeof filePath,
+        pathLength: filePath?.length || 0
+      });
+      
+      // More robust path validation for Windows and other systems
+      const hasValidPath = typeof filePath === 'string' && 
+                          filePath.trim() !== '' && 
+                          (filePath.includes('\\') || filePath.includes('/') || 
+                           filePath.match(/^[A-Za-z]:/) || // Windows drive letter
+                           filePath.startsWith('\\\\') || // UNC path
+                           filePath.startsWith('/')); // Unix path
+      
+      if (!hasValidPath) {
+        console.warn('File does not have a valid path. Path details:', {
+          path: filePath,
+          type: typeof filePath,
+          hasBackslash: filePath?.includes('\\'),
+          hasForwardSlash: filePath?.includes('/'),
+          matchesDriveLetter: filePath?.match(/^[A-Za-z]:/),
+          isUncPath: filePath?.startsWith('\\\\'),
+          isUnixPath: filePath?.startsWith('/')
+        });
+        console.warn('Creating a regular note instead of a temp note.');
+        
+        // Fallback: read the file content using the Web File API and create a regular note
+        try {
+          const content = await file.text();
+          
+          // Sanitize content - check for non-monospace characters
+          const hasSpecialChars = /[^\x20-\x7E\n\r\t]/.test(content); // Only allow printable ASCII, newlines, tabs
+          
+          const title = file.name.replace(/\.md$/, '');
+          
+          // Create a regular note
+          const newNote = await window.electronAPI.createNote(title);
+          if (newNote) {
+            await window.electronAPI.saveNote(newNote.id, content);
+            
+            // If content has special characters, mark as having unsaved changes
+            if (hasSpecialChars) {
+              await window.electronAPI.updateTempNoteState(newNote.id, true, false);
+            }
+            
+            // Switch to the new note
+            if (onNoteUpdate) {
+              onNoteUpdate(newNote);
+            }
+          }
+        } catch (fallbackError) {
+          console.error('Failed to create regular note from dropped file:', fallbackError);
+        }
         return;
       }
 
@@ -1537,16 +1585,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     if (note.isTemp && note.externalPath && note.syncMode) {
       try {
         const success = await window.electronAPI.writeFileContent(note.externalPath, diskContent);
-        if (success) {
-          await window.electronAPI.updateTempNoteState(note.id, false, true);
-        } else {
-          await window.electronAPI.updateTempNoteState(note.id, true, note.syncMode || false);
-        }
+        const newUnsaved = !success;
+        await window.electronAPI.updateTempNoteState(note.id, newUnsaved, true);
+        if (onNoteUpdate) onNoteUpdate({ ...note, hasUnsavedChanges: newUnsaved });
       } catch (err) {
         console.warn('Failed to save temp note to external file:', err);
-        // Mark as having unsaved changes
         await window.electronAPI.updateTempNoteState(note.id, true, note.syncMode || false);
+        if (onNoteUpdate) onNoteUpdate({ ...note, hasUnsavedChanges: true });
       }
+    } else if (note.isTemp && note.externalPath && !note.syncMode) {
+      // Mark as having unsaved changes since we only saved to DB, not to the external file
+      await window.electronAPI.updateTempNoteState(note.id, true, false);
+      if (onNoteUpdate && !note.hasUnsavedChanges) onNoteUpdate({ ...note, hasUnsavedChanges: true });
     }
 
     const now = Date.now();
@@ -2421,52 +2471,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           >
             Edit
           </button>
-
-          {/* Temp note indicator */}
-          {note?.isTemp && (
-            <div className="temp-note-indicator">
-              <span className="temp-icon">📄</span>
-              <span className="temp-label">Temp Note</span>
-              {note.externalPath && (
-                <span className="temp-path" title={note.externalPath}>
-                  {tempNoteBasename || 'Loading...'}
-                </span>
-              )}
-              <button
-                className="temp-save-btn"
-                onClick={async () => {
-                  if (!note.externalPath) return;
-                  try {
-                    const content = await window.electronAPI.loadNote(note.id);
-                    const success = await window.electronAPI.writeFileContent(note.externalPath, content);
-                    if (success) {
-                      await window.electronAPI.updateTempNoteState(note.id, false, note.syncMode || false);
-                    }
-                  } catch (err) {
-                    console.warn('Failed to save temp note to external file:', err);
-                  }
-                }}
-                title="Save changes to external file"
-              >
-                💾
-              </button>
-              <button
-                className={`temp-sync-btn ${note.syncMode ? 'active' : ''}`}
-                onClick={async () => {
-                  const newSyncMode = !note.syncMode;
-                  await window.electronAPI.updateTempNoteState(note.id, note.hasUnsavedChanges || false, newSyncMode);
-                  // Force a re-render by updating the note
-                  if (onNoteUpdate) {
-                    const updatedNote = { ...note, syncMode: newSyncMode };
-                    onNoteUpdate(updatedNote);
-                  }
-                }}
-                title={note.syncMode ? "Disable auto-sync with external file" : "Enable auto-sync with external file"}
-              >
-                🔄
-              </button>
-            </div>
-          )}
 
           {/* left-aligned text editing tools - only in edit mode */}
           {!showPreview && (

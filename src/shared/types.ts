@@ -172,5 +172,4 @@ export interface IElectronAPI {
   writeFileContent: (filePath: string, content: string) => Promise<boolean>;
   showSaveDialog: (options: any) => Promise<any>;
   getFileBasename: (filePath: string) => Promise<string>;
-  getPathForFile: (file: File) => string;
 }

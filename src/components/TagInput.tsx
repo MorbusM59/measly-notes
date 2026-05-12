@@ -34,7 +34,7 @@ export const TagInput: React.FC<TagInputPropsExtended> = ({ note, onTagsChanged,
   const focusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isProtectedTag = (name?: string) => {
     const n = (name || '').trim().toLowerCase();
-    return n === 'deleted' || n === 'archived';
+    return n === 'deleted' || n === 'archived' || n === 'temp';
   };
 
   useEffect(() => {
@@ -84,6 +84,7 @@ export const TagInput: React.FC<TagInputPropsExtended> = ({ note, onTagsChanged,
 
   const handleAddTag = async () => {
     if (!note || !inputValue.trim()) return;
+    if (note.isTemp) return; // temp notes cannot have other tags
 
     const normalized = normalizeTagName(inputValue);
     if (!normalized) return;
@@ -246,13 +247,36 @@ export const TagInput: React.FC<TagInputPropsExtended> = ({ note, onTagsChanged,
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Type to add tag..."
+              placeholder={note.isTemp ? 'Temp note — click "temp" pill to convert' : 'Type to add tag...'}
+              disabled={!!note.isTemp}
               aria-label="Tag input"
             />
           </div>
         </div>
 
         <div className="tags-display" aria-live="polite">
+          {note.isTemp && (
+            <div
+              className="tag-pill active protected temp"
+              title="Temp note. Click to save as a permanent note"
+              onClick={async () => {
+                try {
+                  const result = await window.electronAPI.showSaveDialog({
+                    title: 'Save note as...',
+                    defaultPath: note.externalPath || 'note.md',
+                    filters: [{ name: 'Markdown', extensions: ['md'] }],
+                  });
+                  if (!result || result.canceled || !result.filePath) return;
+                  await window.electronAPI.convertTempNoteToRegular(note.id, result.filePath);
+                  if (onTagsChanged) onTagsChanged();
+                } catch (err) {
+                  console.warn('convertTempNoteToRegular failed', err);
+                }
+              }}
+            >
+              temp
+            </div>
+          )}
           {noteTags.map((noteTag, slotIdx) => {
             const tag = noteTag.tag as Tag;
             const armed = deleteArmedIndex === slotIdx;

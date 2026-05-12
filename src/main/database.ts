@@ -919,6 +919,7 @@ export function getCategoryHierarchy(): { hierarchy: any; uncategorizedNotes: No
       JOIN tags tp ON ntp.tagId = tp.id
       WHERE ntp.noteId = n.id AND LOWER(tp.name) IN ('deleted', 'archived')
     )
+    AND (n.isTemp IS NULL OR n.isTemp = 0)
     ORDER BY t0.name, t1.name, t2.name, n.updatedAt DESC
   `);
   const rows = stmt.all() as Array<{
@@ -987,6 +988,7 @@ export function getHierarchyForTag(tagName: string): { hierarchy: any; uncategor
     LEFT JOIN note_tags nt2 ON n.id = nt2.noteId AND nt2.position = 2
     LEFT JOIN tags t2 ON nt2.tagId = t2.id
     WHERE tf.name = ?
+    AND (n.isTemp IS NULL OR n.isTemp = 0)
     ORDER BY n.updatedAt DESC
   `);
   const rows = stmt.all(tagName) as Array<any>;
@@ -1035,6 +1037,7 @@ export function getNotesInTrash(): Note[] {
     JOIN note_tags nt ON n.id = nt.noteId
     JOIN tags t ON nt.tagId = t.id
     WHERE LOWER(t.name) = 'deleted'
+    AND (n.isTemp IS NULL OR n.isTemp = 0)
     ORDER BY n.lastEdited DESC
   `);
   const rows = stmt.all() as Note[];

@@ -220,9 +220,9 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showPreview]);
 
-  // Handle opening .md files from external sources (IPC from main + drag-and-drop)
+  // Handle opening .md files from external sources
   useEffect(() => {
-    const openMdFileByPath = async (filePath: string) => {
+    const handleOpenMdFile = async (_event: any, filePath: string) => {
       try {
         // Check if we already have a temp note for this file
         const tempNotes = await window.electronAPI.getTempNotes();
@@ -240,17 +240,14 @@ export const App: React.FC = () => {
 
         // Read the file content
         const content = await window.electronAPI.readFileContent(filePath);
-        if (content === null) {
-          console.warn('Failed to read .md file content:', filePath);
-          return;
-        }
         const title = await window.electronAPI.getFileBasename(filePath);
+        const titleWithoutExt = title.replace(/\.md$/, '');
 
         // Create a temp note
         const tempNote = await window.electronAPI.createTempNote(title, filePath, 'utf8');
         if (tempNote) {
           // Save the content to the temp note
-          await window.electronAPI.saveNote(tempNote.id, content);
+          await window.electronAPI.saveNote(tempNote.id, content ?? '');
 
           // Switch to the new temp note
           setSelectedNote(tempNote);
@@ -266,38 +263,10 @@ export const App: React.FC = () => {
     };
 
     // Listen for open-md-file events from main process
-    (window as any).electronAPI.onOpenMdFile((_event: any, filePath: string) => openMdFileByPath(filePath));
-
-    // Handle drag-and-drop of .md files from Windows Explorer.
-    // Calling e.preventDefault() on dragover/drop stops Chromium from navigating
-    // to the file:// URL, which would wipe the app.
-    const handleDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types.includes('Files')) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-      }
-    };
-
-    const handleDrop = (e: DragEvent) => {
-      if (!e.dataTransfer) return;
-      const files = Array.from(e.dataTransfer.files);
-      const mdFile = files.find(f => f.name.toLowerCase().endsWith('.md'));
-      if (mdFile) {
-        e.preventDefault();
-        // Resolve the real filesystem path via webUtils (File.path was removed in Electron 28)
-        const filePath = window.electronAPI.getPathForFile(mdFile);
-        if (filePath) {
-          openMdFileByPath(filePath);
-        }
-      }
-    };
-
-    document.addEventListener('dragover', handleDragOver);
-    document.addEventListener('drop', handleDrop);
+    (window as any).electronAPI.onOpenMdFile(handleOpenMdFile);
 
     return () => {
-      document.removeEventListener('dragover', handleDragOver);
-      document.removeEventListener('drop', handleDrop);
+      // Cleanup if needed
     };
   }, []);
 
@@ -375,6 +344,31 @@ export const App: React.FC = () => {
     (async () => {
       setSidebarRefreshTrigger(t => t + 1);
     })();
+  };
+
+  const handleTempNoteSave = async () => {
+    if (!selectedNote?.isTemp || !selectedNote.externalPath) return;
+    try {
+      const content = await window.electronAPI.loadNote(selectedNote.id);
+      const success = await window.electronAPI.writeFileContent(selectedNote.externalPath, content);
+      if (success) {
+        await window.electronAPI.updateTempNoteState(selectedNote.id, false, selectedNote.syncMode || false);
+        setSelectedNote({ ...selectedNote, hasUnsavedChanges: false });
+      }
+    } catch (err) {
+      console.warn('handleTempNoteSave failed', err);
+    }
+  };
+
+  const handleTempNoteSyncToggle = async () => {
+    if (!selectedNote?.isTemp) return;
+    const newSyncMode = !selectedNote.syncMode;
+    try {
+      await window.electronAPI.updateTempNoteState(selectedNote.id, selectedNote.hasUnsavedChanges || false, newSyncMode);
+      setSelectedNote({ ...selectedNote, syncMode: newSyncMode });
+    } catch (err) {
+      console.warn('handleTempNoteSyncToggle failed', err);
+    }
   };
 
   const handleUtilityActionComplete = async (purgedNoteIds?: number[]) => {
@@ -805,6 +799,11 @@ export const App: React.FC = () => {
           autoSaveEnabled={autoSaveEnabled}
           onToggleAutoSave={() => setAutoSaveEnabled(!autoSaveEnabled)}
           hasSelectedNote={selectedNote != null}
+          isTempNote={selectedNote?.isTemp === true}
+          tempHasUnsavedChanges={selectedNote?.hasUnsavedChanges === true}
+          tempSyncMode={selectedNote?.syncMode === true}
+          onTempSave={handleTempNoteSave}
+          onTempSyncToggle={handleTempNoteSyncToggle}
           logBase={logBase}
           onLogBaseChange={setLogBase}
         />
