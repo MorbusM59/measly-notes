@@ -219,10 +219,6 @@ export const Utility: React.FC<UtilityProps> = ({
           </button>
         )}
       </div>
-
-      <div className="utility-btn utility-btn--placeholder">
-        <span className="utility-icon utility-icon--empty-set" />
-      </div>
     </div>
   );
 };

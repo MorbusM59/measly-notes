@@ -78,17 +78,6 @@
   overflow: visible;
 }
 
-.utility-area {
-  min-height: 28px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  height: 100%;
-  width: 100%;
-  color: var(--color-muted-text);
-  font-size: 13px;
-}
-
 /* Viewer/editor area */
 .viewer {
   margin: 0;

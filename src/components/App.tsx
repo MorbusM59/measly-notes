@@ -717,18 +717,16 @@ export const App: React.FC = () => {
 
       {/* Utility fixed */}
       <div className="utility-grid" style={{ gridArea: 'utility' }}>
-        <div className="utility-area">
-          <Utility
-            onActionComplete={handleUtilityActionComplete}
-            onExportPdf={handleExportPdf}
-            onExportMd={handleExportMd}
-            autoSaveEnabled={autoSaveEnabled}
-            onToggleAutoSave={() => setAutoSaveEnabled(!autoSaveEnabled)}
-            hasSelectedNote={selectedNote != null}
-            logBase={logBase}
-            onLogBaseChange={setLogBase}
-          />
-        </div>
+        <Utility
+          onActionComplete={handleUtilityActionComplete}
+          onExportPdf={handleExportPdf}
+          onExportMd={handleExportMd}
+          autoSaveEnabled={autoSaveEnabled}
+          onToggleAutoSave={() => setAutoSaveEnabled(!autoSaveEnabled)}
+          hasSelectedNote={selectedNote != null}
+          logBase={logBase}
+          onLogBaseChange={setLogBase}
+        />
       </div>
 
       {/* Viewer/editor */}
