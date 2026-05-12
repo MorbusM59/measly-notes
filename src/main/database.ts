@@ -1325,9 +1325,29 @@ export async function reconcileNotesWithFs(opts?: { markMissingAsDeleted?: boole
   return results;
 }
 export function saveNoteSnapshot(noteId: number, content: string, isManual: boolean = false): void {
+  const latestSnapshot = db.prepare(
+    'SELECT id, content FROM note_snapshots WHERE noteId = ? ORDER BY timestamp DESC LIMIT 1'
+  ).get(noteId) as { id: number; content: string } | undefined;
+
+  if (latestSnapshot && latestSnapshot.content === content && !isManual) {
+    return;
+  }
+
   const timestamp = new Date().toISOString();
-  db.prepare('INSERT INTO note_snapshots (noteId, content, timestamp, isManual) VALUES (?, ?, ?, ?)').run(noteId, content, timestamp, isManual ? 1 : 0);
-  compactNoteSnapshots(noteId);
+  const insertStmt = db.prepare(
+    'INSERT INTO note_snapshots (noteId, content, timestamp, isManual) VALUES (?, ?, ?, ?)'
+  );
+  const deleteStmt = db.prepare('DELETE FROM note_snapshots WHERE id = ?');
+
+  const saveTx = db.transaction(() => {
+    insertStmt.run(noteId, content, timestamp, isManual ? 1 : 0);
+    if (latestSnapshot && latestSnapshot.content === content && isManual) {
+      deleteStmt.run(latestSnapshot.id);
+    }
+    compactNoteSnapshots(noteId);
+  });
+
+  saveTx();
 }
 
 export function getNoteSnapshots(noteId: number): import('../shared/types').NoteSnapshot[] {
