@@ -4,6 +4,7 @@ import './Utility.scss';
 interface UtilityProps {
   onActionComplete?: (purgedNoteIds?: number[]) => void;
   onExportPdf?: (chooseFolder?: boolean) => Promise<void>;
+  onExportMd?: (chooseFolder?: boolean) => Promise<void>;
   
   autoSaveEnabled?: boolean;
   onToggleAutoSave?: () => void;
@@ -17,6 +18,7 @@ interface UtilityProps {
 export const Utility: React.FC<UtilityProps> = ({
   onActionComplete,
   onExportPdf,
+  onExportMd,
   autoSaveEnabled = true,
   onToggleAutoSave,
   hasSelectedNote = false,
@@ -78,10 +80,42 @@ export const Utility: React.FC<UtilityProps> = ({
   const handleExportClick = async (event: React.MouseEvent<HTMLButtonElement>) => {
     try {
       if (onExportPdf) {
-        await onExportPdf(event.shiftKey);
+        await onExportPdf(false);
       }
     } catch (err) {
       console.warn('exportPdf failed', err);
+    }
+  };
+
+  const handleExportContextMenu = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    try {
+      if (onExportPdf) {
+        await onExportPdf(true);
+      }
+    } catch (err) {
+      console.warn('exportPdf failed', err);
+    }
+  };
+
+  const handleExportMdClick = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    try {
+      if (onExportMd) {
+        await onExportMd(false);
+      }
+    } catch (err) {
+      console.warn('exportMd failed', err);
+    }
+  };
+
+  const handleExportMdContextMenu = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    try {
+      if (onExportMd) {
+        await onExportMd(true);
+      }
+    } catch (err) {
+      console.warn('exportMd failed', err);
     }
   };
 
@@ -111,10 +145,21 @@ export const Utility: React.FC<UtilityProps> = ({
         className="utility-btn"
         type="button"
         onClick={handleExportClick}
-        title="Export to PDF. Shift-click to choose folder"
+        onContextMenu={handleExportContextMenu}
+        title="Export to PDF. Right-click to choose folder"
         aria-label="Export to PDF"
       >
         <i className="fa-solid fa-file-pdf" aria-hidden="true" />
+      </button>
+      <button
+        className="utility-btn"
+        type="button"
+        onClick={handleExportMdClick}
+        onContextMenu={handleExportMdContextMenu}
+        title="Export to Markdown. Right-click to choose folder"
+        aria-label="Export to Markdown"
+      >
+        <i className="fa-solid fa-file-code" aria-hidden="true" />
       </button>
       <button
         className={`utility-btn${trashArmed ? ' utility-btn--armed' : ''}`}

@@ -432,6 +432,51 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleExportMd = async (chooseFolder = false) => {
+    if (!selectedNote) return;
+
+    try {
+      const reselect = chooseFolder;
+      const saved = localStorage.getItem('md-export-folder');
+      let folder = saved && !reselect ? saved : null;
+      if (!folder) {
+        folder = await (window as any).electronAPI.selectExportFolder();
+        if (!folder) return; // user cancelled
+        localStorage.setItem('md-export-folder', folder);
+      }
+
+      // Get the content that's currently displayed (timeline version or current file)
+      let currentContent: string;
+      if (timeMachineIndex >= 0 && snapshots[timeMachineIndex]) {
+        currentContent = snapshots[timeMachineIndex].content;
+      } else {
+        // Load current content from file
+        currentContent = await (window as any).electronAPI.loadNote(selectedNote.id);
+      }
+
+      // Build filename: YY-MM-DD_<title truncated to 50>.md
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(-2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const datePart = `${yy}-${mm}-${dd}`;
+      const rawTitle = (selectedNote.title ?? 'Untitled').trim() || 'Untitled';
+      const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
+      const truncated = sanitize(rawTitle).substring(0, 50);
+      const fileName = `${datePart}_${truncated}.md`;
+
+      const res = await (window as any).electronAPI.exportMd(folder, fileName, currentContent);
+
+      if (!res || !res.ok) {
+        console.warn('MD export failed', res?.error);
+      } else {
+        console.log('Exported MD to', res.path);
+      }
+    } catch (err) {
+      console.warn('Export MD error', err);
+    }
+  };
+
   // Utilities
   const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
@@ -676,6 +721,7 @@ export const App: React.FC = () => {
           <Utility
             onActionComplete={handleUtilityActionComplete}
             onExportPdf={handleExportPdf}
+            onExportMd={handleExportMd}
             autoSaveEnabled={autoSaveEnabled}
             onToggleAutoSave={() => setAutoSaveEnabled(!autoSaveEnabled)}
             hasSelectedNote={selectedNote != null}

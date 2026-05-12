@@ -204,6 +204,13 @@ const electronAPI: IElectronAPI & {
     assertNonEmptyString(fileName, 'fileName');
     return (await ipcRenderer.invoke('export-pdf', folderPath, fileName)) as { ok: boolean; path?: string; error?: string };
   },
+
+  exportMd: async (folderPath: string, fileName: string, content: string) => {
+    assertNonEmptyString(folderPath, 'folderPath');
+    assertNonEmptyString(fileName, 'fileName');
+    assertString(content, 'content');
+    return (await ipcRenderer.invoke('export-md', folderPath, fileName, content)) as { ok: boolean; path?: string; error?: string };
+  },
   // Tag renaming
   renameTag: async (tagId: number, newName: string) => {
     assertPositiveInteger(tagId, 'tagId');

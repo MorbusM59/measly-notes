@@ -330,6 +330,45 @@ ipcMain.handle('export-pdf', async (event, folderPath: string, fileName: string)
   }
 });
 
+// Export a note as Markdown file. Expects full folder path, desired fileName, and content.
+ipcMain.handle('export-md', async (event, folderPath: string, fileName: string, content: string) => {
+  try {
+    if (!folderPath || !fileName || content === undefined) return { ok: false, error: 'Invalid arguments' };
+
+    // ensure folder exists
+    try { fs.mkdirSync(folderPath, { recursive: true }); } catch (e) { console.warn('[main] export-md mkdir failed', e); }
+
+    const sanitize = (s: string) => s.replace(/[<>:"/\\|?*]+/g, '_');
+    const base = sanitize(fileName);
+    let outPath = path.join(folderPath, base);
+    // if exists, append a colon-free time suffix: " (hh-mm)". If that also exists,
+    // append a version marker like " (hh-mm) v2", " (hh-mm) v3", etc.
+    if (fs.existsSync(outPath)) {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const timeSuffix = ` (${hh}-${mm})`;
+      const ext = path.extname(base);
+      const nameOnly = base.substring(0, base.length - ext.length);
+      let candidate = `${nameOnly}${timeSuffix}${ext}`;
+      let counter = 1;
+      let candidatePath = path.join(folderPath, candidate);
+      while (fs.existsSync(candidatePath)) {
+        counter += 1;
+        candidate = `${nameOnly}${timeSuffix} v${counter}${ext}`;
+        candidatePath = path.join(folderPath, candidate);
+      }
+      outPath = candidatePath;
+    }
+
+    fs.writeFileSync(outPath, content, 'utf-8');
+    return { ok: true, path: outPath };
+  } catch (err: any) {
+    console.warn('[main] export-md failed', err);
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
 // Rename a tag (merge if target name exists)
 ipcMain.handle('rename-tag', async (event, tagId: number, newName: string) => {
   try {
