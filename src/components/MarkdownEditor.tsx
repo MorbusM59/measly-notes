@@ -1755,9 +1755,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     if (historyReason) {
       recordHistoryEntry(historyReason, lastCommittedSnapshotRef.current, afterSnapshot);
     }
+    setTextareaSelection(newCursorPos, newCursorPos);
     scheduleTimeout(() => {
       textareaRef.current?.focus();
-      setTextareaSelection(newCursorPos, newCursorPos);
       autosizeTextarea(null);
       ensureCaretVisible();
       programmaticInsertRef.current = false;

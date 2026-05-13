@@ -470,6 +470,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const previousViewportStartRowRef = useRef(0);
   const lastCaretViewportOffsetRef = useRef(0);
   const previousWrapWidthPxRef = useRef<number | null>(null);
+  const reportedTextQueueRef = useRef<string[]>([]);
   
   const centerStartRow = viewportStartRow ?? uncontrolledViewportStartRow;
   const resolvedTopRowCount = topRowCount ?? uncontrolledTopRowCount;
@@ -583,18 +584,26 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   useLayoutEffect(() => {
     const el = centerInputRef.current;
     if (!el) return;
-    if (ceGetText(el) !== text) {
-      ceSetText(el, text);
-      if (isFocused) {
-        // Use React-state selection positions (from the closure of this render),
-        // NOT ceGetSelection(el). For handleBeforeInput-handled keys, the browser
-        // never mutates the DOM (e.preventDefault() was called), so the DOM
-        // selection is stale (pre-keystroke position). Using stale savedSel would
-        // restore the wrong position → handleSelect fires → syncSelectionState
-        // overwrites the correct selection → cascade of state corrections →
-        // "Maximum update depth exceeded" under rapid/held-key input.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        ceSetSelection(el, selectionStart, selectionEnd);
+    
+    // Check if the current React `text` is a state we generated during typing
+    const queueIndex = reportedTextQueueRef.current.indexOf(text);
+    if (queueIndex !== -1) {
+      // It's a lagging (or caught-up) render of our own typing.
+      // Remove this and everything before it from the queue.
+      reportedTextQueueRef.current.splice(0, queueIndex + 1);
+    } else {
+      // It's not in the queue. This means the text change came from OUTSIDE
+      // (Undo, Paste, external setContent, etc.), OR it's the initial render.
+      // We must explicitly sync the DOM to exactly match this text.
+      reportedTextQueueRef.current = []; // flush queue
+      if (ceGetText(el) !== text) {
+        ceSetText(el, text);
+        if (isFocused) {
+          // Use React-state selection positions (from the closure of this render),
+          // NOT ceGetSelection(el).
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+          ceSetSelection(el, selectionStart, selectionEnd);
+        }
       }
     }
   // selectionStart/selectionEnd are intentionally read from the current render's
@@ -1259,37 +1268,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const newSelectionEnd = sel?.end ?? newSelectionStart;
 
     normalizeEditableDom(el, newText, sel);
+    reportedTextQueueRef.current.push(newText);
     onTextChange(newText, newSelectionStart, newSelectionEnd);
   };
 
   const handleBeforeInput = (e: React.FormEvent<HTMLDivElement>) => {
     if (isReadOnly) {
       e.preventDefault();
-      return;
-    }
-
-    const inputEvent = e.nativeEvent as InputEvent;
-    const inputType = inputEvent.inputType;
-    const data = inputEvent.data;
-    if (inputEvent.isComposing) return;
-
-    const isNewlineInsert = inputType === 'insertParagraph'
-      || inputType === 'insertLineBreak'
-      || (inputType === 'insertText' && data === '\n');
-
-    if (isNewlineInsert || (inputType === 'insertText' && typeof data === 'string' && data.length > 0)) {
-      const el = e.currentTarget;
-      const sel = ceGetSelection(el) ?? { start: selectionStart, end: selectionEnd };
-      const start = Math.min(sel.start, sel.end);
-      const end = Math.max(sel.start, sel.end);
-      const insertText = isNewlineInsert ? '\n' : (data ?? '');
-      const newText = text.substring(0, start) + insertText + text.substring(end);
-      const nextCaretPos = start + insertText.length;
-
-      e.preventDefault();
-      pendingAutomaticCaretPosRef.current = nextCaretPos;
-      boundaryCaretRowPreferenceRef.current = null;
-      onTextChange(newText, nextCaretPos, nextCaretPos);
     }
   };
 
