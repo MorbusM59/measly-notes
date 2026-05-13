@@ -259,7 +259,7 @@ export const TagInput: React.FC<TagInputPropsExtended> = ({ note, onTagsChanged,
           {!!note.isTemp && (
             <div
               className="tag-pill active protected temp"
-              title="Temp note. Click to convert into a regular note"
+              title="Remove the temp tag to import this external file as a regular note."
               onClick={() => {
                 if (onConvertTempNote) onConvertTempNote();
               }}
