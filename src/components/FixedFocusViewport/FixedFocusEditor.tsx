@@ -669,12 +669,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (!showLineBreaks) return [] as Array<{ topPx: number; leftPx: number }>;
     const markers: Array<{ topPx: number; leftPx: number }> = [];
     const visibleStart = effectiveCenterStartRow;
-    for (let charIndex = 0; charIndex < text.length; charIndex += 1) {
-      if (text[charIndex] !== '\n') continue;
-      const rowIndex = findRowForCharIndex(charIndex, wrappedLines);
+    const visibleEnd = visibleStart + viewport.centerRowCount;
+    // Only scan rows currently visible in the viewport — not the full document.
+    // isLineEnd rows are the ones that end at a \n boundary.
+    for (let rowIndex = visibleStart; rowIndex < visibleEnd && rowIndex < wrappedLines.length; rowIndex++) {
       const row = wrappedLines[rowIndex];
-      if (!row) continue;
-      const rowText = text.slice(row.startCharIndex, Math.min(charIndex, row.endCharIndex));
+      if (!row || !row.isLineEnd) continue;
+      const rowText = text.slice(row.startCharIndex, row.endCharIndex);
       const leftPx = leftPaddingPx + (countVisualCells(rowText) * charCellWidthPx);
       markers.push({
         topPx: (rowIndex - visibleStart) * metrics.rowHeightPx,
@@ -682,7 +683,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       });
     }
     return markers;
-  }, [showLineBreaks, wrappedLines, text, effectiveCenterStartRow, leftPaddingPx, charCellWidthPx, metrics.rowHeightPx]);
+  }, [showLineBreaks, wrappedLines, text, effectiveCenterStartRow, viewport.centerRowCount, leftPaddingPx, charCellWidthPx, metrics.rowHeightPx]);
   const gridRowCount = Math.max(0, Math.floor(drawableHeightPx / metrics.rowHeightPx));
   const quantizedGridWidthPx = gridColumnCount * charCellWidthPx;
   const timelineWidthPx = totalColumnCount * charCellWidthPx;
