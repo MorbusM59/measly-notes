@@ -330,10 +330,18 @@ export const App: React.FC = () => {
     
     try {
       // 1. Get the current content
-      const content = await window.electronAPI.loadNote(selectedNote.id);
+      let content = (await window.electronAPI.loadNote(selectedNote.id)) || '';
 
-      // Extract title from first line using shared logic
-      const title = extractNoteTitle(content || '');
+      const lines = content.split('\n');
+      const firstLine = lines[0] || '';
+      let title = extractNoteTitle(content);
+
+      // If the first line is not a markdown header, we need to inject a dummy title
+      if (!firstLine.trim().startsWith('#')) {
+        const baseTitle = selectedNote.title.replace(/\.[^/.]+$/, "");
+        title = baseTitle;
+        content = `# ${title}\n\n${content}`;
+      }
 
       // 2. Create a new note
       const newNote = await window.electronAPI.createNote(title);

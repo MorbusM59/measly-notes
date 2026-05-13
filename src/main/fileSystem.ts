@@ -37,6 +37,20 @@ function decodeCp1252(buf: Buffer): string {
 export async function normalizeFileEncoding(filePath: string): Promise<string> {
   try {
     const buf = await fs.readFile(filePath);
+
+    // Check for UTF-16LE BOM
+    if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+      return buf.toString('utf16le');
+    }
+    // Check for UTF-16BE BOM (less common, but handled via byte swapping)
+    if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+      return buf.swap16().toString('utf16le');
+    }
+    // Check for UTF-8 BOM
+    if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+      return buf.slice(3).toString('utf8');
+    }
+
     // Try UTF-8 first
     const asUtf8 = buf.toString('utf8');
     if (!asUtf8.includes('\uFFFD')) return asUtf8;

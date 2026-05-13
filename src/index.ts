@@ -543,11 +543,11 @@ app.whenReady().then(async () => {
     app.setAsDefaultProtocolClient('measly-notes', process.execPath, [path.dirname(process.execPath)]);
   }
 
-  // Handle file opening (double-click .md files or command line args)
-  // Check command line arguments for .md files
+  // Handle file opening (double-click .md/.txt files or command line args)
+  // Check command line arguments for .md and .txt files
   const args = process.argv.slice(1);
   for (const arg of args) {
-    if (arg.endsWith('.md') && fs.existsSync(arg)) {
+    if ((arg.endsWith('.md') || arg.endsWith('.txt')) && fs.existsSync(arg)) {
       pendingFilePaths.push(path.resolve(arg));
     }
   }
@@ -560,10 +560,10 @@ app.whenReady().then(async () => {
       mainWindow.focus();
     }
 
-    // Check for .md files in the command line
+    // Check for .md/.txt files in the command line
     const args = commandLine.slice(1);
     for (const arg of args) {
-      if (arg.endsWith('.md') && fs.existsSync(arg)) {
+      if ((arg.endsWith('.md') || arg.endsWith('.txt')) && fs.existsSync(arg)) {
         pendingFilePaths.push(path.resolve(arg));
         // Send to renderer to handle
         if (mainWindow && mainWindow.webContents) {
@@ -576,7 +576,7 @@ app.whenReady().then(async () => {
   // Handle open-file events (macOS)
   app.on('open-file', (event, filePath) => {
     event.preventDefault();
-    if (filePath.endsWith('.md') && fs.existsSync(filePath)) {
+    if ((filePath.endsWith('.md') || filePath.endsWith('.txt')) && fs.existsSync(filePath)) {
       pendingFilePaths.push(path.resolve(filePath));
       // Send to renderer to handle
       if (mainWindow && mainWindow.webContents) {
@@ -799,7 +799,7 @@ app.whenReady().then(async () => {
         const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
         if (!res || res.canceled || !res.filePaths || res.filePaths.length === 0) return { imported: 0, createdNoteIds: [] };
         const folder = res.filePaths[0];
-        const entries = fs.readdirSync(folder).filter(f => f.toLowerCase().endsWith('.md'));
+        const entries = fs.readdirSync(folder).filter(f => f.toLowerCase().endsWith('.md') || f.toLowerCase().endsWith('.txt'));
         const createdNoteIds: number[] = [];
         const errors: string[] = [];
         for (const e of entries) {
@@ -813,9 +813,9 @@ app.whenReady().then(async () => {
               try {
                 const raw = fs.readFileSync(src, 'utf8');
                 const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-                if (lines.length > 0) return lines[0].replace(/^#+\s*/, '') || e.replace(/\.md$/i, '');
+                if (lines.length > 0) return lines[0].replace(/^#+\s*/, '') || e.replace(/\.(md|txt)$/i, '');
               } catch { void 0; }
-              return e.replace(/\.md$/i, '');
+              return e.replace(/\.(md|txt)$/i, '');
             })();
             const note = createNote(titleGuess, '');
             // generate token and filename

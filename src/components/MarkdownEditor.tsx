@@ -815,7 +815,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     if (files.length === 0) return;
 
     const file = files[0];
-    if (!file.name.toLowerCase().endsWith('.md')) return;
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith('.md') && !lowerName.endsWith('.txt')) return;
 
     try {
       // Use webUtils.getPathForFile (Electron 28+) via preload bridge
