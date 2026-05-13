@@ -1115,7 +1115,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
               const normalizedExt = extContent.replace(/\r\n/g, '\n');
               const normalizedNote = noteContent.replace(/\r\n/g, '\n');
               if (normalizedExt !== normalizedNote && !note.hasUnsavedChanges) {
-                window.electronAPI.updateTempNoteState(note.id, true, note.syncMode ?? false).then(() => {
+                window.electronAPI.updateTempNoteState(note.id, true, !!note.syncMode).then(() => {
                   if (onNoteUpdateRef.current) {
                     onNoteUpdateRef.current({ ...note, hasUnsavedChanges: true });
                   }
@@ -1551,7 +1551,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         onNoteUpdateRef.current?.({ ...note, hasUnsavedChanges: newUnsaved });
       } catch (err) {
         console.warn('Failed to save temp note to external file:', err);
-        await window.electronAPI.updateTempNoteState(note.id, true, note.syncMode || false);
+        await window.electronAPI.updateTempNoteState(note.id, true, !!note.syncMode);
         onNoteUpdateRef.current?.({ ...note, hasUnsavedChanges: true });
       }
     } else if (note.isTemp && note.externalPath && !note.syncMode) {

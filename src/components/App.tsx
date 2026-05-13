@@ -371,7 +371,7 @@ export const App: React.FC = () => {
       const content = await window.electronAPI.loadNote(selectedNote.id);
       const success = await window.electronAPI.writeFileContent(selectedNote.externalPath, content);
       if (success) {
-        await window.electronAPI.updateTempNoteState(selectedNote.id, false, selectedNote.syncMode || false);
+        await window.electronAPI.updateTempNoteState(selectedNote.id, false, !!selectedNote.syncMode);
         setSelectedNote({ ...selectedNote, hasUnsavedChanges: false });
       }
     } catch (err) {
@@ -383,7 +383,7 @@ export const App: React.FC = () => {
     if (!selectedNote?.isTemp) return;
     const newSyncMode = !selectedNote.syncMode;
     try {
-      await window.electronAPI.updateTempNoteState(selectedNote.id, selectedNote.hasUnsavedChanges || false, newSyncMode);
+      await window.electronAPI.updateTempNoteState(selectedNote.id, !!selectedNote.hasUnsavedChanges, newSyncMode);
       setSelectedNote({ ...selectedNote, syncMode: newSyncMode });
     } catch (err) {
       console.warn('handleTempNoteSyncToggle failed', err);
