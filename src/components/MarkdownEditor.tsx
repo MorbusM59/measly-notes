@@ -641,7 +641,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const currentPreviewHsvaRef = useRef<HSVA | null>(null);
 
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
-  const [editHistoryCount, setEditHistoryCount] = useState(0);
+  const editHistoryCountRef = useRef(0);
   const textareaRef = useRef<HTMLDivElement | null>(null);
   const editorContentRef = useRef<HTMLDivElement | null>(null);
   const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -738,7 +738,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     } else {
       if (stack.length > 50) stack.shift();
     }
-    setEditHistoryCount(undoStackRef.current.length + redoStackRef.current.length);
+    editHistoryCountRef.current = undoStackRef.current.length + redoStackRef.current.length;
   }, []);
 
   const bundleRecentChars = useCallback(() => {
@@ -882,7 +882,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       undoStackRef.current = [];
       redoStackRef.current = [];
       undoTotalDiffRef.current = 0;
-      setEditHistoryCount(0);
+      editHistoryCountRef.current = 0;
       pendingHistoryBoundaryRef.current = null;
       lastCommittedSnapshotRef.current = { content: '', selectionStart: 0, selectionEnd: 0 };
       return;
@@ -893,7 +893,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     undoStackRef.current = [];
     redoStackRef.current = [];
     undoTotalDiffRef.current = 0;
-    setEditHistoryCount(0);
+    editHistoryCountRef.current = 0;
 
     return () => {
       isCancelled = true;
@@ -1961,7 +1961,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     const currentSnapshot = buildSnapshot(content, liveSelectionStartRef.current, liveSelectionEndRef.current);
     redoStackRef.current.push({ type: entry.type, snapshot: currentSnapshot, diff: redoDiff });
     
-    setEditHistoryCount(undoStackRef.current.length + redoStackRef.current.length);
+    editHistoryCountRef.current = undoStackRef.current.length + redoStackRef.current.length;
     applySnapshotProgrammatically(entry.snapshot);
   }, [applySnapshotProgrammatically, buildSnapshot, content]);
 
@@ -1979,7 +1979,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     undoStackRef.current.push({ type: entry.type, snapshot: currentSnapshot, diff: undoDiff });
     undoTotalDiffRef.current += undoDiff;
     
-    setEditHistoryCount(undoStackRef.current.length + redoStackRef.current.length);
+    editHistoryCountRef.current = undoStackRef.current.length + redoStackRef.current.length;
     applySnapshotProgrammatically(entry.snapshot);
   }, [applySnapshotProgrammatically, buildSnapshot, content]);
 

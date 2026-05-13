@@ -11,6 +11,33 @@ import { ComputedMetrics } from './lineMetrics';
 let measurementContext: CanvasRenderingContext2D | null = null;
 const measurementCache = new Map<string, number>();
 
+// ---- Per-logical-line wrap cache ------------------------------------------------
+// Caches the visual row layout (relative offsets) for each unique combination of
+// (lineText × containerWidth × font). On a typical keypress only ONE logical line
+// changes, so every other line is an O(1) cache hit instead of a full measurement.
+
+interface RelativeRowSpan {
+  startOffset: number;  // offset from the start of the logical line
+  endOffset: number;
+  isLineStart: boolean;
+  isLineEnd: boolean;
+}
+
+const lineWrapCache = new Map<string, RelativeRowSpan[]>();
+const MAX_LINE_WRAP_CACHE_SIZE = 2000;
+
+function makeLineWrapKey(
+  lineText: string,
+  containerWidthPx: number,
+  fontSizePx: number,
+  fontFamily: string,
+  charCellWidthPx: number | undefined,
+): string {
+  const cellStr = charCellWidthPx != null ? charCellWidthPx.toFixed(4) : '';
+  return `${containerWidthPx.toFixed(2)}|${fontSizePx}|${cellStr}|${fontFamily}|${lineText}`;
+}
+// ---------------------------------------------------------------------------------
+
 /**
  * A "wrapped row" is a visual line of text that may span multiple logical lines
  * or be only part of a logical line (if it wraps due to width).
@@ -49,68 +76,97 @@ export function computeWrappedLines(
 
   for (let logLineIdx = 0; logLineIdx < logicalLines.length; logLineIdx++) {
     const logicalLine = logicalLines[logLineIdx];
-    const lineCharCount = logicalLine.length;
 
-    if (lineCharCount === 0) {
-      // Empty logical line -> one wrapped row (the empty line itself)
+    // Use cached per-line spans — only the edited line is a cache miss.
+    const spans = computeLineSpans(logicalLine, containerWidthPx, metrics, fontFamily, charCellWidthPx);
+
+    for (const span of spans) {
       lines.push({
-        startCharIndex: globalCharIndex,
-        endCharIndex: globalCharIndex,
+        startCharIndex: globalCharIndex + span.startOffset,
+        endCharIndex: globalCharIndex + span.endOffset,
         logicalLineIndex: logLineIdx,
-        isLineStart: true,
-        isLineEnd: true,
+        isLineStart: span.isLineStart,
+        isLineEnd: span.isLineEnd,
       });
-      globalCharIndex += 1; // account for the \n
-    } else {
-      // Split logical line into wrapped rows using measured text width.
-      let linePos = 0;
-      while (linePos < lineCharCount) {
-        const rowStart = linePos;
-        const maxRowEnd = findMaxFittingEnd(
-          logicalLine,
-          rowStart,
-          containerWidthPx,
-          metrics.fontSizePx,
-          fontFamily,
-          charCellWidthPx
-        );
-        let rowEnd = maxRowEnd;
-
-        // Prefer wrapping at whitespace while keeping wrapped rows free from
-        // leading spaces. When a boundary space would be the first char on the
-        // next row, move the entire trailing word to the next row as well.
-        if (maxRowEnd < lineCharCount) {
-          const charAtBoundary = logicalLine[maxRowEnd];
-          const isBoundaryWhitespace = charAtBoundary === ' ' || charAtBoundary === '\t';
-          if (isBoundaryWhitespace) {
-            const trailingWordStart = findWordStartBeforeIndex(logicalLine, rowStart, maxRowEnd);
-            if (trailingWordStart > rowStart) {
-              rowEnd = trailingWordStart;
-            }
-          } else {
-            const breakPos = findWrapBreak(logicalLine, rowStart, maxRowEnd);
-            if (breakPos > rowStart) {
-              rowEnd = breakPos;
-            }
-          }
-        }
-
-        lines.push({
-          startCharIndex: globalCharIndex + rowStart,
-          endCharIndex: globalCharIndex + rowEnd,
-          logicalLineIndex: logLineIdx,
-          isLineStart: rowStart === 0,
-          isLineEnd: rowEnd === lineCharCount,
-        });
-
-        linePos = rowEnd;
-      }
-
-      globalCharIndex += lineCharCount + 1; // include the \n
     }
+
+    globalCharIndex += logicalLine.length + 1; // +1 for the \n separator
   }
 
   return lines;
+}
+
+/**
+ * Compute (and cache) the visual row layout for a single logical line.
+ * Returns relative offsets; the caller translates them to absolute char indices.
+ */
+function computeLineSpans(
+  logicalLine: string,
+  containerWidthPx: number,
+  metrics: ComputedMetrics,
+  fontFamily: string,
+  charCellWidthPx: number | undefined,
+): RelativeRowSpan[] {
+  const cacheKey = makeLineWrapKey(logicalLine, containerWidthPx, metrics.fontSizePx, fontFamily, charCellWidthPx);
+  const cached = lineWrapCache.get(cacheKey);
+  if (cached) return cached;
+
+  const spans: RelativeRowSpan[] = [];
+  const lineCharCount = logicalLine.length;
+
+  if (lineCharCount === 0) {
+    // Empty logical line → one wrapped row (the empty line itself).
+    spans.push({ startOffset: 0, endOffset: 0, isLineStart: true, isLineEnd: true });
+  } else {
+    let linePos = 0;
+    while (linePos < lineCharCount) {
+      const rowStart = linePos;
+      const maxRowEnd = findMaxFittingEnd(
+        logicalLine,
+        rowStart,
+        containerWidthPx,
+        metrics.fontSizePx,
+        fontFamily,
+        charCellWidthPx
+      );
+      let rowEnd = maxRowEnd;
+
+      // Prefer wrapping at whitespace while keeping wrapped rows free from
+      // leading spaces. When a boundary space would be the first char on the
+      // next row, move the entire trailing word to the next row as well.
+      if (maxRowEnd < lineCharCount) {
+        const charAtBoundary = logicalLine[maxRowEnd];
+        const isBoundaryWhitespace = charAtBoundary === ' ' || charAtBoundary === '\t';
+        if (isBoundaryWhitespace) {
+          const trailingWordStart = findWordStartBeforeIndex(logicalLine, rowStart, maxRowEnd);
+          if (trailingWordStart > rowStart) {
+            rowEnd = trailingWordStart;
+          }
+        } else {
+          const breakPos = findWrapBreak(logicalLine, rowStart, maxRowEnd);
+          if (breakPos > rowStart) {
+            rowEnd = breakPos;
+          }
+        }
+      }
+
+      spans.push({
+        startOffset: rowStart,
+        endOffset: rowEnd,
+        isLineStart: rowStart === 0,
+        isLineEnd: rowEnd === lineCharCount,
+      });
+
+      linePos = rowEnd;
+    }
+  }
+
+  if (lineWrapCache.size >= MAX_LINE_WRAP_CACHE_SIZE) {
+    const firstKey = lineWrapCache.keys().next().value;
+    if (firstKey !== undefined) lineWrapCache.delete(firstKey);
+  }
+  lineWrapCache.set(cacheKey, spans);
+  return spans;
 }
 
 function getMeasurementContext(): CanvasRenderingContext2D | null {

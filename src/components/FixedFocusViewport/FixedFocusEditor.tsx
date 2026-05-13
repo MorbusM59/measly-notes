@@ -624,30 +624,47 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     rightPaddingPx,
     containerWidthPx - leftPaddingPx - wrapWidthPx
   );
-  const model = useMemo(() => {
-    const m = new FixedFocusViewportModel(
-      fontSizePx,
-      spacingPreset,
-      wrapWidthPx,
-      drawableHeightPx,
-      fontFamily,
-      resolvedTopRowCount,
-      resolvedBottomRowCount,
-      charCellWidthPx
-    );
-    m.setText(text, wrapWidthPx);
-    return m;
-  }, [
-    text,
-    fontSizePx,
-    spacingPreset,
-    wrapWidthPx,
-    drawableHeightPx,
-    fontFamily,
-    resolvedTopRowCount,
-    resolvedBottomRowCount,
-    charCellWidthPx,
-  ]);
+  // Keep the model instance stable across renders. Only recreate when layout or
+  // font parameters change — text updates use per-line wrap caching and are cheap.
+  const modelRef = useRef<FixedFocusViewportModel | null>(null);
+  const modelLayoutRef = useRef({
+    fontSizePx, spacingPreset, wrapWidthPx, drawableHeightPx,
+    fontFamily, resolvedTopRowCount, resolvedBottomRowCount, charCellWidthPx,
+  });
+  {
+    const lp = modelLayoutRef.current;
+    if (
+      !modelRef.current
+      || lp.fontSizePx !== fontSizePx
+      || lp.spacingPreset !== spacingPreset
+      || lp.wrapWidthPx !== wrapWidthPx
+      || lp.drawableHeightPx !== drawableHeightPx
+      || lp.fontFamily !== fontFamily
+      || lp.resolvedTopRowCount !== resolvedTopRowCount
+      || lp.resolvedBottomRowCount !== resolvedBottomRowCount
+      || lp.charCellWidthPx !== charCellWidthPx
+    ) {
+      modelRef.current = new FixedFocusViewportModel(
+        fontSizePx,
+        spacingPreset,
+        wrapWidthPx,
+        drawableHeightPx,
+        fontFamily,
+        resolvedTopRowCount,
+        resolvedBottomRowCount,
+        charCellWidthPx
+      );
+      modelLayoutRef.current = {
+        fontSizePx, spacingPreset, wrapWidthPx, drawableHeightPx,
+        fontFamily, resolvedTopRowCount, resolvedBottomRowCount, charCellWidthPx,
+      };
+    }
+    // Only call setText when the text actually changed — cache handles the rest.
+    if (modelRef.current.getText() !== text) {
+      modelRef.current.setText(text, wrapWidthPx);
+    }
+  }
+  const model = modelRef.current!;
 
   const wrappedLines = model.getWrappedLines();
   const provisionalViewport = model.getViewport();
