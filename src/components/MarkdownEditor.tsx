@@ -2423,20 +2423,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   };
 
   return (
-    <div 
-      className={`markdown-editor ${isDragOver ? 'drag-over' : ''}`}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {isDragOver && (
-        <div className="drag-overlay">
-          <div className="drag-message">
-            <span className="drag-icon">📄</span>
-            <span>Drop markdown file here</span>
-          </div>
-        </div>
-      )}
+    <div className="markdown-editor">
       <div className="editor-toolbar" style={toolbarStyle}>
         <div style={leftToolsStyle}>
           <button
@@ -2815,7 +2802,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         )}
       </div>
 
-      <div className={`editor-content ${showPreview ? 'is-preview' : 'is-editor'}`} ref={editorContentRef} style={!showPreview ? { overflow: 'hidden' } : undefined}>
+      <div
+        className={`editor-content ${showPreview ? 'is-preview' : 'is-editor'} ${isDragOver ? 'drag-over' : ''}`}
+        ref={editorContentRef}
+        style={!showPreview ? { overflow: 'hidden' } : undefined}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {isDragOver && (
+          <div className="drag-overlay">
+          </div>
+        )}
         {!showPreview ? (
           <FixedFocusEditor
             key={`${editorStyle}-${editorFontSize}-${editorSpacing}-${layoutRevision}`}
