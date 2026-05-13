@@ -223,6 +223,12 @@ export const App: React.FC = () => {
   // Handle opening .md files from external sources
   const handleOpenMdFile = useCallback(async (filePath: string) => {
     try {
+      try {
+        await (window as any).electronAPI.requestForceSave();
+      } catch (err) {
+        console.warn('requestForceSave failed on open external file', err);
+      }
+
       // Check if we already have a temp note for this file
       const tempNotes = await window.electronAPI.getTempNotes();
       const existingTempNote = tempNotes.find(note => note.externalPath === filePath);
@@ -336,11 +342,14 @@ export const App: React.FC = () => {
       const firstLine = lines[0] || '';
       let title = extractNoteTitle(content);
 
+      let offset = 0;
       // If the first line is not a markdown header, we need to inject a dummy title
       if (!firstLine.trim().startsWith('#')) {
         const baseTitle = selectedNote.title.replace(/\.[^/.]+$/, "");
         title = baseTitle;
-        content = `# ${title}\n\n${content}`;
+        const prefix = `# ${title}\n\n`;
+        content = prefix + content;
+        offset = prefix.length;
       }
 
       // 2. Create a new note
@@ -352,6 +361,30 @@ export const App: React.FC = () => {
       // Also update the title in db immediately to reflect in UI
       await window.electronAPI.updateNoteTitle(newNote.id, title);
       newNote.title = title; // update local object to reflect immediately
+
+      // Migrate UI state
+      try {
+        const oldUiState = await window.electronAPI.getNoteUiState(selectedNote.id);
+        if (oldUiState) {
+          if (offset > 0 && oldUiState.cursorPos != null) {
+            oldUiState.cursorPos += offset;
+          }
+          await window.electronAPI.saveNoteUiState(newNote.id, oldUiState);
+        }
+        
+        const getEditStateKey = (noteId: number) => `markdown-edit-state-${noteId}`;
+        const rawState = localStorage.getItem(getEditStateKey(selectedNote.id));
+        if (rawState) {
+          const parsed = JSON.parse(rawState);
+          if (offset > 0 && parsed.selectionStart != null) {
+            parsed.selectionStart += offset;
+          }
+          localStorage.setItem(getEditStateKey(newNote.id), JSON.stringify(parsed));
+          localStorage.removeItem(getEditStateKey(selectedNote.id));
+        }
+      } catch (err) {
+        console.warn('Failed to migrate ui state', err);
+      }
 
       // 4. Close the old temp note
       await window.electronAPI.deleteTempNote(selectedNote.id);

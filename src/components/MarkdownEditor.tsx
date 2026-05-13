@@ -910,8 +910,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     const liveSel = el ? (ceGetSelection(el) ?? { start: selectionStart, end: selectionEnd }) : { start: selectionStart, end: selectionEnd };
     const state: EditState = {
       selectionStart: liveSel.start,
-      scrollTop: editViewportStartRow,
-      viewportStartRow: editViewportStartRow,
+      scrollTop: liveViewportStartRowRef.current,
+      viewportStartRow: liveViewportStartRowRef.current,
     };
     try {
       // persist to DB via preload API (best-effort)
