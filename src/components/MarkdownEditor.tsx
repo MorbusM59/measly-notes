@@ -2818,6 +2818,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             onBottomRowCountChange={handleFixedFocusBottomRowCountChange}
             onTotalWrappedRowCountChange={(count) => { totalWrappedRowsRef.current = count; }}
             timelineProps={timelineProps}
+            isTemp={note?.isTemp}
+            externalPath={note?.externalPath}
             showLineBreaks={showLineBreaks}
             onTextChange={(newText, newSelectionStart, newSelectionEnd) => {
               if (isTimeTravelLocked) return;

@@ -371,6 +371,8 @@ interface FixedFocusEditorProps {
   /** Called whenever the total wrapped row count changes (e.g. text reflows). */
   onTotalWrappedRowCountChange?: (count: number) => void;
   timelineProps?: any;
+  isTemp?: boolean;
+  externalPath?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -415,6 +417,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   onCompositionEnd,
   onTotalWrappedRowCountChange,
   timelineProps,
+  isTemp,
+  externalPath,
   readOnly = false,
 }) => {
   const isReadOnly = Boolean(readOnly);
@@ -2316,11 +2320,17 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             height: `${charCellWidthPx}px`,
             display: 'flex',
           }}>
-            <Timeline 
-              {...timelineProps}
-              charWidth={charCellWidthPx}
-              gridWidth={timelineWidthPx}
-            />
+            {isTemp ? (
+              <div className="external-file-path-info">
+                {externalPath}
+              </div>
+            ) : (
+              <Timeline 
+                {...timelineProps}
+                charWidth={charCellWidthPx}
+                gridWidth={timelineWidthPx}
+              />
+            )}
           </div>
         )}
       </div>
