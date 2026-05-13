@@ -205,12 +205,17 @@ function findMaxFittingEnd(
   fontFamily: string,
   charCellWidthPx?: number
 ): number {
-  // When a DOM-measured cell width is provided, iterate through characters
-  // counting visual cells (accounting for tabs = 3 cells, others = 1 cell).
   if (charCellWidthPx && charCellWidthPx > 0) {
     const maxCells = Math.floor(maxWidthPx / charCellWidthPx);
+    if (maxCells <= 0) return rowStart + 1; // Need at least 1 char
+    
+    // Fast path: bypass loop for simple mathematical bounds
+    const estimatedEnd = rowStart + maxCells;
+    if (estimatedEnd >= line.length) {
+      return line.length; // Can fit the whole rest of the line
+    }
+    
     let cellsUsed = 0;
-
     for (let i = rowStart; i < line.length; i++) {
       const char = line[i];
       const cellsForChar = char === '\t' ? 3 : 1;
@@ -219,7 +224,6 @@ function findMaxFittingEnd(
       }
       cellsUsed += cellsForChar;
     }
-
     return line.length;
   }
 

@@ -535,91 +535,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     textareaRef.current = centerInputRef.current;
   }, [textareaRef]);
 
-  useEffect(() => {
-    if (!editorApiRef) return;
-    editorApiRef.current = {
-      applyProgrammaticEdit: (edit: { start: number; deleteLen: number; insertText: string }) => {
-        const el = centerInputRef.current;
-        if (!el) return null;
-        try { el.focus(); } catch {}
-
-        const start = Math.max(0, Math.floor(edit.start ?? 0));
-        const deleteLen = Math.max(0, Math.floor(edit.deleteLen ?? 0));
-        const end = start + deleteLen;
-
-        try {
-          // Set selection to target range
-          ceSetSelection(el, start, end);
-          // Use execCommand to insert text so browser undo integrates
-          const success = document.execCommand('insertText', false, edit.insertText ?? '');
-          if (!success) {
-            // Fallback to DOM Range replacement
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0) {
-              const range = sel.getRangeAt(0);
-              range.deleteContents();
-              range.insertNode(document.createTextNode(edit.insertText ?? ''));
-              range.collapse(false);
-              sel.removeAllRanges();
-              sel.addRange(range);
-            }
-          }
-        } catch (err) {
-          // Fallback: apply text by rebuilding DOM (rare)
-          const currentText = ceGetText(el);
-          const newText = currentText.substring(0, start) + (edit.insertText ?? '') + currentText.substring(end);
-          ceSetText(el, newText);
-          ceSetSelection(el, start + (edit.insertText ?? '').length, start + (edit.insertText ?? '').length);
-        }
-
-        const newText = ceGetText(el);
-        const sel = ceGetSelection(el) ?? { start: 0, end: 0 };
-        onTextChange(newText, sel.start, sel.end);
-        return { newText, selectionStart: sel.start, selectionEnd: sel.end };
-      },
-    };
-
-    return () => { if (editorApiRef) editorApiRef.current = null; };
-  }, [editorApiRef, onTextChange]);
-
-  // Sync external text-prop changes into the contenteditable DOM.
-  // When the user types, ceGetText(el) === text and this is a no-op.
-  // When undo/redo/programmatic changes arrive, we rebuild the DOM.
-  useLayoutEffect(() => {
-    const el = centerInputRef.current;
-    if (!el) return;
-    
-    // Check if the current React `text` is a state we generated during typing
-    const queueIndex = reportedTextQueueRef.current.indexOf(text);
-    if (queueIndex !== -1) {
-      // It's a lagging (or caught-up) render of our own typing.
-      // Remove this and everything before it from the queue.
-      reportedTextQueueRef.current.splice(0, queueIndex + 1);
-    } else {
-      // It's not in the queue. This means the text change came from OUTSIDE
-      // (Undo, Paste, external setContent, etc.), OR it's the initial render.
-      // We must explicitly sync the DOM to exactly match this text.
-      reportedTextQueueRef.current = []; // flush queue
-      if (ceGetText(el) !== text) {
-        ceSetText(el, text);
-        if (isFocused) {
-          // Use React-state selection positions (from the closure of this render),
-          // NOT ceGetSelection(el).
-          // eslint-disable-next-line react-hooks/exhaustive-deps
-          ceSetSelection(el, selectionStart, selectionEnd);
-        }
-      }
-    }
-  // selectionStart/selectionEnd are intentionally read from the current render's
-  // closure but NOT listed as deps: this effect must only run when `text` changes.
-  // At that point the closure already holds the correct new positions. Adding them
-  // to deps would re-run this effect on every caret move (expensive ceGetText call
-  // on every selection change).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
-
-  // No custom caret animation required when using native caret.
-
   // Build model for zone slicing + layout; viewport driven entirely by centerStartRow state.
   // Contract:
   // - rightmost 1 column is the scrollbar indicator
@@ -708,6 +623,125 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const topRows = model.getTopZoneRows();
   const centerRows = model.getCenterZoneRows();
   const bottomRows = model.getBottomZoneRows();
+
+  const topText = topRows.length > 0
+    ? text.slice(topRows[0].startCharIndex, topRows[topRows.length - 1].endCharIndex)
+    : '';
+
+  const centerCharsOffset = centerRows.length > 0 ? centerRows[0].startCharIndex : 0;
+  const centerText = centerRows.length > 0
+    ? text.slice(centerRows[0].startCharIndex, centerRows[centerRows.length - 1].endCharIndex)
+    : '';
+
+  const bottomText = bottomRows.length > 0
+    ? text.slice(bottomRows[0].startCharIndex, bottomRows[bottomRows.length - 1].endCharIndex)
+    : '';
+
+  useEffect(() => {
+    if (!editorApiRef) return;
+    editorApiRef.current = {
+      applyProgrammaticEdit: (edit: { start: number; deleteLen: number; insertText: string }) => {
+        const el = centerInputRef.current;
+        if (!el) return null;
+
+        const start = Math.max(0, Math.floor(edit.start ?? 0));
+        const deleteLen = Math.max(0, Math.floor(edit.deleteLen ?? 0));
+        const end = start + deleteLen;
+
+        const relStart = start - centerCharsOffset;
+        const relEnd = end - centerCharsOffset;
+
+        if (relStart < 0 || relEnd > centerText.length) {
+          // Edit falls outside the native DOM. We must fallback to React state replacement (loses native undo step)
+          const newText = text.substring(0, start) + (edit.insertText ?? '') + text.substring(end);
+          const newPos = start + (edit.insertText ?? '').length;
+          onTextChange(newText, newPos, newPos);
+          return { newText, selectionStart: newPos, selectionEnd: newPos };
+        }
+
+        try { el.focus(); } catch {}
+
+        try {
+          // Set selection to target range
+          ceSetSelection(el, relStart, relEnd);
+          // Use execCommand to insert text so browser undo integrates
+          const success = document.execCommand('insertText', false, edit.insertText ?? '');
+          if (!success) {
+            // Fallback to DOM Range replacement
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+              const range = sel.getRangeAt(0);
+              range.deleteContents();
+              range.insertNode(document.createTextNode(edit.insertText ?? ''));
+              range.collapse(false);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          }
+        } catch (err) {
+          // Fallback: apply text by rebuilding DOM (rare)
+          const currentText = ceGetText(el);
+          const newCenterText = currentText.substring(0, relStart) + (edit.insertText ?? '') + currentText.substring(relEnd);
+          ceSetText(el, newCenterText);
+          ceSetSelection(el, relStart + (edit.insertText ?? '').length, relStart + (edit.insertText ?? '').length);
+        }
+
+        const newCenterTextDom = ceGetText(el);
+        const sel = ceGetSelection(el) ?? { start: 0, end: 0 };
+        
+        const prefix = text.substring(0, centerCharsOffset);
+        const suffix = text.substring(centerCharsOffset + centerText.length);
+        const globalNewText = prefix + newCenterTextDom + suffix;
+        const globalStart = sel.start + centerCharsOffset;
+        const globalEnd = sel.end + centerCharsOffset;
+
+        onTextChange(globalNewText, globalStart, globalEnd);
+        return { newText: globalNewText, selectionStart: globalStart, selectionEnd: globalEnd };
+      },
+    };
+
+    return () => { if (editorApiRef) editorApiRef.current = null; };
+  }, [editorApiRef, onTextChange, text, centerText, centerCharsOffset]);
+
+  // Sync external text-prop changes into the contenteditable DOM.
+  // When the user types, ceGetText(el) === centerText and this is a no-op.
+  // When undo/redo/programmatic changes arrive, or when centerText is reflowed by scrolling, we rebuild the DOM.
+  useLayoutEffect(() => {
+    const el = centerInputRef.current;
+    if (!el) return;
+    
+    // Check if the current React `text` is a state we generated during typing
+    // Now comparing against centerText since reportedTextQueueRef gets the newText slice
+    const queueIndex = reportedTextQueueRef.current.indexOf(centerText);
+    if (queueIndex !== -1) {
+      // It's a lagging (or caught-up) render of our own typing.
+      // Remove this and everything before it from the queue.
+      reportedTextQueueRef.current.splice(0, queueIndex + 1);
+    } else {
+      // It's not in the queue. This means the text change came from OUTSIDE
+      // (Undo, scroll/reflow, Paste, external setContent, etc.), OR it's the initial render.
+      // We must explicitly sync the DOM to exactly match this center text.
+      reportedTextQueueRef.current = []; // flush queue
+      if (ceGetText(el) !== centerText) {
+        ceSetText(el, centerText);
+        if (isFocused) {
+          // Use React-state selection positions (from the closure of this render),
+          // NOT ceGetSelection(el).
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+          ceSetSelection(el, Math.max(0, selectionStart - centerCharsOffset), Math.max(0, selectionEnd - centerCharsOffset));
+        }
+      }
+    }
+  // selectionStart/selectionEnd are intentionally read from the current render's
+  // closure but NOT listed as deps: this effect must only run when `centerText` changes.
+  // At that point the closure already holds the correct new positions. Adding them
+  // to deps would re-run this effect on every caret move (expensive ceGetText call
+  // on every selection change).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centerText]);
+
+  // No custom caret animation required when using native caret.
+
   const lineBreakMarkers = useMemo(() => {
     if (!showLineBreaks) return [] as Array<{ topPx: number; leftPx: number }>;
     const markers: Array<{ topPx: number; leftPx: number }> = [];
@@ -1083,13 +1117,15 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const el = centerInputRef.current;
     if (!el || !isFocused) return;
     const live = ceGetSelection(el);
-    if (!live || live.start !== selectionStart || live.end !== selectionEnd) {
-      ceSetSelection(el, selectionStart, selectionEnd);
+    const relStart = Math.max(0, selectionStart - centerCharsOffset);
+    const relEnd = Math.max(0, selectionEnd - centerCharsOffset);
+    if (!live || live.start !== relStart || live.end !== relEnd) {
+      ceSetSelection(el, relStart, relEnd);
     }
     // Suppress any internal scroll the browser may apply
     if (el.scrollTop) el.scrollTop = 0;
     if (el.scrollLeft) el.scrollLeft = 0;
-  }, [isFocused, selectionEnd, selectionStart]);
+  }, [isFocused, selectionEnd, selectionStart, centerCharsOffset]);
 
   // Canvas POC removed — using DOM overlay caret only.
 
@@ -1256,9 +1292,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     if (isReadOnly) {
       const el = e.currentTarget;
       const currentText = ceGetText(el);
-      if (currentText !== text) {
+      if (currentText !== centerText) {
         const sel = ceGetSelection(el) ?? { start: 0, end: 0 };
-        ceSetText(el, text);
+        ceSetText(el, centerText);
         ceSetSelection(el, sel.start, sel.end);
       }
       return;
@@ -1273,7 +1309,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
 
     normalizeEditableDom(el, newText, sel);
     reportedTextQueueRef.current.push(newText);
-    onTextChange(newText, newSelectionStart, newSelectionEnd);
+    
+    const prefix = text.substring(0, centerCharsOffset);
+    const suffix = text.substring(centerCharsOffset + centerText.length);
+    const globalNewText = prefix + newText + suffix;
+    
+    onTextChange(globalNewText, newSelectionStart + centerCharsOffset, newSelectionEnd + centerCharsOffset);
   };
 
   const handleBeforeInput = (e: React.FormEvent<HTMLDivElement>) => {
@@ -1289,7 +1330,8 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const el = e.currentTarget;
     const sel = ceGetSelection(el);
     if (!sel) return;
-    const { start: newSelectionStart, end: newSelectionEnd } = sel;
+    const newSelectionStart = sel.start + centerCharsOffset;
+    const newSelectionEnd = sel.end + centerCharsOffset;
 
     // If this is a user-driven caret change (Left/Right arrows, click, etc.)
     // and not a programmatic setSelectionRange we issued ourselves, clear any
@@ -1588,7 +1630,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       const { start, end } = getWordSelectionRange(clickedPos);
       event.preventDefault();
       event.currentTarget.focus();
-      ceSetSelection(event.currentTarget, start, end);
+      ceSetSelection(event.currentTarget, Math.max(0, start - centerCharsOffset), Math.max(0, end - centerCharsOffset));
       onSelectionChange?.(start, end);
       return;
     }
@@ -1608,14 +1650,14 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       const nextSelectionStart = Math.min(caretPos, clickedPos);
       const nextSelectionEnd = Math.max(caretPos, clickedPos);
       event.currentTarget.focus();
-      ceSetSelection(event.currentTarget, nextSelectionStart, nextSelectionEnd);
+      ceSetSelection(event.currentTarget, Math.max(0, nextSelectionStart - centerCharsOffset), Math.max(0, nextSelectionEnd - centerCharsOffset));
       onSelectionChange?.(nextSelectionStart, nextSelectionEnd);
       return;
     }
 
     const anchorPos = clickedPos;
     event.currentTarget.focus();
-    ceSetSelection(event.currentTarget, anchorPos, anchorPos);
+    ceSetSelection(event.currentTarget, Math.max(0, anchorPos - centerCharsOffset), Math.max(0, anchorPos - centerCharsOffset));
 
     selectionDragStateRef.current = {
       pointerId: event.pointerId,
@@ -1788,12 +1830,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     document.body.style.cursor = 'row-resize';
   };
 
-  // Translate the textarea vertically so that row `centerStartRow` aligns with
-  // the top of the center zone. The parent div clips via overflow:hidden.
-  const textareaTopPx = -(effectiveCenterStartRow * metrics.rowHeightPx);
+  // The center zone's DOM now receives ONLY the center visible text, so the top
+  // of the DOM string is exactly aligned with the top of the middle zone. No negative
+  // translation is required.
+  const textareaTopPx = 0;
   const textareaHeightPx = Math.max(
     layout.centerHeightPx,
-    wrappedLines.length * metrics.rowHeightPx
+    centerRows.length * metrics.rowHeightPx
   );
   const topRowsInsetPx = Math.max(0, layout.topHeightPx - (topRows.length * metrics.rowHeightPx));
   const topDividerTopPx = Math.max(0, Math.round(topInsetPx + heightForRows(viewport.topRowCount, metrics)));
@@ -1916,9 +1959,9 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const editor = event.currentTarget;
     const clickedPos = getCharIndexForPointer(event.clientX, event.clientY);
     const { start, end } = getWordSelectionRange(clickedPos);
-    ceSetSelection(editor, start, end);
+    ceSetSelection(editor, Math.max(0, start - centerCharsOffset), Math.max(0, end - centerCharsOffset));
     onSelectionChange?.(start, end);
-  }, [getCharIndexForPointer, getWordSelectionRange, onSelectionChange]);
+  }, [getCharIndexForPointer, getWordSelectionRange, onSelectionChange, centerCharsOffset]);
 
   const getCenterZoneBounds = useCallback(() => {
     const editorRoot = editorRootRef.current;
@@ -2165,11 +2208,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             )}
           >
             <MirroredTextLayer
-              text={text}
+              text={topText}
               metrics={metrics}
-              totalWrappedRowCount={wrappedLines.length}
+              totalWrappedRowCount={topRows.length}
               visibleHeightPx={layout.topHeightPx}
-              startRow={Math.max(0, effectiveCenterStartRow - topRows.length)}
+              startRow={0}
+              isSlicedText={true}
               insetTopPx={topRowsInsetPx}
               leftPaddingPx={leftPaddingPx}
               rightPaddingPx={textareaRightPaddingPx}
@@ -2219,7 +2263,7 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
               // detect it here and leave the click's selection untouched.
               const el = centerInputRef.current;
               if (el && !selectionDragStateRef.current) {
-                ceSetSelection(el, selectionStart, selectionEnd);
+                ceSetSelection(el, Math.max(0, selectionStart - centerCharsOffset), Math.max(0, selectionEnd - centerCharsOffset));
               }
               setIsFocused(true);
             }}
@@ -2284,11 +2328,12 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
             )}
           >
             <MirroredTextLayer
-              text={text}
+              text={bottomText}
               metrics={metrics}
-              totalWrappedRowCount={wrappedLines.length}
+              totalWrappedRowCount={bottomRows.length}
               visibleHeightPx={layout.bottomHeightPx}
-              startRow={effectiveCenterStartRow + viewport.centerRowCount}
+              startRow={0}
+              isSlicedText={true}
               insetTopPx={0}
               leftPaddingPx={leftPaddingPx}
               rightPaddingPx={textareaRightPaddingPx}
@@ -2343,6 +2388,7 @@ interface MirroredTextLayerProps {
   totalWrappedRowCount: number;
   visibleHeightPx: number;
   startRow: number;
+  isSlicedText?: boolean;
   insetTopPx?: number;
   leftPaddingPx?: number;
   rightPaddingPx?: number;
@@ -2356,6 +2402,7 @@ const MirroredTextLayer: React.FC<MirroredTextLayerProps> = ({
   totalWrappedRowCount,
   visibleHeightPx,
   startRow,
+  isSlicedText = false,
   insetTopPx = 0,
   rightPaddingPx = 20,
   leftPaddingPx = 20,
@@ -2378,10 +2425,12 @@ const MirroredTextLayer: React.FC<MirroredTextLayerProps> = ({
       value={text}
       style={{
         position: 'absolute',
-        top: `${insetTopPx - (startRow * metrics.rowHeightPx)}px`,
+        top: isSlicedText ? `${insetTopPx}px` : `${insetTopPx - (startRow * metrics.rowHeightPx)}px`,
         left: 0,
         width: '100%',
-        height: `${Math.max(visibleHeightPx, totalWrappedRowCount * metrics.rowHeightPx)}px`,
+        height: isSlicedText
+          ? `${Math.max(visibleHeightPx, totalWrappedRowCount * metrics.rowHeightPx)}px`
+          : `${Math.max(visibleHeightPx, totalWrappedRowCount * metrics.rowHeightPx)}px`,
         fontSize: 'inherit',
         lineHeight: `${metrics.rowHeightPx}px`,
         padding: `0 ${rightPaddingPx}px 0 ${leftPaddingPx}px`,
