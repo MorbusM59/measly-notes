@@ -606,12 +606,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       || lp.resolvedBottomRowCount !== resolvedBottomRowCount
       || lp.charCellWidthPx !== charCellWidthPx
     ) {
-       
-      console.log('[FFE modelRecreate]', {
-        reason: !modelRef.current ? 'init' : 'layoutChange',
-        before: { ...lp },
-        after: { fontSizePx, spacingPreset, wrapWidthPx, drawableHeightPx, fontFamily, resolvedTopRowCount, resolvedBottomRowCount, charCellWidthPx },
-      });
       modelRef.current = new FixedFocusViewportModel(
         fontSizePx,
         spacingPreset,
@@ -676,22 +670,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   const bottomText = bottomRows.length > 0
     ? text.slice(bottomRows[0].startCharIndex, bottomRows[bottomRows.length - 1].endCharIndex)
     : '';
-
-  // ─── DEBUG: render-time layout snapshot ─────────────────────────────────
-   
-  console.log('[FFE render]', {
-    textLen: text.length,
-    wrappedLinesLen: wrappedLines.length,
-    centerStartRow: viewport.centerStartRow,
-    centerRowCount: viewport.centerRowCount,
-    centerRowsLen: centerRows.length,
-    bottomRowsLen: bottomRows.length,
-    centerHeightPx: layout.centerHeightPx,
-    bottomHeightPx: layout.bottomHeightPx,
-    topHeightPx: layout.topHeightPx,
-    centerText: JSON.stringify(centerText.length > 40 ? centerText.slice(0, 20) + '…' + centerText.slice(-20) : centerText),
-    bottomText: JSON.stringify(bottomText.length > 40 ? bottomText.slice(0, 20) + '…' + bottomText.slice(-20) : bottomText),
-  });
 
   useEffect(() => {
     if (!editorApiRef) return;
@@ -769,52 +747,6 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     // Check if the current React `text` is a state we generated during typing
     // Now comparing against centerText since reportedTextQueueRef gets the newText slice
     const queueIndex = reportedTextQueueRef.current.indexOf(centerText);
-    // ─── DEBUG ──────────────────────────────────────────────────────────────
-    const lastChildEff = el.lastChild;
-    const hasSentinelEff = lastChildEff != null && isManagedSentinelBr(lastChildEff);
-    const wantsSentinelEff = centerText.length === 0 || centerText.endsWith('\n');
-    const ceGetTextEff = ceGetText(el);
-    const domEff = Array.from(el.childNodes).map(n => {
-      if (n.nodeType === Node.TEXT_NODE) return `TXT(${JSON.stringify((n as Text).data)})`;
-      if ((n as Element).tagName === 'BR') {
-        return isManagedSentinelBr(n) ? 'BR.sentinel' : 'BR';
-      }
-      return `${(n as Element).tagName}`;
-    }).join(' | ');
-
-    // First-mismatch index between ceGetText and centerText
-    let mismatchIdx = -1;
-    const minLen = Math.min(ceGetTextEff.length, centerText.length);
-    for (let i = 0; i < minLen; i++) {
-      if (ceGetTextEff[i] !== centerText[i]) { mismatchIdx = i; break; }
-    }
-    if (mismatchIdx === -1 && ceGetTextEff.length !== centerText.length) mismatchIdx = minLen;
-
-    // First-mismatch index between queue[0] and centerText (to diagnose queue miss)
-    const q0 = reportedTextQueueRef.current[0] ?? '';
-    let queueMismatchIdx = -1;
-    const minLenQ = Math.min(q0.length, centerText.length);
-    for (let i = 0; i < minLenQ; i++) {
-      if (q0[i] !== centerText[i]) { queueMismatchIdx = i; break; }
-    }
-    if (queueMismatchIdx === -1 && q0.length !== centerText.length) queueMismatchIdx = minLenQ;
-     
-    console.log('[FFE centerTextEffect]', {
-      centerTextLen: centerText.length,
-      ceGetTextEffLen: ceGetTextEff.length,
-      queueLen: reportedTextQueueRef.current.length,
-      queueIndex,
-      queue0Len: q0.length,
-      mismatchIdx,
-      queueMismatchIdx,
-      mismatchSliceCe: mismatchIdx >= 0 ? JSON.stringify(ceGetTextEff.slice(Math.max(0, mismatchIdx - 5), mismatchIdx + 10)) : null,
-      mismatchSliceCenter: mismatchIdx >= 0 ? JSON.stringify(centerText.slice(Math.max(0, mismatchIdx - 5), mismatchIdx + 10)) : null,
-      queueMismatchSliceQ: queueMismatchIdx >= 0 ? JSON.stringify(q0.slice(Math.max(0, queueMismatchIdx - 5), queueMismatchIdx + 10)) : null,
-      queueMismatchSliceCenter: queueMismatchIdx >= 0 ? JSON.stringify(centerText.slice(Math.max(0, queueMismatchIdx - 5), queueMismatchIdx + 10)) : null,
-      hasSentinelEff,
-      wantsSentinelEff,
-      domEff,
-    });
     if (queueIndex !== -1) {
       // It's a lagging (or caught-up) render of our own typing.
       // Remove this and everything before it from the queue.
@@ -1434,78 +1366,13 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
     const newSelectionStart = sel?.start ?? 0;
     const newSelectionEnd = sel?.end ?? newSelectionStart;
 
-    // ─── DEBUG: snapshot DOM before/after normalize ──────────────────────
-    const inputEvent = e.nativeEvent as InputEvent;
-    const inputType = inputEvent.inputType;
-    const domBefore = Array.from(el.childNodes).map(n => {
-      if (n.nodeType === Node.TEXT_NODE) return `TXT(${JSON.stringify((n as Text).data)})`;
-      if ((n as Element).tagName === 'BR') {
-        return isManagedSentinelBr(n) ? 'BR.sentinel' : 'BR';
-      }
-      return `${(n as Element).tagName}`;
-    }).join(' | ');
-    const lastChildBefore = el.lastChild;
-    const hasSentinelBefore = lastChildBefore != null && isManagedSentinelBr(lastChildBefore);
-    const wantsSentinel = newText.length === 0 || newText.endsWith('\n');
-
-    // Find first-mismatch char index between newText (from DOM) and the old centerText (closure).
-    let inputMismatchIdx = -1;
-    const minLenInput = Math.min(newText.length, centerText.length);
-    for (let i = 0; i < minLenInput; i++) {
-      if (newText[i] !== centerText[i]) { inputMismatchIdx = i; break; }
-    }
-    if (inputMismatchIdx === -1 && newText.length !== centerText.length) inputMismatchIdx = minLenInput;
-     
-    console.log('[FFE handleInput]', {
-      inputType,
-      newTextLen: newText.length,
-      centerTextOldLen: centerText.length,
-      textLen: text.length,
-      centerCharsOffset,
-      sliceEnd: centerCharsOffset + centerText.length,
-      identical: newText === centerText,
-      inputMismatchIdx,
-      mismatchSliceNew: inputMismatchIdx >= 0 ? JSON.stringify(newText.slice(Math.max(0, inputMismatchIdx - 5), inputMismatchIdx + 10)) : null,
-      mismatchSliceOld: inputMismatchIdx >= 0 ? JSON.stringify(centerText.slice(Math.max(0, inputMismatchIdx - 5), inputMismatchIdx + 10)) : null,
-      tailNew: JSON.stringify(newText.slice(-10)),
-      tailOld: JSON.stringify(centerText.slice(-10)),
-      sel,
-      domBefore,
-      hasSentinelBefore,
-      wantsSentinel,
-      sentinelMismatch: hasSentinelBefore !== wantsSentinel,
-    });
-
     normalizeEditableDom(el, newText, sel);
 
-    const ceGetTextAfter = ceGetText(el);
-    const domAfter = Array.from(el.childNodes).map(n => {
-      if (n.nodeType === Node.TEXT_NODE) return `TXT(${JSON.stringify((n as Text).data)})`;
-      if ((n as Element).tagName === 'BR') {
-        return isManagedSentinelBr(n) ? 'BR.sentinel' : 'BR';
-      }
-      return `${(n as Element).tagName}`;
-    }).join(' | ');
-     
-    console.log('[FFE handleInput]  afterNormalize:', {
-      ceGetTextAfterLen: ceGetTextAfter.length,
-      matchesNewText: ceGetTextAfter === newText,
-      domAfter,
-    });
-
     reportedTextQueueRef.current.push(newText);
-    
+
     const prefix = text.substring(0, centerCharsOffset);
     const suffix = text.substring(centerCharsOffset + centerText.length);
     const globalNewText = prefix + newText + suffix;
-
-     
-    console.log('[FFE handleInput]  callingOnTextChange:', {
-      prefixLen: prefix.length,
-      suffixLen: suffix.length,
-      globalNewTextLen: globalNewText.length,
-      caret: newSelectionStart + centerCharsOffset,
-    });
 
     onTextChange(globalNewText, newSelectionStart + centerCharsOffset, newSelectionEnd + centerCharsOffset);
   };

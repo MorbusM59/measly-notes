@@ -2050,9 +2050,17 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
       programmaticInsertRef.current = true;
       handleContentChange(newText);
+      // Update caret synchronously so React batches text + caret into a single
+      // render.  Previously this was deferred into scheduleTimeout(0), which
+      // produced two renders: one with the new text but old caret (causing the
+      // bottom zone to briefly show the new layout) and one after the timeout
+      // with the updated caret (causing the viewport to scroll and the bottom
+      // to snap back).  By calling syncSelectionState here, both changes land
+      // in the same commit; FFE's useLayoutEffect scrolls the viewport before
+      // the browser has a chance to paint, so the flash is never visible.
+      syncSelectionState(newCursorPos, newCursorPos);
       scheduleTimeout(() => {
         el.focus();
-        setTextareaSelection(newCursorPos, newCursorPos);
         autosizeTextarea(el);
         ensureCaretVisible();
         programmaticInsertRef.current = false;
