@@ -1797,11 +1797,15 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
       const atSliceStart = collapsed && caretPos === centerCharsOffset;
       const atSliceEnd = collapsed && caretPos === sliceEnd;
       const lastCenterRow = centerRows.length > 0 ? centerRows[centerRows.length - 1] : null;
-      const atStartOfLastCenterRow = collapsed && lastCenterRow != null
-        && caretPos === lastCenterRow.startCharIndex
-        // Guard against single-row center where start-of-last == start-of-slice;
-        // the symmetric case at the top boundary is intentionally left to native.
-        && lastCenterRow.startCharIndex !== centerCharsOffset;
+      // Caret is on the last center row, at any position before the row-end \n.
+      // Empty-row special case: startCharIndex === endCharIndex, so caret === both;
+      // the < endCharIndex check would fail, but we still want to intercept.
+      // Guard: single-row center (start-of-last === start-of-slice) is left to native.
+      const onLastCenterRowBeforeEnd = collapsed && lastCenterRow != null
+        && lastCenterRow.startCharIndex !== centerCharsOffset
+        && caretPos >= lastCenterRow.startCharIndex
+        && (caretPos < lastCenterRow.endCharIndex
+          || lastCenterRow.startCharIndex === lastCenterRow.endCharIndex);
 
       if (e.key === 'Delete' && atSliceEnd && caretPos < text.length) {
         e.preventDefault();
@@ -1847,25 +1851,19 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         return;
       }
 
-      // Enter at the start of the last visible center row.  Native handling
-      // inserts a \n at the caret and advances the caret one character forward
-      // — but the new caret position lands one row past the center slice, which
-      // triggers the boundary-clamp effect to scroll the viewport down so the
-      // caret stays in view.  The visible result is: the new blank row gets
-      // pushed up to the second-to-last position, the row content the user was
-      // splitting away stays anchored at the last position, and the bottom zone
-      // briefly bounces during the same-commit scroll.  Instead, intercept the
-      // key, insert the \n directly into global text, and leave the caret at
-      // the insertion index.  `resolveRowForCaretIndex` resolves the shared
-      // boundary downstream to the new empty row, so the caret appears on the
-      // blank line at the last center position, and the original content drops
-      // naturally into the bottom zone with no viewport scroll.
-      if (e.key === 'Enter' && atStartOfLastCenterRow) {
+      // Enter anywhere on the last center row (before the row-end \n, plus the
+      // empty-row case): insert \n and advance caret to caretPos + 1.  That lands
+      // on the new row (remainder or empty), which is one row past the current center
+      // zone.  caretOutsideVisibleCenter fires in useLayoutEffect → viewport scrolls
+      // up one row before the browser paints → new row becomes the last center row
+      // with the caret at its start, and the bottom zone content is entirely unchanged.
+      if (e.key === 'Enter' && onLastCenterRowBeforeEnd) {
         e.preventDefault();
+        const newCaret = caretPos + 1;
         const newText = text.slice(0, caretPos) + '\n' + text.slice(caretPos);
         boundaryCaretRowPreferenceRef.current = null;
-        pendingAutomaticCaretPosRef.current = caretPos;
-        onTextChange(newText, caretPos, caretPos);
+        pendingAutomaticCaretPosRef.current = newCaret;
+        onTextChange(newText, newCaret, newCaret);
         return;
       }
     }
