@@ -1851,16 +1851,25 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
         return;
       }
 
-      // Enter anywhere on the last center row (before the row-end \n, plus the
-      // empty-row case): insert \n and advance caret to caretPos + 1.  That lands
-      // on the new row (remainder or empty), which is one row past the current center
-      // zone.  caretOutsideVisibleCenter fires in useLayoutEffect → viewport scrolls
-      // up one row before the browser paints → new row becomes the last center row
-      // with the caret at its start, and the bottom zone content is entirely unchanged.
+      // Enter anywhere on the last center row (before the row-end boundary, plus the
+      // empty-row case).
+      //
+      // Steps (per user contract):
+      //   1. Capture remainder — text between the caret and the end of the row.
+      //   2. Remove remainder from that position in the text.
+      //   3. Insert \n at caretPos (regular line break on the now-trimmed line).
+      //   4. Re-insert remainder immediately after the new \n.
+      //
+      // Result: caret at caretPos + 1 (start of remainder / new empty line).
+      // That position is one row past the current center zone →
+      // caretOutsideVisibleCenter fires in useLayoutEffect → viewport scrolls up
+      // one row before the browser paints → the new row (with remainder, or empty)
+      // becomes the last center row; the bottom zone content is entirely unchanged.
       if (e.key === 'Enter' && onLastCenterRowBeforeEnd) {
         e.preventDefault();
+        const remainder = text.slice(caretPos, lastCenterRow!.endCharIndex);
+        const newText = text.slice(0, caretPos) + '\n' + remainder + text.slice(lastCenterRow!.endCharIndex);
         const newCaret = caretPos + 1;
-        const newText = text.slice(0, caretPos) + '\n' + text.slice(caretPos);
         boundaryCaretRowPreferenceRef.current = null;
         pendingAutomaticCaretPosRef.current = newCaret;
         onTextChange(newText, newCaret, newCaret);
