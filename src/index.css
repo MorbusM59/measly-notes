@@ -13,15 +13,93 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+@font-face {
+  font-family: 'Syne Mono';
+  src: url('./fonts/SyneMono-Regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+}
+
+:root {
+  /* Core Editor Variables */
+  --editor-font: 'Syne Mono', monospace;
+  --editor-font-size: 16px;
+  --editor-line-height: 24px;
+  --editor-cell-width: 10px; /* EXACT absolute pixel width for boxes */
+  
+  /* Grid & Box Colors */
+  --color-grid: rgba(200, 200, 200, 0.5);
+  --color-bg-regular: rgba(230, 220, 214, 0.49);
+  --color-bg-leading: rgba(0, 0, 0, 0.1);
+  --color-bg-trailing: rgba(0, 0, 0, 0.1);
+  --color-caret: rgba(120, 115, 112, 0.8);
+  --color-selection: rgba(199, 94, 0, 0.49);
+}
+
 body {
   margin: 0;
+  overflow: hidden;
   display: flex;
   place-items: center;
   min-width: 320px;
   min-height: 100vh;
+  /* Use system font for UI, but editor uses custom font */
+  font-family: system-ui, -apple-system, sans-serif; 
 }
 
-.min-h-screen { min-height: 100vh; width: 100vw; }
+/* 
+  The Magic Monospace Grid
+*/
+.measly-grid-bg {
+  /* No more 'ch', everything is mapped to exact pixel bounds */
+  background-image: 
+    repeating-linear-gradient(to right, var(--color-grid) 0, var(--color-grid) 1px, transparent 1px, transparent var(--editor-cell-width)),
+    repeating-linear-gradient(to bottom, var(--color-grid) 0, var(--color-grid) 1px, transparent 1px, transparent var(--editor-line-height));
+  background-size: 100% 100%;
+  
+  /* Start exactly at 0px X, and shift Y by 4px so text 'sits' on the line */
+  background-position: 0px 4px;
+}
+
+/* Lexical Editor Text Styles */
+.editor-text {
+  font-family: var(--editor-font);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
+  
+  /* THE GOLDEN FIX: Pads the character advance-width so it equals exactly the grid box */
+  letter-spacing: calc(var(--editor-cell-width) - 1ch); 
+  
+  font-variant-ligatures: none; 
+  font-variant-numeric: tabular-nums;
+  white-space: pre-wrap;
+  tab-size: 4;
+}
+
+/* Clear all native margins from children inside the editor to prevent vertical shifting */
+.editor-text p, .editor-text div {
+  margin: 0;
+  padding: 0;
+}
+
+/* We will apply this to all standard text nodes */
+.editor-text-regular {
+  background-color: var(--color-bg-regular);
+}
+
+.h-screen { height: 100vh; width: 100vw; }
+.w-screen { width: 100vw; }
+.overflow-hidden { overflow: hidden; }
+.flex-shrink-0 { flex-shrink: 0; }
+.py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+.shadow-sm { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
+.text-2xl { font-size: 1.5rem; line-height: 2rem; }
+.border-b-2 { border-bottom-width: 2px; border-bottom-style: solid; }
+.pb-1 { padding-bottom: 0.25rem; }
+.flex-1 { flex: 1 1 0%; }
+.min-h-0 { min-height: 0; }
+.max-w-4xl { max-width: 56rem; }
+.border-x { border-left-width: 1px; border-right-width: 1px; border-style: solid; border-color: #e5e7eb; }
 .bg-gray-50 { background-color: #f9fafb; color: #111; }
 .flex { display: flex; }
 .flex-col { flex-direction: column; }
@@ -59,8 +137,37 @@ body {
 .absolute { position: absolute; }
 .top-6 { top: 1.5rem; }
 .left-6 { left: 1.5rem; }
+.left-0 { left: 0; }
+.right-0 { right: 0; }
+.h-full { height: 100%; }
+.w-full { width: 100%; }
+.top-\[50vh\] { top: 50vh; }
+.pt-\[50vh\] { padding-top: 50vh; }
+.pb-\[50vh\] { padding-bottom: 50vh; }
+.px-10 { padding-left: 2.5rem; padding-right: 2.5rem; }
+.min-h-\[50px\] { min-height: 50px; }
+.overflow-y-auto { overflow-y: auto; }
+.bg-gray-100 { background-color: #f3f4f6; }
+.p-2 { padding: 0.5rem; }
+.gap-2 { gap: 0.5rem; }
+.gap-4 { gap: 1rem; }
+.text-sm { font-size: 0.875rem; }
+.w-10 { width: 2.5rem; }
+.text-right { text-align: right; }
+.border-dashed { border-style: dashed; }
+.border-t-2 { border-top-width: 2px; border-top-style: dashed; }
+.border-b-2 { border-bottom-width: 2px; border-bottom-style: dashed; }
+.border-orange-400 { border-color: #fb923c; }
+.opacity-50 { opacity: 0.5; }
+.z-10 { z-index: 10; }
+.z-20 { z-index: 20; }
+.leading-relaxed { line-height: 1.625; }
+.outline-none { outline: 2px solid transparent; outline-offset: 2px; }
+.text-gray-800 { color: #1f2937; }
 .text-gray-400 { color: #9ca3af; }
 .pointer-events-none { pointer-events: none; }
 .select-none { user-select: none; }
+.relative { position: relative; }
+.bg-white { background-color: #fff; }
 
-.editor-paragraph { margin-bottom: 8px; }
+.editor-paragraph { margin: 0; padding: 0; }
