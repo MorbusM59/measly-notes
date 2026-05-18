@@ -7,7 +7,7 @@ import {
   EditSnapshot,
   Note,
 } from '../shared/types';
-import { FixedFocusEditor, ceGetSelection, ceGetText } from './FixedFocusViewport';
+import { FixedFocusEditor, ceGetText } from './FixedFocusViewport';
 import './MarkdownEditor.scss';
 import './MarkdownThemes.scss';
 
@@ -624,6 +624,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const [fixedFocusTopRowCount, setFixedFocusTopRowCount] = useState(3);
   const [fixedFocusBottomRowCount, setFixedFocusBottomRowCount] = useState(3);
   const isComposingRef = useRef(false);
+  const editorApiRef = useRef<any>(null);
   const [isOnFirstLine, setIsOnFirstLine] = useState(false);
 
   // View (preview) settings
@@ -910,7 +911,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     const editorContent = editorContentRef.current;
     if (!editorContent) return;
     // Use live selection if element is focused, otherwise fall back to React state
-    const liveSel = el ? (ceGetSelection(el) ?? { start: selectionStart, end: selectionEnd }) : { start: selectionStart, end: selectionEnd };
+    const liveSel = el ? (editorApiRef.current?.getLiveSelection?.() ?? { start: selectionStart, end: selectionEnd }) : { start: selectionStart, end: selectionEnd };
     const state: EditState = {
       selectionStart: liveSel.start,
       scrollTop: liveViewportStartRowRef.current,
@@ -1841,7 +1842,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const handleCopy = (e: React.ClipboardEvent<HTMLDivElement>) => {
     const el = textareaRef.current;
     if (!el) return;
-    const sel = ceGetSelection(el) ?? { start: selectionStart, end: selectionEnd };
+    const sel = editorApiRef.current?.getLiveSelection?.() ?? { start: selectionStart, end: selectionEnd };
     const selected = content.substring(sel.start, sel.end);
     try {
       e.clipboardData.setData('text/plain', selected || '');
@@ -2021,14 +2022,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       const el = textareaRef.current;
       if (!el) return;
 
-      const liveSel = ceGetSelection(el) ?? { start: selectionStart, end: selectionEnd };
+      const liveSel = editorApiRef.current?.getLiveSelection?.() ?? { start: selectionStart, end: selectionEnd };
       const start = liveSel.start;
       const end = liveSel.end;
       const lineStart = content.lastIndexOf('\n', start - 1) + 1;
       const currentLineBeforeCursor = content.substring(lineStart, start);
-      
-      const whitespaceMatch = currentLineBeforeCursor.match(/^[ \t]*/);
-      const leadingWhitespace = whitespaceMatch ? whitespaceMatch[0] : '';
+      const leadingWhitespace = currentLineBeforeCursor.match(/^\s*/)?.[0] || '';
       
       const listMatch = currentLineBeforeCursor.substring(leadingWhitespace.length).match(/^([-*+]|\d+\.)\s+/);
       let listMarker = '';
@@ -2382,7 +2381,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         if (showPreview) {
           void window.electronAPI.saveNoteUiState(id, { progressPreview: ratio });
         } else {
-          void window.electronAPI.saveNoteUiState(id, { progressEdit: ratio, cursorPos: textareaRef.current ? (ceGetSelection(textareaRef.current)?.start ?? null) : null, scrollTop: el.scrollTop });
+          void window.electronAPI.saveNoteUiState(id, { progressEdit: ratio, cursorPos: textareaRef.current ? (editorApiRef.current?.getLiveSelection?.()?.start ?? null) : null, scrollTop: el.scrollTop });
         }
       }, 200);
     };
@@ -2813,6 +2812,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         )}
         {!showPreview ? (
           <FixedFocusEditor
+            editorApiRef={editorApiRef}
             key={`${editorStyle}-${editorFontSize}-${editorSpacing}-${layoutRevision}`}
             text={timeMachineSnapshotContent ?? content}
             caretPos={caretPos}

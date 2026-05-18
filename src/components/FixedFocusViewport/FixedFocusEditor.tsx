@@ -681,6 +681,16 @@ export const FixedFocusEditor: React.FC<FixedFocusEditorProps> = ({
   useEffect(() => {
     if (!editorApiRef) return;
     editorApiRef.current = {
+      getLiveSelection: () => {
+        const el = centerInputRef.current;
+        if (!el) return null;
+        const sel = ceGetSelection(el);
+        if (!sel) return { start: caretPos, end: caretPos };
+        return {
+          start: sel.start + centerCharsOffset,
+          end: sel.end + centerCharsOffset,
+        };
+      },
       applyProgrammaticEdit: (edit: { start: number; deleteLen: number; insertText: string }) => {
         const el = centerInputRef.current;
         if (!el) return null;
