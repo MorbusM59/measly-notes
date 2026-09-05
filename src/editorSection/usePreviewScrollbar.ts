@@ -8,6 +8,25 @@ import { createCommittedThumbHeight } from '../editor/scrollThumbMetrics'
 import { sampleCurveRampProgress } from '../editor/ScrollCurvePlan'
 import type { ScrollJourneyTiming } from '../editor/scrollJourney'
 import { measureAverageCharWidthPx } from '../editor/scrollBridgeTexture'
+import { createWheelNotchState, stepWheelNotch } from '../editor/wheelNotch'
+import { appendWheelTrace, isWheelTraceOn } from '../editor/wheelTrace'
+import {
+  cancelWheelSpin,
+  createWheelSpinState,
+  getWheelSpinCutoffMs,
+  getWheelSpinDampenDivisor,
+  getWheelSpinEffectiveThresholdMs,
+  nextWheelSpinDelayMs,
+  registerWheelSpinNudge,
+  takeWheelSpinNudge,
+  type WheelSpinDirection,
+} from '../editor/wheelSpin'
+import {
+  advanceWheelSpinGlide,
+  createWheelSpinGlide,
+  resolveWheelSpinNudgePixels,
+  type WheelSpinGlide,
+} from '../editor/wheelSpinGlide'
 import {
   buildReleaseRampDownPlanFromCurrentParams,
   cancelNonQuantizedSmoothScroll,
@@ -127,6 +146,31 @@ export function usePreviewScrollbar({
   } | null>(null)
   const trackHoldCancelRef = useRef<(() => void) | null>(null)
   const rubberBandRafRef = useRef<number | null>(null)
+  // Spin-to-keep-scrolling, the render view's half (editor/wheelSpin.ts for
+  // the gesture, editor/wheelSpinGlide.ts for why this one is continuous).
+  // Per hook instance, like the edit view's is per mount: two split-view
+  // panes are two scrollers, and a spin in one says nothing about the other.
+  const previewWheelSpinStateRef = useRef(createWheelSpinState())
+  // Not used to scroll -- native scrolling still does that here -- only to
+  // decide what counts as one nudge, exactly as the edit view decides it.
+  // See the wheel handler for why detection has to be shared and motion
+  // must not be.
+  const previewWheelNotchStateRef = useRef(createWheelNotchState())
+  const previewWheelSpinGlideRef = useRef<WheelSpinGlide | null>(null)
+  const previewWheelSpinRafRef = useRef<number | null>(null)
+  const previewWheelSpinLastFrameMsRef = useRef<number | null>(null)
+  /** Sub-pixel remainder, so a slow coast is not rounded to a standstill. */
+  const previewWheelSpinCarryPxRef = useRef(0)
+  const previewWheelSpinScrollBehaviorRef = useRef<string | null>(null)
+  /**
+   * Switches this pane's wheel listener between passive and interceptive.
+   *
+   * Installed by the effect that owns the listener; held in a ref because
+   * ending a coast is something the scrollbar's handlers and the unmount
+   * path do too, and all of them have to be able to hand the wheel back.
+   * See that effect for why the distinction is worth this much machinery.
+   */
+  const previewWheelInterceptRef = useRef<((intercept: boolean) => void) | null>(null)
   const [isPreviewScrollThumbActive, setIsPreviewScrollThumbActive] = useState(false)
   const [isDraggingPreviewScrollThumb, setIsDraggingPreviewScrollThumb] = useState(false)
 
@@ -134,6 +178,42 @@ export function usePreviewScrollbar({
     if (!isPreviewMode) return true
     return isPreviewScrollInteractionBlocked?.() ?? false
   }, [isPreviewMode, isPreviewScrollInteractionBlocked])
+
+  /**
+   * End a coast, whatever it was doing, and say why in the wheel trace.
+   *
+   * Declared up here rather than beside the wheel handler because the
+   * scrollbar's own handlers -- a track click, a thumb drag -- have to be
+   * able to call it, and they are defined further down. Everything it
+   * touches is a ref, so it has no dependency on any of that.
+   */
+  const stopPreviewWheelSpin = useCallback((reason: string) => {
+    const wasRunning = previewWheelSpinGlideRef.current !== null
+      || previewWheelSpinRafRef.current !== null
+      || previewWheelSpinStateRef.current.coast !== null
+    if (previewWheelSpinRafRef.current !== null) {
+      cancelAnimationFrame(previewWheelSpinRafRef.current)
+      previewWheelSpinRafRef.current = null
+    }
+    previewWheelSpinGlideRef.current = null
+    previewWheelSpinLastFrameMsRef.current = null
+    previewWheelSpinCarryPxRef.current = 0
+    cancelWheelSpin(previewWheelSpinStateRef.current)
+    previewWheelInterceptRef.current?.(false)
+
+    // `.markdown-preview` carries `scroll-behavior: smooth`, so the coast
+    // borrows `auto` for its own writes and must hand back whatever was
+    // there -- the same borrow-and-return the page-key scroll does, and for
+    // the same reason: a per-frame write that the browser then animates is
+    // a coast chasing its own tail.
+    const scroller = previewScrollRef.current
+    if (scroller && previewWheelSpinScrollBehaviorRef.current !== null) {
+      scroller.style.scrollBehavior = previewWheelSpinScrollBehaviorRef.current
+      previewWheelSpinScrollBehaviorRef.current = null
+    }
+
+    if (wasRunning && isWheelTraceOn()) appendWheelTrace(`preview   coast ENDED (${reason})`)
+  }, [previewScrollRef])
 
   const applyPreviewThumbDom = useCallback((topPx: number, heightPx: number) => {
     previewScrollThumbTopRef.current = topPx
@@ -644,6 +724,10 @@ export function usePreviewScrollbar({
 
   const handlePreviewTrackMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (shouldBlockPreviewInteraction()) return
+    // The scrollbar is not inside the scroller, so the coast's own
+    // mousedown listener never sees a click here -- and a reader reaching
+    // for the thumb has plainly stopped being carried along.
+    stopPreviewWheelSpin('scrollbar')
     if (event.button === 2) {
       handlePreviewTrackRightMouseDown(event)
       return
@@ -805,7 +889,7 @@ export function usePreviewScrollbar({
         goTo(false)
       },
     })
-  }, [previewScrollRef, shouldBlockPreviewInteraction, handlePreviewTrackRightMouseDown, previewDocumentPositionRef, startThumbRubberBand, stopThumbRubberBand, syncPreviewCustomScrollbar])
+  }, [previewScrollRef, shouldBlockPreviewInteraction, stopPreviewWheelSpin, handlePreviewTrackRightMouseDown, previewDocumentPositionRef, startThumbRubberBand, stopThumbRubberBand, syncPreviewCustomScrollbar])
 
   // A gesture in flight when this unmounts would otherwise fire its snap into
   // a torn-down pane.
@@ -813,6 +897,7 @@ export function usePreviewScrollbar({
 
   const handlePreviewThumbMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (shouldBlockPreviewInteraction()) return
+    stopPreviewWheelSpin('scrollbar')
     if (event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
@@ -825,7 +910,7 @@ export function usePreviewScrollbar({
       pointerY: event.clientY,
       thumbTopPx: previewScrollThumbTopRef.current,
     }
-  }, [previewScrollRef, shouldBlockPreviewInteraction])
+  }, [previewScrollRef, shouldBlockPreviewInteraction, stopPreviewWheelSpin])
 
   const stopPreviewContinuousScroll = useCallback(() => {
     previewContinuousScrollDirectionRef.current = 0
@@ -1154,6 +1239,328 @@ export function usePreviewScrollbar({
     stopPreviewContinuousScroll,
     syncPreviewCustomScrollbar,
     previewScrollRef,
+  ])
+
+  /**
+   * Spin-to-keep-scrolling in the render view.
+   *
+   * The gesture, its three sliders and its rules are the edit view's, whole
+   * and unchanged: `editor/wheelSpin.ts` decides what a spin is, how long
+   * the tail of one is ignored, when the next notch takes control back, and
+   * when the coast has damped out. Two things are different here, and both
+   * follow from this pane having no row grid:
+   *
+   *  1. **Real notches are still scrolled by the browser.** The edit view
+   *     has to intercept them, because it must land on a row boundary. Here
+   *     there is nothing to land on, so intercepting could only take away
+   *     the browser's own smoothing and give nothing back. The wheel
+   *     handler therefore reads the gesture and lets it through -- it only
+   *     ever calls `preventDefault` on the notches the SPIN owns: the tail
+   *     of the user's own gesture, and the notch that takes control back.
+   *  2. **The coast is continuous, not stepped.** Same schedule, paid out
+   *     as speed -- see `editor/wheelSpinGlide.ts` for why a hundred-pixel
+   *     step is a nudge rather than a coast once the dampening stretches
+   *     the interval.
+   *
+   * Detection, though, is shared exactly: the same `wheelNotch` accumulator
+   * the edit view uses decides what counts as one nudge, so the same wheel
+   * on the same desk starts a spin in both panes at the same moment. It is
+   * used here purely as a detector; the pixels it reports are what the
+   * browser has just scrolled, which is what the coast then continues at.
+   * That is also what keeps a trackpad from reading as a permanent spin:
+   * its sub-notch deltas never become nudges, exactly as in the edit view.
+   */
+  useEffect(() => {
+    if (!isPreviewMode) return
+
+    const scroller = previewScrollRef.current
+    if (!scroller) return
+
+    const spinState = previewWheelSpinStateRef.current
+    const notchState = previewWheelNotchStateRef.current
+
+    /** The line height this pane actually renders at, for line-mode wheels. */
+    const previewLineHeightPx = (): number => {
+      const style = window.getComputedStyle(scroller)
+      const parsed = Number.parseFloat(style.lineHeight)
+      if (Number.isFinite(parsed) && parsed > 0) return parsed
+      const fontPx = Number.parseFloat(style.fontSize)
+      return Number.isFinite(fontPx) && fontPx > 0 ? fontPx * 1.5 : 24
+    }
+
+    /** What this event is worth in pixels, or 0 when it is not a nudge yet. */
+    const resolveNudgePixels = (event: WheelEvent): number => {
+      const isPixelMode = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
+      return resolveWheelSpinNudgePixels({
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        // The edit view's own gate, from the shared accumulator: a device
+        // that sends 50 per notch and one that sends 120 both make one nudge
+        // per click, and a trackpad's pixel stream makes none until it adds
+        // up.
+        units: isPixelMode ? stepWheelNotch(notchState, event.deltaY, performance.now()) : 0,
+        notchPx: notchState.notchPx,
+        // Only measured for the modes that need it. Every mouse wheel in
+        // this app reports pixels, and a getComputedStyle plus a clientHeight
+        // read on every wheel event is a forced style and layout pass for an
+        // answer that would go unused.
+        lineHeightPx: isPixelMode ? 0 : previewLineHeightPx(),
+        pageHeightPx: isPixelMode ? 0 : Math.max(1, scroller.clientHeight * 0.9),
+      })
+    }
+
+    /**
+     * The next interval, and the nudge that ends it, from the shared model.
+     *
+     * Called by the glide when its current segment is spent. Null is the
+     * coast being over -- the cut off, or a decay that outgrew it.
+     */
+    const nextSegmentDurationMs = (): number | null => {
+      const delayMs = nextWheelSpinDelayMs(
+        spinState,
+        getWheelSpinDampenDivisor(),
+        getWheelSpinCutoffMs(),
+      )
+      if (delayMs === null) return null
+      // Advances the counter the NEXT interval is computed from -- the whole
+      // of the dampening, and the reason this is a callback rather than a
+      // number the glide could have been handed once.
+      if (!takeWheelSpinNudge(spinState)) return null
+      return delayMs
+    }
+
+    const coastFrame = (nowMs: number) => {
+      previewWheelSpinRafRef.current = null
+      const glide = previewWheelSpinGlideRef.current
+      if (!glide) return
+
+      if (!isPreviewMode || !previewScrollRef.current) {
+        stopPreviewWheelSpin('pane gone')
+        return
+      }
+      if (shouldBlockPreviewInteraction()) {
+        stopPreviewWheelSpin('scroll blocked')
+        return
+      }
+      // The threshold going to its off position mid-coast means the feature
+      // was switched off while it was running; honour that now, not at the
+      // next spin.
+      if (getWheelSpinEffectiveThresholdMs() <= 0) {
+        stopPreviewWheelSpin('bypassed')
+        return
+      }
+      // A search jump, a scrollbar travel, a chapter change: something with
+      // a destination of its own has taken the scroller over. One check
+      // covers every one of them, and covers the ones added later.
+      if (isNonQuantizedSmoothScrollActive(scroller)) {
+        stopPreviewWheelSpin('journey took over')
+        return
+      }
+
+      const lastFrameMs = previewWheelSpinLastFrameMsRef.current
+      previewWheelSpinLastFrameMsRef.current = nowMs
+      // A frame that arrives after a long stall (a hidden window, a heavy
+      // render) is capped rather than paid out in full: the schedule is
+      // still advanced by what it owes, but the reader is not thrown a
+      // second's worth of travel in one jump.
+      const elapsedMs = lastFrameMs === null ? 0 : clamp(nowMs - lastFrameMs, 0, 100)
+      const step = advanceWheelSpinGlide(glide, elapsedMs, nextSegmentDurationMs)
+
+      const totalPx = previewWheelSpinCarryPxRef.current + step.pixels
+      const wholePx = Math.trunc(totalPx)
+      previewWheelSpinCarryPxRef.current = totalPx - wholePx
+
+      if (wholePx !== 0) {
+        const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+        const nextScrollTop = clamp(scroller.scrollTop + wholePx, 0, maxScrollTop)
+        if (Math.abs(nextScrollTop - scroller.scrollTop) > 0.01) {
+          scroller.scrollTop = nextScrollTop
+          syncPreviewCustomScrollbar()
+        }
+
+        // Running out of scroller is not running out of document: a windowed
+        // preview (editorSection/previewWindow.ts) reaches the end of its
+        // mounted content many times on the way through a large note, with
+        // more of it arriving a frame later. Only the document's own edge
+        // ends a coast -- the edit view can use "it did not move" for this
+        // and this pane cannot.
+        const atScrollerEnd = (glide.direction < 0 && nextScrollTop <= 0.01)
+          || (glide.direction > 0 && nextScrollTop >= maxScrollTop - 0.01)
+        const position = previewDocumentPositionRef?.current
+        if (atScrollerEnd && (position?.isAtDocumentEdge?.(glide.direction) ?? true)) {
+          stopPreviewWheelSpin('document end')
+          return
+        }
+      }
+
+      if (step.finished) {
+        stopPreviewWheelSpin('damped out')
+        return
+      }
+
+      previewWheelSpinRafRef.current = requestAnimationFrame(coastFrame)
+    }
+
+    const startPreviewWheelSpin = (direction: WheelSpinDirection, pixelsPerNudge: number) => {
+      if (previewWheelSpinRafRef.current !== null) {
+        cancelAnimationFrame(previewWheelSpinRafRef.current)
+        previewWheelSpinRafRef.current = null
+      }
+      // Whatever else was travelling, the hand has just overruled it.
+      cancelNonQuantizedSmoothScroll(scroller)
+      if (previewWheelSpinScrollBehaviorRef.current === null) {
+        previewWheelSpinScrollBehaviorRef.current = scroller.style.scrollBehavior
+      }
+      scroller.style.scrollBehavior = 'auto'
+      previewWheelSpinGlideRef.current = createWheelSpinGlide(direction, pixelsPerNudge)
+      previewWheelSpinCarryPxRef.current = 0
+      // Null, not `nowMs`: the first frame pays out nothing and only
+      // establishes the clock, so the coast starts exactly one frame's worth
+      // of distance behind the hand rather than one frame's worth ahead of
+      // wherever the browser had got to.
+      previewWheelSpinLastFrameMsRef.current = null
+      previewWheelSpinRafRef.current = requestAnimationFrame(coastFrame)
+      // From here until the coast ends, the wheel is this handler's to
+      // decline -- and only from here.
+      setIntercepting(true)
+    }
+
+    // Passive until a coast is actually running, and non-passive only then.
+    //
+    // This is not a micro-optimisation. A non-passive wheel listener takes
+    // the pane's scrolling off the compositor: Chromium cannot scroll until
+    // the main thread has had the event and declined to cancel it. Measured
+    // on the real app, with a 1200-section note: a notch reached the pane in
+    // 4ms with the listener passive and 33ms with it non-passive -- on every
+    // wheel event, whether or not anybody ever spins. The edit view pays
+    // that price because it genuinely intercepts every notch; this pane
+    // intercepts exactly two kinds, both of which only occur while a coast
+    // is running, so it can pay only then. The swap is a remove-and-re-add
+    // of the same function, so nothing is double-handled.
+    let intercepting = false
+    const setIntercepting = (next: boolean) => {
+      if (next === intercepting) return
+      intercepting = next
+      scroller.removeEventListener('wheel', handleWheel)
+      scroller.addEventListener('wheel', handleWheel, next ? { passive: false } : { passive: true })
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      const tracing = isWheelTraceOn()
+      if (shouldBlockPreviewInteraction()) {
+        // Deliberately no preventDefault: what a blocked transition does to
+        // a real wheel in this pane is whatever it did before this feature
+        // existed. Only the coast is this handler's to stop.
+        stopPreviewWheelSpin('scroll blocked')
+        return
+      }
+      if (event.deltaY === 0) return
+
+      const thresholdMs = getWheelSpinEffectiveThresholdMs()
+      if (thresholdMs <= 0) {
+        // The slider's off position. The machinery is not consulted, not
+        // started, and the wheel is the browser's again -- one comparison.
+        stopPreviewWheelSpin('bypassed')
+        return
+      }
+
+      const pixels = resolveNudgePixels(event)
+      if (pixels <= 0) {
+        if (tracing) {
+          appendWheelTrace(
+            `preview wheel dy=${event.deltaY} mode=${event.deltaMode} sub-notch` +
+            ` notch=${notchState.notchPx} pending=${notchState.pendingPx.toFixed(2)}`,
+          )
+        }
+        return
+      }
+
+      const direction: WheelSpinDirection = event.deltaY > 0 ? 1 : -1
+      const action = registerWheelSpinNudge(spinState, {
+        nowMs: performance.now(),
+        direction,
+        rows: pixels,
+        thresholdMs,
+      })
+
+      if (action.kind === 'ignore') {
+        // The tail of the user's own spin, arriving while the coast runs.
+        // This one really is swallowed -- letting it through would add the
+        // hand's remaining notches to a scroll that is already carrying them.
+        // Guarded: both of these branches are reachable only while a coast
+        // runs, which is exactly when the listener is interceptive, but a
+        // preventDefault from a passive listener is a console warning and a
+        // silent no-op, and that is not a way to find out.
+        if (intercepting) event.preventDefault()
+        if (tracing) appendWheelTrace(`preview wheel dy=${event.deltaY} SWALLOWED spin-tail`)
+        return
+      }
+      if (action.kind === 'stop') {
+        // The bargain the edit view makes: the notch that stops the coast
+        // scrolls nothing, so you can halt on the line you meant to.
+        if (intercepting) event.preventDefault()
+        stopPreviewWheelSpin('user nudge')
+        return
+      }
+
+      if (tracing) {
+        appendWheelTrace(
+          `preview wheel[b=${thresholdMs} c=${getWheelSpinDampenDivisor()}` +
+          `${action.startsCoast ? ' SPIN' : ''}] dy=${event.deltaY} mode=${event.deltaMode}` +
+          ` px/nudge=${action.rows.toFixed(2)} top=${scroller.scrollTop.toFixed(2)}`,
+        )
+      }
+      // Not scrolled here: an ordinary notch is the browser's to scroll, and
+      // it already has. `action.rows` is this pane's currency -- pixels.
+      if (action.startsCoast) startPreviewWheelSpin(direction, action.rows)
+    }
+
+    // Anything that means the reader is now doing something other than
+    // being carried along ends the coast, exactly as in the edit view.
+    const cancelOnOtherInput = () => stopPreviewWheelSpin('other input')
+
+    /**
+     * A keystroke ends a coast -- but this pane cannot listen for one on its
+     * own scroller the way the edit view does.
+     *
+     * The edit view's scroller holds the focused editable, so every keystroke
+     * made while reading it arrives there. Nothing in the render view is
+     * focusable (unless render-view spell check has made it contentEditable),
+     * so a keystroke goes to the body and a scroller-scoped listener never
+     * sees it -- confirmed live: the coast sailed straight through a
+     * keypress. Hence the window, narrowed to the two cases that are this
+     * pane's business: a key pressed inside it, or a key pressed anywhere
+     * while this is the section the reader is working in. A keystroke into
+     * the OTHER pane of a split is that pane's, and does not stop this one.
+     */
+    const cancelOnWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      const target = event.target
+      const insideThisPane = target instanceof Node && scroller.contains(target)
+      if (!insideThisPane && !isSectionActive) return
+      stopPreviewWheelSpin('keystroke')
+    }
+
+    scroller.addEventListener('wheel', handleWheel, { passive: true })
+    previewWheelInterceptRef.current = setIntercepting
+    scroller.addEventListener('mousedown', cancelOnOtherInput, { capture: true })
+    window.addEventListener('keydown', cancelOnWindowKeyDown, { capture: true })
+
+    return () => {
+      previewWheelInterceptRef.current = null
+      scroller.removeEventListener('wheel', handleWheel)
+      scroller.removeEventListener('mousedown', cancelOnOtherInput, { capture: true })
+      window.removeEventListener('keydown', cancelOnWindowKeyDown, { capture: true })
+      stopPreviewWheelSpin('unmount')
+    }
+  }, [
+    isPreviewMode,
+    isSectionActive,
+    previewScrollRef,
+    previewDocumentPositionRef,
+    shouldBlockPreviewInteraction,
+    stopPreviewWheelSpin,
+    syncPreviewCustomScrollbar,
+    activeNoteId,
   ])
 
   // Native scroll (covers mouse wheel, trackpad, keyboard when not intercepted)

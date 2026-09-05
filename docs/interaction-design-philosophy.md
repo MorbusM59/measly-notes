@@ -131,13 +131,17 @@ The goal is deterministic behavior with one source of truth per interaction phas
 
 ### 3g. A wheel spin may outlive the hand, and one nudge takes it back
 - Three notches in the same direction, each inside the user's `auto scroll`
-  threshold (10-50ms), are one gesture rather than three, and the edit view
-  keeps scrolling at the rate that gesture set (`src/editor/wheelSpin.ts`).
-  Both sliders carry an OFF position as their leftmost step rather than a
+  threshold (10-50ms), are one gesture rather than three, and the view keeps
+  scrolling at the rate that gesture set (`src/editor/wheelSpin.ts`). Both
+  sliders carry an OFF position as their leftmost step rather than a
   separate toggle -- one persisted number per control, and the off state
   living at the end of the axis it continues.
-- Every simulated nudge is an ordinary whole-row scroll, so 3d holds through a
-  coast exactly as it does under the hand.
+- **Both panes, one gesture.** The edit and render views share the state
+  machine, the three sliders and every rule below; what the wheel means does
+  not depend on which pane it is over. They differ only where the panes
+  themselves differ -- see 3h.
+- In the edit view, every simulated nudge is an ordinary whole-row scroll, so
+  3d holds through a coast exactly as it does under the hand.
 - **The tail of the gesture is not input.** A spin does not end on the notch
   that starts the coast; the remaining notches arrive while it runs, and
   acting on them doubles the speed while treating them as an interruption
@@ -164,6 +168,46 @@ The goal is deterministic behavior with one source of truth per interaction phas
 - Anything else that means the reader has moved on -- a keystroke, a click in
   the text, a blocked scroll transition, the end of the document, unmounting
   -- ends it too. A page that keeps moving under a keypress is not a feature.
+
+### 3h. The render view coasts, it does not step
+- The render view has no row grid, so the two things the edit view's coast
+  does *because* of one are done differently there, and nothing else is
+  (`src/editorSection/usePreviewScrollbar.ts`).
+- **Real notches stay the browser's.** The edit view must intercept every
+  notch to land on a row boundary; here there is nothing to land on, so
+  interception could only take the browser's own smoothing away and give
+  nothing back. The render view's handler reads the gesture and lets it
+  through. It calls `preventDefault` on exactly the two notches the spin
+  owns -- the tail of the user's own gesture, and the one that takes control
+  back -- so "the stopping nudge scrolls nothing" holds in both panes.
+- **The wheel is only intercepted while a coast is running.** A non-passive
+  wheel listener takes a pane's scrolling off the compositor: nothing scrolls
+  until the main thread has seen the event and declined to cancel it.
+  Measured on the real app with a 1200-section note, a notch reached the
+  render view in 4ms with the listener passive and 33ms with it non-passive,
+  on every wheel event, spin or no spin. The edit view pays that because it
+  intercepts every notch by necessity; this pane intercepts only the two
+  kinds a coast owns, so its listener is passive until a coast starts and
+  passive again the moment one ends.
+- **The coast is continuous, not stepped** (`src/editor/wheelSpinGlide.ts`).
+  Same schedule, same decay, same cut off, same distance travelled by any
+  given moment -- paid out as speed rather than in jumps. A row is small
+  enough that a step reads as motion; one notch of a render-view wheel is
+  three text lines or so, and once the dampening has stretched the interval
+  toward the cut off, delivering that in one jump twice a second is a page
+  being nudged, not a page coasting to a stop.
+- **What counts as a nudge is decided identically**, by the same
+  `editor/wheelNotch.ts` accumulator the edit view learns its device on. The
+  same wheel on the same desk starts a spin in both panes at the same
+  moment, and a trackpad's sub-notch stream starts one in neither.
+- **A coast ends at the document's edge, not the scroller's.** A windowed
+  render view (`editorSection/previewWindow.ts`) runs out of mounted content
+  many times on the way through a large note. The edit view can read "it did
+  not move" as the end of the document; this pane must ask
+  `isAtDocumentEdge`, or a coast would die a third of the way down.
+- **Anything with a destination of its own outranks a coast**: a search
+  jump, a scrollbar travel, a chapter change. One check for a running
+  journey covers all of them, including the ones added later.
 
 ### 3d. In edit view, text is never between rows
 - The edit pane is a grid of character cells. Text sits on row boundaries

@@ -9,6 +9,7 @@ import { suppressNextPlainTypingSoundOnce, typingSoundManager } from '../sound/T
 import { readSelectionRect, type SelectionRect } from '../editor/CaretRect';
 import { readSelectionLineRects } from '../editor/SelectionRects';
 import { createWheelNotchState, stepWheelNotch } from '../editor/wheelNotch';
+import { appendWheelTrace, isWheelTraceOn } from '../editor/wheelTrace';
 import {
   cancelWheelSpin,
   createWheelSpinState,
@@ -3998,18 +3999,10 @@ export function CM6Editor({
     // already saved one session from mistaking a settle gate for a scroll
     // bug. Buffered on window.__wheelTrace (last 400):
     //   copy(window.__wheelTrace.join(String.fromCharCode(10)))
-    const wheelTraceOn = () => (
-      typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-wheel') === '1'
-    );
-    const appendWheelTrace = (line: string) => {
-      if (typeof window === 'undefined') return;
-      const host = window as unknown as { __wheelTrace?: string[] };
-      if (!host.__wheelTrace) host.__wheelTrace = [];
-      host.__wheelTrace.push(line);
-      if (host.__wheelTrace.length > 400) host.__wheelTrace.splice(0, host.__wheelTrace.length - 400);
-      // eslint-disable-next-line no-console
-      console.log(line);
-    };
+    // Flag and buffer live in editor/wheelTrace.ts: the render view runs the
+    // same feature through the same trace, and a gesture that crosses panes
+    // has to read as one story.
+    const wheelTraceOn = isWheelTraceOn;
     /** The document line number sitting at the very top of the viewport -- the reader's own measure of "did it move". */
     const topVisibleLine = (): number | string => {
       try {
