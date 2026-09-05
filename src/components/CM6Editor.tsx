@@ -8,7 +8,7 @@ import { buildTokenPresentation } from '../editor/MarkdownLineClassification';
 import { suppressNextPlainTypingSoundOnce, typingSoundManager } from '../sound/TypingSoundManager';
 import { readSelectionRect, type SelectionRect } from '../editor/CaretRect';
 import { readSelectionLineRects } from '../editor/SelectionRects';
-import { PIXELS_PER_WHEEL_UNIT } from '../editor/LayoutConstants';
+import { createWheelNotchState, stepWheelNotch } from '../editor/wheelNotch';
 import {
   buildReleaseRampDownPlanFromCurrentParams,
   CONTINUOUS_SCROLL_APEX_SPEED_MULTIPLIER,
@@ -2416,7 +2416,11 @@ export function CM6Editor({
     // that reconcile system isn't here yet, clearCagedRefocusState() has
     // nothing to clear and is correctly omitted from the wheel handler
     // below (matching what it would be once ported: a no-op today).
-    let pendingWheelPx = 0;
+    // One notch of the wheel is one row -- but only the device knows how many
+    // pixels a notch is, so this measures it rather than assuming the Windows
+    // default. See editor/wheelNotch.ts for the every-other-notch bug that
+    // assumption caused.
+    const wheelNotchState = createWheelNotchState();
     const pageKeysHeld = new Set<string>();
     let pageContinuousDirection: -1 | 0 | 1 = 0;
     let pageContinuousRafId: number | null = null;
@@ -3960,10 +3964,53 @@ export function CM6Editor({
     };
     view.scrollDOM.addEventListener('scroll', handleScroll, { passive: true });
 
+    // Opt-in wheel trace -- localStorage.setItem('thockdown:debug-wheel', '1').
+    //
+    // Built for, and immediately decisive on, "scrolling up only produces a
+    // line movement on every other wheel position": the deltas it printed
+    // were 50px, against a handler that assumed 100 (see
+    // editor/wheelNotch.ts). Kept, because the shape of that report --
+    // "scrolling feels wrong" -- has exactly one useful first question, what
+    // the device is actually sending, and nothing else in the app can answer
+    // it.
+    //
+    // Every line carries the top VISIBLE LINE as well as scrollTop, because
+    // the complaint is always about text moving, and a scroll that moves
+    // while the text does not looks identical from the scroll number alone.
+    // The silent declines are logged too -- an unlogged early return is
+    // precisely where a swallowed notch hides, and the `blocked` line has
+    // already saved one session from mistaking a settle gate for a scroll
+    // bug. Buffered on window.__wheelTrace (last 400):
+    //   copy(window.__wheelTrace.join(String.fromCharCode(10)))
+    const wheelTraceOn = () => (
+      typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-wheel') === '1'
+    );
+    const appendWheelTrace = (line: string) => {
+      if (typeof window === 'undefined') return;
+      const host = window as unknown as { __wheelTrace?: string[] };
+      if (!host.__wheelTrace) host.__wheelTrace = [];
+      host.__wheelTrace.push(line);
+      if (host.__wheelTrace.length > 400) host.__wheelTrace.splice(0, host.__wheelTrace.length - 400);
+      // eslint-disable-next-line no-console
+      console.log(line);
+    };
+    /** The document line number sitting at the very top of the viewport -- the reader's own measure of "did it move". */
+    const topVisibleLine = (): number | string => {
+      try {
+        const rect = view.scrollDOM.getBoundingClientRect();
+        const pos = view.posAtCoords({ x: rect.left + 8, y: rect.top + 1 });
+        return pos === null ? '?' : view.state.doc.lineAt(pos).number;
+      } catch {
+        return '?';
+      }
+    };
+
     // Cage-quantized wheel scroll -- ported verbatim from
     // CagedScrollPlugin.tsx's own handleWheel.
     const handleWheel = (event: WheelEvent) => {
+      const tracing = wheelTraceOn();
       if (isEditScrollInteractionBlocked()) {
+        if (tracing) appendWheelTrace(`wheel dy=${event.deltaY} mode=${event.deltaMode} DECLINED blocked`);
         event.preventDefault();
         return;
       }
@@ -3979,12 +4026,16 @@ export function CM6Editor({
         const pageUnits = Math.trunc(Math.abs(event.deltaY));
         units = Math.max(1, pageUnits) * (event.deltaY > 0 ? 1 : -1);
       } else {
-        pendingWheelPx += event.deltaY;
-        const stepSign = pendingWheelPx < 0 ? -1 : 1;
-        const unitCount = Math.floor(Math.abs(pendingWheelPx) / PIXELS_PER_WHEEL_UNIT);
-        if (unitCount === 0) return;
-        units = unitCount * stepSign;
-        pendingWheelPx -= unitCount * PIXELS_PER_WHEEL_UNIT * stepSign;
+        units = stepWheelNotch(wheelNotchState, event.deltaY, performance.now());
+        if (units === 0) {
+          if (tracing) {
+            appendWheelTrace(
+              `wheel dy=${event.deltaY} mode=${event.deltaMode} DECLINED sub-notch` +
+              ` notch=${wheelNotchState.notchPx} pending=${wheelNotchState.pendingPx.toFixed(2)}`,
+            );
+          }
+          return;
+        }
       }
 
       if (units === 0) return;
@@ -3993,7 +4044,36 @@ export function CM6Editor({
       const scroller = view.scrollDOM;
       const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
       const target = Math.max(0, Math.min(maxScrollTop, scroller.scrollTop + units * lineHeightPxNow));
-      scroller.scrollTop = Math.round(target / lineHeightPxNow) * lineHeightPxNow;
+      const written = Math.round(target / lineHeightPxNow) * lineHeightPxNow;
+
+      if (!tracing) {
+        scroller.scrollTop = written;
+        return;
+      }
+
+      const beforeTop = scroller.scrollTop;
+      const beforeLine = topVisibleLine();
+      const beforeHeight = scroller.scrollHeight;
+      scroller.scrollTop = written;
+      const afterTop = scroller.scrollTop;
+      const afterLine = topVisibleLine();
+      const prefix =
+        `wheel dy=${event.deltaY} mode=${event.deltaMode} units=${units} lh=${lineHeightPxNow}` +
+        ` notch=${wheelNotchState.notchPx} pending=${wheelNotchState.pendingPx.toFixed(2)}` +
+        ` top ${beforeTop.toFixed(2)}->${afterTop.toFixed(2)}` +
+        ` (want ${written.toFixed(2)}) line ${beforeLine}->${afterLine}`;
+      appendWheelTrace(prefix);
+      // One frame later: whatever CM6's height-map compensation or the
+      // browser's scroll anchoring did to the position we just wrote. This
+      // is the half the scroll number alone cannot show. Logged as its own
+      // line rather than folded into the one above, so the immediate write
+      // is still on record if the frame never arrives.
+      requestAnimationFrame(() => {
+        appendWheelTrace(
+          `  settled top=${scroller.scrollTop.toFixed(2)} line=${topVisibleLine()}` +
+          ` scrollHeight ${beforeHeight}->${scroller.scrollHeight}`,
+        );
+      });
     };
     view.scrollDOM.addEventListener('wheel', handleWheel, { passive: false });
 
