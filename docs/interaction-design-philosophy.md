@@ -129,6 +129,42 @@ The goal is deterministic behavior with one source of truth per interaction phas
   size. A cancelled animation that leaves its own geometry behind is worse
   than one that never ran.
 
+### 3g. A wheel spin may outlive the hand, and one nudge takes it back
+- Three notches in the same direction, each inside the user's `auto scroll`
+  threshold (10-50ms), are one gesture rather than three, and the edit view
+  keeps scrolling at the rate that gesture set (`src/editor/wheelSpin.ts`).
+  Both sliders carry an OFF position as their leftmost step rather than a
+  separate toggle -- one persisted number per control, and the off state
+  living at the end of the axis it continues.
+- Every simulated nudge is an ordinary whole-row scroll, so 3d holds through a
+  coast exactly as it does under the hand.
+- **The tail of the gesture is not input.** A spin does not end on the notch
+  that starts the coast; the remaining notches arrive while it runs, and
+  acting on them doubles the speed while treating them as an interruption
+  kills the coast on the frame it began. They are ignored for a flat 500ms
+  -- a property of the hand, which takes about as long to stop turning a
+  wheel however fast it was turning it. A window proportional to the
+  gesture's own speed served the fast spin worst, which is the one with the
+  longest tail.
+- **The coast ends at the user's `cut off`** (50-500ms between rows). This
+  was derived from the spin threshold for a while, on the theory that one
+  number should not need a second; in practice they answer different
+  questions -- how quick a spin has to be, and how slow a coast may get
+  before it stops being one -- and tying them together meant tuning either
+  could only be done by accepting what it did to the other.
+- **Except at the dampen slider's leftmost position**, which is a decay of
+  exactly 0 rather than a very small one, and where the coast runs until
+  something stops it. That position is a sentinel value rather than a small
+  number, because "never slows" and "slows imperceptibly" are different
+  promises and only one of them can be kept by arithmetic.
+- **After that, the next notch stops the coast and scrolls nothing** -- the
+  same bargain as 3f. A gesture that both halts the motion and adds to it
+  cannot be aimed, and stopping on the line you meant to stop on is the
+  entire point of taking control back.
+- Anything else that means the reader has moved on -- a keystroke, a click in
+  the text, a blocked scroll transition, the end of the document, unmounting
+  -- ends it too. A page that keeps moving under a keypress is not a feature.
+
 ### 3d. In edit view, text is never between rows
 - The edit pane is a grid of character cells. Text sits on row boundaries
   before, during and after every interaction -- a wheel, a held PageDown, a

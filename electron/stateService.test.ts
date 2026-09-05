@@ -54,6 +54,34 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.menu?.isDoubleSizeMode).toBe(false)
   })
 
+  it('persists the wheel-spin sliders, including the 0 that means "off"', async () => {
+    // sanitizeMenu is an allowlist, and a numeric field it never learned
+    // about is dropped silently -- so a slider can be wired perfectly on the
+    // renderer side and still come back at its default on every restart.
+    // Zero is tested explicitly because it is a meaningful VALUE here (the
+    // feature switched off), not an absent field, and the two are easy to
+    // conflate in a sanitizer.
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date',
+        selectedMonths: [],
+        selectedYears: [],
+        searchQuery: '',
+        wheelSpinThresholdMs: 0,
+        wheelSpinDampenDivisor: 0,
+        wheelSpinCutoffMs: 350,
+      },
+    })
+
+    const reader = new StateService(dataRoot)
+    const loaded = await reader.loadAppState()
+    expect(loaded.menu?.wheelSpinThresholdMs).toBe(0)
+    expect(loaded.menu?.wheelSpinDampenDivisor).toBe(0)
+    expect(loaded.menu?.wheelSpinCutoffMs).toBe(350)
+  })
+
   it('flushAppStateOnClose (the before-quit safety net) also preserves isDoubleSizeMode', async () => {
     const writer = new StateService(dataRoot)
     await writer.saveAppState({

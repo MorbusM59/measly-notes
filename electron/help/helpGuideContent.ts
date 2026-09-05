@@ -582,7 +582,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 ### [Sync](#sync)
 
 > **Where?**
-> Settings → Data Synchronization → the sync icon.
+> Settings → Data → the sync icon.
 
 *Rescans the app's own notes folder for files that exist on disk but aren't yet registered.*
 
@@ -591,7 +591,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 ### [Import](#import)
 
 > **Where?**
-> Settings → Data Synchronization → the import icon.
+> Settings → Data → the import icon.
 
 *Brings Markdown files from anywhere on your computer into Thockdown as regular notes.*
 
@@ -600,7 +600,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 ### [Open Notes Folder](#open-notes-folder)
 
 > **Where?**
-> Settings → Data Synchronization → the folder icon.
+> Settings → Data → the folder icon.
 
 *Opens the app's own notes folder (where your \`.md\` files live on disk) in your system file explorer.*
 `,
@@ -708,19 +708,19 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - Right-click a slot to arm it for deletion, or hold right-click to export it.
 - Use the reset button to restore the active custom layout back to its defaults.
 
-### [Colors and Textures](#colors-and-textures)
+### [Colors](#colors-and-textures)
 
 > **Where?**
-> Settings panel → Colors & Textures.
+> Settings panel → Colors.
 
 *A "paint bucket" system for recoloring and retexturing individual UI elements.*
 
 - Click a source swatch — or an active color, or a texture preview — to pick it up, then click any target swatch (UI elements, text colors, textures) to apply it there.
 
-### [Borders and Spacing](#borders-and-spacing)
+### [Borders](#borders-and-spacing)
 
 > **Where?**
-> Settings panel → Borders & Spacing.
+> Settings panel → Borders.
 
 *Fine control over border widths, corner radii, and layout spacing throughout the UI.*
 
@@ -762,12 +762,16 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 
 - Controls for ramp, speed, maximum speed, and overall curve shape. Response is auto-derived from ramp.
 - **Maximum speed** does two jobs at once. It caps how fast a scroll animation travels, and it also caps how *long* one may take: the longest any scroll can run is the time it would take to cover 200,000 pixels at the speed you've set — 2 seconds at the top of the slider, 2.5 at the default. Wind the speed up and long journeys get shorter as well as quicker; wind it down and a trip across a very large note becomes a proper voyage. A journey that can't fit under both limits keeps the time one and exceeds the speed one, so you're never left waiting.
+- **Auto scroll** and **dampen** are a pair, and they only affect edit mode. Spin the wheel — three notches in the same direction, each within the number of milliseconds **auto scroll** is set to — and the text keeps scrolling on its own at the speed you spun, without you having to keep turning. Slid all the way left, **auto scroll** reads “off” and the wheel behaves exactly as it always has.
+- **Dampen** decides how long the free scroll lasts before it winds down. It holds your speed for a good while and then lets go fairly quickly, rather than trailing off into a crawl; slide it right to have it let go sooner, left to make it last. At its leftmost position it never winds down at all — the text keeps going until you stop it. Either way, one more turn of the wheel stops it — as does typing, or clicking in the text. That stopping nudge only stops; it doesn't also scroll, so you can halt on the line you wanted rather than one past it.
+- **Cut off** is where the free scroll gives up: once the lines are arriving further apart than the number of milliseconds you set here, it stops. Between it and **dampen** you can have a scroll that eases off gently and ends early, or one that holds its pace and runs on until it hits the cut off.
+- For half a second after a spin starts, the wheel is ignored. That's the tail of your own gesture: without it, the last few notches of the spin would either double the speed or cancel the scroll the instant it began.
 - These settings aren't part of a layout — they stay as you left them across layout switches and app restarts, the same way the custom cursor toggle does.
 
-### [Mouse Options](#mouse-options)
+### [Cursor](#mouse-options)
 
 > **Where?**
-> Settings panel → Mouse Options.
+> Settings panel → Cursor.
 
 *An optional animated cursor replacement: orbiting dots with fading trails, a center dot, a soft halo, and a breathing pulse, all pinned to the real pointer position. Off by default — flip it on in [Performance]($#performance).*
 
@@ -783,7 +787,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 *Shape, glow and blink rhythm for the block caret in the editor. Its fill color lives with the rest of your theming in [Colors and Textures]($#colors-and-textures); everything else about it is here.*
 
 - The caret sits above the box grid and below your text, so the grid never draws lines across it and the caret never hides the character it's on — however big you make it, whatever color you give it.
-- Top row: an outline color swatch and a halo color swatch. The 4 buttons beside them (H, S, V, A) stage a color by dragging up/down or scrolling on each — left-click a swatch to paint it onto that part of the caret; hold right-click on a swatch to load its current color back into H/S/V/A. Same widget as [Mouse Options]($#mouse-options), independent of it.
+- Top row: an outline color swatch and a halo color swatch. The 4 buttons beside them (H, S, V, A) stage a color by dragging up/down or scrolling on each — left-click a swatch to paint it onto that part of the caret; hold right-click on a swatch to load its current color back into H/S/V/A. Same widget as [Cursor]($#mouse-options), independent of it.
 - **Size** (-5 to +5) grows or shrinks the caret on every side. 0 is the default: it fills a grid box's interior without covering the lines around it. -1 leaves a one-pixel gap to those lines; positive values spill past them into the neighbouring boxes.
 - **Outline** (0–5px) draws a border around the caret rectangle, in the outline color. 0 hides it.
 - **Halo** (0–20px) reaches a glow outward from the caret, in the halo color. 0 hides it.
@@ -794,10 +798,10 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - **Effect** (0–100%) is how much of the chosen shape actually reaches the caret. At 100 you get the blink at full strength; at 0 the caret is simply static, sitting at whatever colors you gave it; in between is a straight blend of the two, so you can keep a rhythm you like and just take the edge off it.
 - All of these are saved per layout, same as the rest of your theming. To stop the blink entirely, use **Reduce caret animation** in [Performance]($#performance).
 
-### [Keystroke Sounds](#keystroke-sounds)
+### [Sounds](#keystroke-sounds)
 
 > **Where?**
-> Settings panel → Keystroke Sounds.
+> Settings panel → Sounds.
 
 *Optional mechanical-keyboard sound effects on typing, undo/redo, and navigation.*
 
@@ -813,10 +817,10 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 
 - Controls the same player described in [Music Player]($HELP§MUSIC-PLAYER); this panel just holds its volume and reverb sliders.
 
-### [Data Synchronization Settings](#data-synchronization-settings)
+### [Data](#data-synchronization-settings)
 
 > **Where?**
-> Settings panel → Data Synchronization.
+> Settings panel → Data.
 
 *Note sync/import, and exporting or importing your whole appearance setup.*
 

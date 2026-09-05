@@ -22,6 +22,16 @@ type CompactScrollbarSliderProps = {
   ariaLabel: string
   reverseScale?: boolean
   defaultValue?: number
+  /**
+   * What the tooltip shows, when that is not the stored number itself.
+   *
+   * A control's steps and the quantity a user is actually tuning are not
+   * always the same thing -- the wheel-spin dampen slider steps through a
+   * divisor and displays the decay it computes from it. The stored value
+   * still drives everything else (position, keyboard, aria-valuenow); this
+   * only changes what is read out.
+   */
+  formatValue?: (value: number) => string
   onCommit: (value: number) => void
 }
 
@@ -35,6 +45,7 @@ export function CompactScrollbarSlider({
   ariaLabel,
   reverseScale = false,
   defaultValue,
+  formatValue,
   onCommit,
 }: CompactScrollbarSliderProps) {
   const railRef = useRef<HTMLDivElement | null>(null)
@@ -103,8 +114,9 @@ export function CompactScrollbarSlider({
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={Number(formatCompactSettingNumber(value, step))}
+      aria-valuetext={formatValue ? formatValue(value) : undefined}
       className={`utility-setting-scrollbar-shell${isDragging ? ' is-dragging' : ''}`}
-      data-live-tooltip={`${trackLabel}: ${formatCompactSettingNumber(value, step)}`}
+      data-live-tooltip={`${trackLabel}: ${formatValue ? formatValue(value) : formatCompactSettingNumber(value, step)}`}
       ref={shellRef}
       onKeyDown={(event) => {
         if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {

@@ -1,4 +1,4 @@
-// UI chrome font (Options > UI Font, between Borders & Spacing and Mouse
+// UI chrome font (Options > UI Font, between Borders and Cursor
 // Options). Distinct from EditorTypography.ts's editor/render content fonts:
 // this scales the app's own labels/buttons/tags/tooltips, not note text.
 

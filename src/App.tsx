@@ -180,6 +180,20 @@ import {
   scrollToNonQuantizedSmooth,
 } from './editor/NonQuantizedSmoothScroll'
 import {
+  getWheelSpinCutoffMs,
+  getWheelSpinDampenDivisor,
+  getWheelSpinThresholdMs,
+  setWheelSpinCutoffMs as applyWheelSpinCutoffMs,
+  setWheelSpinDampenDivisor as applyWheelSpinDampenDivisor,
+  setWheelSpinThresholdMs as applyWheelSpinThresholdMs,
+  WHEEL_SPIN_CUTOFF_MAX_MS,
+  WHEEL_SPIN_CUTOFF_MIN_MS,
+  WHEEL_SPIN_DAMPEN_DIVISOR_MAX,
+  WHEEL_SPIN_DAMPEN_ENDLESS,
+  WHEEL_SPIN_THRESHOLD_MAX_MS,
+  WHEEL_SPIN_THRESHOLD_OFF,
+} from './editor/wheelSpin'
+import {
   FILTER_MONTHS,
   FILTER_YEARS,
   handleMultiSelect,
@@ -2325,6 +2339,9 @@ function App() {
   const [renderScrollTotalTimeSec, setRenderScrollTotalTimeSec] = useState(() => getRenderScrollTotalTimeSec())
   const [renderScrollMaxSpeedPxPerSec, setRenderScrollMaxSpeedPxPerSec] = useState(() => getRenderScrollMaxSpeedPxPerSec())
   const [renderScrollSkew, setRenderScrollSkew] = useState(() => getRenderScrollSkew())
+  const [wheelSpinThresholdMs, setWheelSpinThresholdMsState] = useState(() => getWheelSpinThresholdMs())
+  const [wheelSpinDampenDivisor, setWheelSpinDampenDivisorState] = useState(() => getWheelSpinDampenDivisor())
+  const [wheelSpinCutoffMs, setWheelSpinCutoffMsState] = useState(() => getWheelSpinCutoffMs())
   const [uiMode, setUiMode] = useState<UiLoadoutMode>('light')
   const [uiLoadoutEntries, setUiLoadoutEntries] = useState<UiLoadoutEntry[]>([])
   const [lastCustomIdByMode, setLastCustomIdByMode] = useState<{ light: number; dark: number }>({
@@ -4112,6 +4129,9 @@ function App() {
       renderScrollTotalTimeSec,
       renderScrollMaxSpeedPxPerSec,
       renderScrollSkew,
+      wheelSpinThresholdMs,
+      wheelSpinDampenDivisor,
+      wheelSpinCutoffMs,
       glaze: glazeSettings,
       darkMode,
       uiMode,
@@ -4225,6 +4245,9 @@ function App() {
     renderScrollMaxSpeedPxPerSec,
     renderScrollSkew,
     renderScrollTotalTimeSec,
+    wheelSpinThresholdMs,
+    wheelSpinDampenDivisor,
+    wheelSpinCutoffMs,
     audioKeyVolume,
     audioKeyVariance,
     audioPitch,
@@ -4637,6 +4660,21 @@ function App() {
   useEffect(() => {
     applyRenderScrollSkew(renderScrollSkew)
   }, [renderScrollSkew])
+
+  // The wheel handler reads these live from wheelSpin.ts at event time --
+  // it is attached once at mount, deep inside CM6Editor, and re-attaching
+  // wheel listeners on every drag of a slider is not a trade worth making.
+  useEffect(() => {
+    applyWheelSpinThresholdMs(wheelSpinThresholdMs)
+  }, [wheelSpinThresholdMs])
+
+  useEffect(() => {
+    applyWheelSpinDampenDivisor(wheelSpinDampenDivisor)
+  }, [wheelSpinDampenDivisor])
+
+  useEffect(() => {
+    applyWheelSpinCutoffMs(wheelSpinCutoffMs)
+  }, [wheelSpinCutoffMs])
 
   useEffect(() => {
     if (typeof document === 'undefined' || !('fonts' in document)) return
@@ -6117,6 +6155,27 @@ ${markdownHtml}
             setRenderScrollTotalTimeSec(appState.menu.renderScrollTotalTimeSec ?? getRenderScrollTotalTimeSec())
                   setRenderScrollMaxSpeedPxPerSec(appState.menu.renderScrollMaxSpeedPxPerSec ?? getRenderScrollMaxSpeedPxPerSec())
             setRenderScrollSkew(appState.menu.renderScrollSkew ?? getRenderScrollSkew())
+            // Clamped on the way in, the way renderScrollDynamic is: the
+            // module-level setters clamp anyway, so a stored value from
+            // outside the current bounds would otherwise leave the SLIDER
+            // showing a number the scrolling does not actually use -- and
+            // a control disagreeing with its own effect is worse than a
+            // setting quietly moving to the nearest one that exists.
+            setWheelSpinThresholdMsState(clamp(
+              appState.menu.wheelSpinThresholdMs ?? getWheelSpinThresholdMs(),
+              WHEEL_SPIN_THRESHOLD_OFF,
+              WHEEL_SPIN_THRESHOLD_MAX_MS,
+            ))
+            setWheelSpinDampenDivisorState(clamp(
+              appState.menu.wheelSpinDampenDivisor ?? getWheelSpinDampenDivisor(),
+              WHEEL_SPIN_DAMPEN_ENDLESS,
+              WHEEL_SPIN_DAMPEN_DIVISOR_MAX,
+            ))
+            setWheelSpinCutoffMsState(clamp(
+              appState.menu.wheelSpinCutoffMs ?? getWheelSpinCutoffMs(),
+              WHEEL_SPIN_CUTOFF_MIN_MS,
+              WHEEL_SPIN_CUTOFF_MAX_MS,
+            ))
             setGlazeSettings(sanitizeGlazeSettings(appState.menu.glaze, DEFAULT_GLAZE_SETTINGS))
             setUiMode(appState.menu.uiMode === 'dark' ? 'dark' : 'light')
             applyDarkModePreset(appState.menu.darkMode ?? 'none')
@@ -9229,6 +9288,12 @@ ${markdownHtml}
                         renderScrollMaxSpeedPxPerSec={renderScrollMaxSpeedPxPerSec}
                         setRenderScrollMaxSpeedPxPerSec={setRenderScrollMaxSpeedPxPerSec}
                         renderScrollSkew={renderScrollSkew}
+                        wheelSpinThresholdMs={wheelSpinThresholdMs}
+                        setWheelSpinThresholdMs={setWheelSpinThresholdMsState}
+                        wheelSpinDampenDivisor={wheelSpinDampenDivisor}
+                        setWheelSpinDampenDivisor={setWheelSpinDampenDivisorState}
+                        wheelSpinCutoffMs={wheelSpinCutoffMs}
+                        setWheelSpinCutoffMs={setWheelSpinCutoffMsState}
                         setRenderScrollSkew={setRenderScrollSkew}
                         typingSoundEnabled={typingSoundEnabled}
                         setTypingSoundEnabled={setTypingSoundEnabled}

@@ -444,6 +444,9 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     renderScrollTotalTimeSec: sanitizeOptionalNumber(input?.renderScrollTotalTimeSec),
     renderScrollMaxSpeedPxPerSec: sanitizeOptionalNumber(input?.renderScrollMaxSpeedPxPerSec),
     renderScrollSkew: sanitizeOptionalNumber(input?.renderScrollSkew),
+    wheelSpinThresholdMs: sanitizeOptionalNumber(input?.wheelSpinThresholdMs),
+    wheelSpinDampenDivisor: sanitizeOptionalNumber(input?.wheelSpinDampenDivisor),
+    wheelSpinCutoffMs: sanitizeOptionalNumber(input?.wheelSpinCutoffMs),
     // Legacy pre-curve-model keys -- kept as passthrough (not written by any
     // current save, but still read as a migration fallback for saves from
     // before renderScrollDynamic/Responsiveness existed; see App.tsx).

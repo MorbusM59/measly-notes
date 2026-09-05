@@ -110,6 +110,12 @@ export interface PersistedMenuState {
   renderScrollTotalTimeSec?: number;
   renderScrollMaxSpeedPxPerSec?: number;
   renderScrollSkew?: number;
+  // Spin-to-keep-scrolling (Options > Animations). Same reasoning as the
+  // curve fields above: a scrolling habit, not a look, so it must not be
+  // reset by a layout switch.
+  wheelSpinThresholdMs?: number;
+  wheelSpinDampenDivisor?: number;
+  wheelSpinCutoffMs?: number;
   highlightCaretColor?: string;
   highlightSearchColor?: string;
   highlightSelectionColor?: string;

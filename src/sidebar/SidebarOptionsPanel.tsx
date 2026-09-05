@@ -166,6 +166,21 @@ import {
 } from '../shared/glaze'
 import { LOADOUT_FACTORY_PRESET_COUNT, type UiLoadoutEntry } from '../shared/loadouts'
 import { typingSoundManager } from '../sound/TypingSoundManager'
+import {
+  DEFAULT_WHEEL_SPIN_DAMPEN_DIVISOR,
+  DEFAULT_WHEEL_SPIN_THRESHOLD_MS,
+  formatWheelSpinThreshold,
+  DEFAULT_WHEEL_SPIN_CUTOFF_MS,
+  WHEEL_SPIN_CUTOFF_MAX_MS,
+  WHEEL_SPIN_CUTOFF_MIN_MS,
+  WHEEL_SPIN_CUTOFF_STEP_MS,
+  WHEEL_SPIN_DAMPEN_DIVISOR_MAX,
+  WHEEL_SPIN_DAMPEN_DIVISOR_STEP,
+  WHEEL_SPIN_DAMPEN_ENDLESS,
+  WHEEL_SPIN_THRESHOLD_MAX_MS,
+  WHEEL_SPIN_THRESHOLD_OFF,
+  WHEEL_SPIN_THRESHOLD_STEP_MS,
+} from '../editor/wheelSpin'
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -614,6 +629,12 @@ export interface SidebarOptionsPanelProps {
   setCaretAnimationPreset: (value: CaretAnimationPresetKey) => void
   caretAnimationDurationMs: number
   setCaretAnimationDurationMs: (value: number) => void
+  wheelSpinThresholdMs: number
+  setWheelSpinThresholdMs: (value: number) => void
+  wheelSpinDampenDivisor: number
+  setWheelSpinDampenDivisor: (value: number) => void
+  wheelSpinCutoffMs: number
+  setWheelSpinCutoffMs: (value: number) => void
   caretFrameDurationMs: number
   setCaretFrameDurationMs: (value: number) => void
   caretEffectStrengthPercent: number
@@ -882,6 +903,12 @@ export function SidebarOptionsPanel({
   setCaretAnimationPreset,
   caretAnimationDurationMs,
   setCaretAnimationDurationMs,
+  wheelSpinThresholdMs,
+  setWheelSpinThresholdMs,
+  wheelSpinDampenDivisor,
+  setWheelSpinDampenDivisor,
+  wheelSpinCutoffMs,
+  setWheelSpinCutoffMs,
   caretFrameDurationMs,
   setCaretFrameDurationMs,
   caretEffectStrengthPercent,
@@ -1281,8 +1308,8 @@ export function SidebarOptionsPanel({
 
       <AccordionSection
         className="sidebar-options-section-colors"
-        ariaLabel="Colors & Textures"
-        heading="Colors & Textures"
+        ariaLabel="Colors"
+        heading="Colors"
         iconClass="fa-rectangle-list"
         iconTooltip="These settings are layout specific and will be lost when changing layouts. You can store them by creating a custom layout."
       >
@@ -2059,8 +2086,8 @@ export function SidebarOptionsPanel({
 
       <AccordionSection
         className="sidebar-options-section-misc"
-        ariaLabel="Borders & Spacing"
-        heading="Borders & Spacing"
+        ariaLabel="Borders"
+        heading="Borders"
         iconClass="fa-rectangle-list"
         iconTooltip="These settings are layout specific and will be lost when changing layouts. You can store them by creating a custom layout."
       >
@@ -2138,8 +2165,8 @@ export function SidebarOptionsPanel({
 
       <AccordionSection
         className="sidebar-options-section-mouse"
-        ariaLabel="Mouse Options"
-        heading="Mouse Options"
+        ariaLabel="Cursor"
+        heading="Cursor"
         iconClass="fa-rectangle-list"
         iconTooltip="These settings are layout specific and will be lost when changing layouts. You can store them by creating a custom layout."
       >
@@ -2482,7 +2509,7 @@ export function SidebarOptionsPanel({
         <div className="options-caret-settings-grid" role="group" aria-label="Caret appearance controls">
           {/* Row 1: the two colour targets this section owns. The caret's FILL
               colour is not here on purpose -- it is highlightColors.caret,
-              edited in Colors & Textures with every other highlight colour;
+              edited in Colors with every other highlight colour;
               duplicating it here would be a second control for one value. */}
           <button
             type="button"
@@ -2508,7 +2535,7 @@ export function SidebarOptionsPanel({
           ><span className="options-color-swatch-glyph fa-solid fa-square" aria-hidden="true" /></button>
 
           {/* The staged H/S/V/A the two swatches above apply -- same closed-loop
-              widget as the Mouse Options section's, scoped to this section. */}
+              widget as the Cursor section's, scoped to this section. */}
           <button
             type="button"
             className={`btn-icon options-color-swatch options-hsva-control${caretHsvaDragState?.control === 'h' ? ' is-dragging' : ''}`}
@@ -2673,12 +2700,12 @@ export function SidebarOptionsPanel({
 
       <AccordionSection
         className="sidebar-options-section-audio"
-        ariaLabel="Keystroke Sounds"
-        heading="Keystroke Sounds"
+        ariaLabel="Sounds"
+        heading="Sounds"
         iconClass="fa-rectangle-list"
         iconTooltip="These settings are layout specific and will be lost when changing layouts. You can store them by creating a custom layout."
       >
-<div className="utility-setting-slider-stack" aria-label="Keystroke Sounds controls">
+<div className="utility-setting-slider-stack" aria-label="Sounds controls">
           <div className="utility-setting-button-row" role="group" aria-label="Typing sound controls">
             <button
               type="button"
@@ -2945,6 +2972,52 @@ export function SidebarOptionsPanel({
             defaultValue={DEFAULT_RENDER_SCROLL_MAX_SPEED_PX_PER_SEC}
             onCommit={(value) => setRenderScrollMaxSpeedPxPerSec(clamp(value, 1000, 100000))}
           />
+          {/* Spin-to-keep-scrolling: `auto scroll` sets what counts as a
+              spin, `dampen` what happens after one, so they read in that
+              order. */}
+          <CompactScrollbarSlider
+            id="wheel-spin-threshold"
+            min={WHEEL_SPIN_THRESHOLD_OFF}
+            max={WHEEL_SPIN_THRESHOLD_MAX_MS}
+            step={WHEEL_SPIN_THRESHOLD_STEP_MS}
+            value={wheelSpinThresholdMs}
+            trackLabel="auto scroll"
+            formatValue={formatWheelSpinThreshold}
+            ariaLabel="Spin the wheel to keep scrolling: how close together nudges must be, in milliseconds. All the way left turns it off."
+            defaultValue={DEFAULT_WHEEL_SPIN_THRESHOLD_MS}
+            onCommit={(value) => setWheelSpinThresholdMs(
+              clamp(value, WHEEL_SPIN_THRESHOLD_OFF, WHEEL_SPIN_THRESHOLD_MAX_MS),
+            )}
+          />
+          {/* Reversed: the stored number is the divisor c, which gets
+              SMALLER as damping gets stronger, and a control whose right-hand
+              end damps less than its left would read backwards. */}
+          <CompactScrollbarSlider
+            id="wheel-spin-dampen"
+            min={WHEEL_SPIN_DAMPEN_ENDLESS}
+            max={WHEEL_SPIN_DAMPEN_DIVISOR_MAX}
+            step={WHEEL_SPIN_DAMPEN_DIVISOR_STEP}
+            value={wheelSpinDampenDivisor}
+            trackLabel="dampen"
+            ariaLabel="How quickly a wheel spin coasts to a stop. All the way left, it never stops on its own."
+            defaultValue={DEFAULT_WHEEL_SPIN_DAMPEN_DIVISOR}
+            onCommit={(value) => setWheelSpinDampenDivisor(
+              clamp(value, WHEEL_SPIN_DAMPEN_ENDLESS, WHEEL_SPIN_DAMPEN_DIVISOR_MAX),
+            )}
+          />
+          <CompactScrollbarSlider
+            id="wheel-spin-cutoff"
+            min={WHEEL_SPIN_CUTOFF_MIN_MS}
+            max={WHEEL_SPIN_CUTOFF_MAX_MS}
+            step={WHEEL_SPIN_CUTOFF_STEP_MS}
+            value={wheelSpinCutoffMs}
+            trackLabel="cut off"
+            ariaLabel="How slow a free scroll may get, in milliseconds between rows, before it stops."
+            defaultValue={DEFAULT_WHEEL_SPIN_CUTOFF_MS}
+            onCommit={(value) => setWheelSpinCutoffMs(
+              clamp(value, WHEEL_SPIN_CUTOFF_MIN_MS, WHEEL_SPIN_CUTOFF_MAX_MS),
+            )}
+          />
         </div>
       </AccordionSection>
 
@@ -3008,7 +3081,7 @@ export function SidebarOptionsPanel({
       <AccordionSection
         className="sidebar-options-section-notes"
         ariaLabel="Notes and Import"
-        heading="Data Synchronization"
+        heading="Data"
       >
 <div className="options-loadout-grid" role="group" aria-label="Note sync and import actions">
           <button

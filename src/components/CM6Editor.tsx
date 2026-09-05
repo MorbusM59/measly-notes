@@ -10,6 +10,17 @@ import { readSelectionRect, type SelectionRect } from '../editor/CaretRect';
 import { readSelectionLineRects } from '../editor/SelectionRects';
 import { createWheelNotchState, stepWheelNotch } from '../editor/wheelNotch';
 import {
+  cancelWheelSpin,
+  createWheelSpinState,
+  getWheelSpinCutoffMs,
+  getWheelSpinDampenDivisor,
+  getWheelSpinEffectiveThresholdMs,
+  nextWheelSpinDelayMs,
+  registerWheelSpinNudge,
+  takeWheelSpinNudge,
+  type WheelSpinDirection,
+} from '../editor/wheelSpin';
+import {
   buildReleaseRampDownPlanFromCurrentParams,
   CONTINUOUS_SCROLL_APEX_SPEED_MULTIPLIER,
   resolveApexSpeedPxPerSecFromCurrentParams,
@@ -2421,6 +2432,11 @@ export function CM6Editor({
     // default. See editor/wheelNotch.ts for the every-other-notch bug that
     // assumption caused.
     const wheelNotchState = createWheelNotchState();
+    // Spin-to-keep-scrolling (editor/wheelSpin.ts). Per mount, like the notch
+    // state: two split-view sections are two independent scrollers, and a
+    // spin in one has nothing to say about the other.
+    const wheelSpinState = createWheelSpinState();
+    let wheelSpinTimeoutId: number | null = null;
     const pageKeysHeld = new Set<string>();
     let pageContinuousDirection: -1 | 0 | 1 = 0;
     let pageContinuousRafId: number | null = null;
@@ -4005,12 +4021,117 @@ export function CM6Editor({
       }
     };
 
+    /**
+     * Scroll by whole rows, the one write both a real notch and a simulated
+     * one go through. Returns false when the position did not actually move,
+     * which is how a coast learns it has reached the end of the document --
+     * the alternative is a timer that keeps firing into a wall.
+     */
+    const scrollRows = (rows: number, traceLabel: string): boolean => {
+      const lineHeightPxNow = lineHeightPxRef.current;
+      const scroller = view.scrollDOM;
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const target = Math.max(0, Math.min(maxScrollTop, scroller.scrollTop + rows * lineHeightPxNow));
+      const written = Math.round(target / lineHeightPxNow) * lineHeightPxNow;
+      const beforeTop = scroller.scrollTop;
+
+      if (!wheelTraceOn()) {
+        scroller.scrollTop = written;
+        return scroller.scrollTop !== beforeTop;
+      }
+
+      const beforeLine = topVisibleLine();
+      const beforeHeight = scroller.scrollHeight;
+      scroller.scrollTop = written;
+      const afterTop = scroller.scrollTop;
+      const afterLine = topVisibleLine();
+      appendWheelTrace(
+        `${traceLabel} rows=${rows} lh=${lineHeightPxNow}` +
+        ` notch=${wheelNotchState.notchPx} pending=${wheelNotchState.pendingPx.toFixed(2)}` +
+        ` top ${beforeTop.toFixed(2)}->${afterTop.toFixed(2)}` +
+        ` (want ${written.toFixed(2)}) line ${beforeLine}->${afterLine}`,
+      );
+      // One frame later: whatever CM6's height-map compensation or the
+      // browser's scroll anchoring did to the position we just wrote. This
+      // is the half the scroll number alone cannot show. Logged as its own
+      // line rather than folded into the one above, so the immediate write
+      // is still on record if the frame never arrives.
+      requestAnimationFrame(() => {
+        appendWheelTrace(
+          `  settled top=${scroller.scrollTop.toFixed(2)} line=${topVisibleLine()}` +
+          ` scrollHeight ${beforeHeight}->${scroller.scrollHeight}`,
+        );
+      });
+      return afterTop !== beforeTop;
+    };
+
+    /**
+     * The user's `b`, read live so a slider drag takes effect without a
+     * remount -- and resolved, so the slider's off position arrives here as
+     * the 0 this handler already knows how to bypass on.
+     */
+    const wheelSpinThresholdMs = () => getWheelSpinEffectiveThresholdMs();
+
+    const stopWheelSpin = (reason: string) => {
+      const hadTimeout = wheelSpinTimeoutId !== null;
+      if (wheelSpinTimeoutId !== null) {
+        window.clearTimeout(wheelSpinTimeoutId);
+        wheelSpinTimeoutId = null;
+      }
+      // Note the `||`: by the time a user nudge gets here the state machine
+      // has already cleared its own coast, so keying the log off `coast`
+      // alone silently swallowed the one line anybody would look for. An
+      // armed timeout is the other proof a coast was running.
+      if ((wheelSpinState.coast || hadTimeout) && wheelTraceOn()) appendWheelTrace(`  coast ENDED (${reason})`);
+      cancelWheelSpin(wheelSpinState);
+    };
+
+    /**
+     * Arm the next simulated nudge, or end the coast if there is no next one.
+     *
+     * A chain of timeouts rather than one interval, because the interval is
+     * a different number every time -- that is the whole of the dampening.
+     */
+    const scheduleWheelSpinNudge = () => {
+      if (wheelSpinTimeoutId !== null) {
+        window.clearTimeout(wheelSpinTimeoutId);
+        wheelSpinTimeoutId = null;
+      }
+      const delayMs = nextWheelSpinDelayMs(
+        wheelSpinState,
+        getWheelSpinDampenDivisor(),
+        getWheelSpinCutoffMs(),
+      );
+      if (delayMs === null) {
+        stopWheelSpin('damped out');
+        return;
+      }
+      wheelSpinTimeoutId = window.setTimeout(() => {
+        wheelSpinTimeoutId = null;
+        // The threshold going non-positive mid-coast means spin detection
+        // is off; honour it on the spot rather than at the next spin.
+        if (wheelSpinThresholdMs() <= 0 || isEditScrollInteractionBlocked()) {
+          stopWheelSpin('bypassed');
+          return;
+        }
+        const nudge = takeWheelSpinNudge(wheelSpinState);
+        if (!nudge) return;
+        const moved = scrollRows(nudge.direction * nudge.rows, 'coast');
+        if (!moved) {
+          stopWheelSpin('document end');
+          return;
+        }
+        scheduleWheelSpinNudge();
+      }, delayMs);
+    };
+
     // Cage-quantized wheel scroll -- ported verbatim from
-    // CagedScrollPlugin.tsx's own handleWheel.
+    // CagedScrollPlugin.tsx's own handleWheel, plus the spin coast above.
     const handleWheel = (event: WheelEvent) => {
       const tracing = wheelTraceOn();
       if (isEditScrollInteractionBlocked()) {
         if (tracing) appendWheelTrace(`wheel dy=${event.deltaY} mode=${event.deltaMode} DECLINED blocked`);
+        stopWheelSpin('scroll blocked');
         event.preventDefault();
         return;
       }
@@ -4040,42 +4161,50 @@ export function CM6Editor({
 
       if (units === 0) return;
 
-      const lineHeightPxNow = lineHeightPxRef.current;
-      const scroller = view.scrollDOM;
-      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      const target = Math.max(0, Math.min(maxScrollTop, scroller.scrollTop + units * lineHeightPxNow));
-      const written = Math.round(target / lineHeightPxNow) * lineHeightPxNow;
-
-      if (!tracing) {
-        scroller.scrollTop = written;
+      if (wheelSpinThresholdMs() <= 0) {
+        // The off position the slider offers at its left end, resolved to
+        // 0: the machinery is not consulted, not started, and costs this
+        // handler one comparison.
+        // Labelled distinctly: "is the spin system even switched on here"
+        // is the first question any report about it raises, and the trace
+        // should answer it without anyone having to reason about the code.
+        scrollRows(units, `wheel[spin off] dy=${event.deltaY} mode=${event.deltaMode}`);
         return;
       }
 
-      const beforeTop = scroller.scrollTop;
-      const beforeLine = topVisibleLine();
-      const beforeHeight = scroller.scrollHeight;
-      scroller.scrollTop = written;
-      const afterTop = scroller.scrollTop;
-      const afterLine = topVisibleLine();
-      const prefix =
-        `wheel dy=${event.deltaY} mode=${event.deltaMode} units=${units} lh=${lineHeightPxNow}` +
-        ` notch=${wheelNotchState.notchPx} pending=${wheelNotchState.pendingPx.toFixed(2)}` +
-        ` top ${beforeTop.toFixed(2)}->${afterTop.toFixed(2)}` +
-        ` (want ${written.toFixed(2)}) line ${beforeLine}->${afterLine}`;
-      appendWheelTrace(prefix);
-      // One frame later: whatever CM6's height-map compensation or the
-      // browser's scroll anchoring did to the position we just wrote. This
-      // is the half the scroll number alone cannot show. Logged as its own
-      // line rather than folded into the one above, so the immediate write
-      // is still on record if the frame never arrives.
-      requestAnimationFrame(() => {
-        appendWheelTrace(
-          `  settled top=${scroller.scrollTop.toFixed(2)} line=${topVisibleLine()}` +
-          ` scrollHeight ${beforeHeight}->${scroller.scrollHeight}`,
-        );
+      const direction: WheelSpinDirection = units > 0 ? 1 : -1;
+      const action = registerWheelSpinNudge(wheelSpinState, {
+        nowMs: performance.now(),
+        direction,
+        rows: Math.abs(units),
+        thresholdMs: wheelSpinThresholdMs(),
       });
+
+      if (action.kind === 'ignore') {
+        // The tail of the user's own spin, arriving while the coast runs.
+        if (tracing) appendWheelTrace(`wheel dy=${event.deltaY} SWALLOWED spin-tail`);
+        return;
+      }
+      if (action.kind === 'stop') {
+        stopWheelSpin('user nudge');
+        return;
+      }
+
+      scrollRows(
+        direction * action.rows,
+        `wheel[b=${wheelSpinThresholdMs()} c=${getWheelSpinDampenDivisor()}${action.startsCoast ? ' SPIN' : ''}]` +
+        ` dy=${event.deltaY} mode=${event.deltaMode}`,
+      );
+      if (action.startsCoast) scheduleWheelSpinNudge();
     };
     view.scrollDOM.addEventListener('wheel', handleWheel, { passive: false });
+
+    // Anything else that scrolls, or that means the reader is now doing
+    // something other than reading, ends a coast. A page that keeps moving
+    // under a keystroke or a drag is not a feature.
+    const cancelWheelSpinOnOtherInput = () => stopWheelSpin('other input');
+    view.scrollDOM.addEventListener('mousedown', cancelWheelSpinOnOtherInput, { capture: true });
+    view.scrollDOM.addEventListener('keydown', cancelWheelSpinOnOtherInput, { capture: true });
 
     // PageUp/PageDown release-ramp: keyup on the scroller (not a keymap
     // entry -- CM6's keymap system only sees keydown) starts the
@@ -4469,6 +4598,9 @@ export function CM6Editor({
       detachScrollBridge?.();
       view.scrollDOM.removeEventListener('scroll', handleScroll);
       view.scrollDOM.removeEventListener('wheel', handleWheel);
+      view.scrollDOM.removeEventListener('mousedown', cancelWheelSpinOnOtherInput, { capture: true });
+      view.scrollDOM.removeEventListener('keydown', cancelWheelSpinOnOtherInput, { capture: true });
+      stopWheelSpin('unmount');
       window.removeEventListener('keydown', handlePageKeyDownAnywhere);
       window.removeEventListener('keyup', handlePageKeyUp);
       document.removeEventListener('pointerdown', handlePointerDown, true);
