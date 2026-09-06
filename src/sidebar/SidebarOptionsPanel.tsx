@@ -181,6 +181,17 @@ import {
   WHEEL_SPIN_THRESHOLD_OFF,
   WHEEL_SPIN_THRESHOLD_STEP_MS,
 } from '../editor/wheelSpin'
+import {
+  DEFAULT_WHEEL_STEP_LINES,
+  DEFAULT_WHEEL_STEP_ROWS,
+  formatWheelStepLines,
+  WHEEL_STEP_LINES_MAX,
+  WHEEL_STEP_LINES_MIN,
+  WHEEL_STEP_LINES_STEP,
+  WHEEL_STEP_ROWS_MAX,
+  WHEEL_STEP_ROWS_MIN,
+  WHEEL_STEP_ROWS_STEP,
+} from '../editor/wheelStep'
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -635,6 +646,10 @@ export interface SidebarOptionsPanelProps {
   setWheelSpinDampenDivisor: (value: number) => void
   wheelSpinCutoffMs: number
   setWheelSpinCutoffMs: (value: number) => void
+  wheelStepRows: number
+  setWheelStepRows: (value: number) => void
+  wheelStepLines: number
+  setWheelStepLines: (value: number) => void
   caretFrameDurationMs: number
   setCaretFrameDurationMs: (value: number) => void
   caretEffectStrengthPercent: number
@@ -909,6 +924,10 @@ export function SidebarOptionsPanel({
   setWheelSpinDampenDivisor,
   wheelSpinCutoffMs,
   setWheelSpinCutoffMs,
+  wheelStepRows,
+  setWheelStepRows,
+  wheelStepLines,
+  setWheelStepLines,
   caretFrameDurationMs,
   setCaretFrameDurationMs,
   caretEffectStrengthPercent,
@@ -2920,7 +2939,7 @@ export function SidebarOptionsPanel({
       </AccordionSection>
 
       <AccordionSection
-        className="sidebar-options-section-scrolling"
+        className="sidebar-options-section-animations"
         ariaLabel="Animations"
         heading="Animations"
       >
@@ -2972,6 +2991,23 @@ export function SidebarOptionsPanel({
             defaultValue={DEFAULT_RENDER_SCROLL_MAX_SPEED_PX_PER_SEC}
             onCommit={(value) => setRenderScrollMaxSpeedPxPerSec(clamp(value, 1000, 100000))}
           />
+        </div>
+      </AccordionSection>
+
+      {/* Scrolling is its own section because it answers a different
+          question from Animations. Those four sliders shape a journey the
+          APP decides to make -- a search jump, a page key, a chapter change.
+          These describe what the reader's own hand does to the page: what a
+          notch is worth, and whether a spin may outlive the hand that made
+          it. They were one section while there were only three of them, and
+          the split is what stops the reader hunting for a wheel setting
+          among curve parameters. */}
+      <AccordionSection
+        className="sidebar-options-section-scrolling"
+        ariaLabel="Scrolling"
+        heading="Scrolling"
+      >
+<div className="utility-setting-slider-stack" aria-label="Wheel scrolling settings">
           {/* Spin-to-keep-scrolling: `auto scroll` sets what counts as a
               spin, `dampen` what happens after one, so they read in that
               order. */}
@@ -3016,6 +3052,40 @@ export function SidebarOptionsPanel({
             defaultValue={DEFAULT_WHEEL_SPIN_CUTOFF_MS}
             onCommit={(value) => setWheelSpinCutoffMs(
               clamp(value, WHEEL_SPIN_CUTOFF_MIN_MS, WHEEL_SPIN_CUTOFF_MAX_MS),
+            )}
+          />
+          {/* What one notch is worth, per pane. Two controls rather than one
+              because the panes count in different units and always have: the
+              edit view lands on row boundaries, so its step can only be a
+              whole number of rows, while the render view has no grid to land
+              on and can take a fraction of a line. A single shared number
+              would have to be one or the other, and would be lying to one of
+              the panes. */}
+          <CompactScrollbarSlider
+            id="wheel-step-rows"
+            min={WHEEL_STEP_ROWS_MIN}
+            max={WHEEL_STEP_ROWS_MAX}
+            step={WHEEL_STEP_ROWS_STEP}
+            value={wheelStepRows}
+            trackLabel="edit step"
+            ariaLabel="How many rows one notch of the wheel scrolls in edit mode."
+            defaultValue={DEFAULT_WHEEL_STEP_ROWS}
+            onCommit={(value) => setWheelStepRows(
+              clamp(Math.round(value), WHEEL_STEP_ROWS_MIN, WHEEL_STEP_ROWS_MAX),
+            )}
+          />
+          <CompactScrollbarSlider
+            id="wheel-step-lines"
+            min={WHEEL_STEP_LINES_MIN}
+            max={WHEEL_STEP_LINES_MAX}
+            step={WHEEL_STEP_LINES_STEP}
+            value={wheelStepLines}
+            trackLabel="view step"
+            formatValue={formatWheelStepLines}
+            ariaLabel="How many lines of text one notch of the wheel scrolls in render view."
+            defaultValue={DEFAULT_WHEEL_STEP_LINES}
+            onCommit={(value) => setWheelStepLines(
+              clamp(value, WHEEL_STEP_LINES_MIN, WHEEL_STEP_LINES_MAX),
             )}
           />
         </div>

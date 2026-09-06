@@ -54,7 +54,7 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.menu?.isDoubleSizeMode).toBe(false)
   })
 
-  it('persists the wheel-spin sliders, including the 0 that means "off"', async () => {
+  it('persists the wheel-spin and wheel-step sliders, including the 0 that means "off"', async () => {
     // sanitizeMenu is an allowlist, and a numeric field it never learned
     // about is dropped silently -- so a slider can be wired perfectly on the
     // renderer side and still come back at its default on every restart.
@@ -72,6 +72,8 @@ describe('StateService app-state field round-trip', () => {
         wheelSpinThresholdMs: 0,
         wheelSpinDampenDivisor: 0,
         wheelSpinCutoffMs: 350,
+        wheelStepRows: 4,
+        wheelStepLines: 2.7,
       },
     })
 
@@ -80,6 +82,11 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.menu?.wheelSpinThresholdMs).toBe(0)
     expect(loaded.menu?.wheelSpinDampenDivisor).toBe(0)
     expect(loaded.menu?.wheelSpinCutoffMs).toBe(350)
+    // The two step sliders travel the same allowlist, and the render view's
+    // is fractional -- a sanitizer that rounded or truncated would look
+    // correct on the edit view's and quietly move the other one.
+    expect(loaded.menu?.wheelStepRows).toBe(4)
+    expect(loaded.menu?.wheelStepLines).toBe(2.7)
   })
 
   it('flushAppStateOnClose (the before-quit safety net) also preserves isDoubleSizeMode', async () => {

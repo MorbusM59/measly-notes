@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  advanceWheelSpinGlide,
-  createWheelSpinGlide,
-  resolveWheelSpinNudgePixels,
-  WHEEL_SPIN_NUDGE_MIN_PX,
-} from './wheelSpinGlide'
-import { WHEEL_NOTCH_MIN_PX } from './wheelNotch'
+import { advanceWheelSpinGlide, createWheelSpinGlide } from './wheelSpinGlide'
 
 /** A segment source that hands out a fixed list, then ends the coast. */
 function segmentsOf(durations: number[]): { next: () => number | null; calls: () => number } {
@@ -85,29 +79,3 @@ describe('wheelSpinGlide', () => {
   })
 })
 
-describe('resolveWheelSpinNudgePixels', () => {
-  const base = { deltaMode: 0, units: 1, notchPx: 100, lineHeightPx: 24, pageHeightPx: 700 }
-
-  it('takes the event\'s own delta, not the learned notch size', () => {
-    // The case this exists for: a 120px device whose accumulator still reads
-    // 100. Continuing at 100 would visibly slow down at the handoff.
-    expect(resolveWheelSpinNudgePixels({ ...base, deltaY: 120 })).toBe(120)
-  })
-
-  it('is 0 until the accumulator says a nudge has been made', () => {
-    expect(resolveWheelSpinNudgePixels({ ...base, deltaY: 6, units: 0 })).toBe(0)
-  })
-
-  it('falls back to the learned notch for a nudge assembled from sub-notch events', () => {
-    expect(resolveWheelSpinNudgePixels({ ...base, deltaY: 8, units: 1 })).toBe(100)
-  })
-
-  it('reads line and page mode in their own units', () => {
-    expect(resolveWheelSpinNudgePixels({ ...base, deltaY: -3, deltaMode: 1 })).toBe(72)
-    expect(resolveWheelSpinNudgePixels({ ...base, deltaY: 1, deltaMode: 2 })).toBe(700)
-  })
-
-  it('agrees with the notch module about what a notch minimally is', () => {
-    expect(WHEEL_SPIN_NUDGE_MIN_PX).toBe(WHEEL_NOTCH_MIN_PX)
-  })
-})

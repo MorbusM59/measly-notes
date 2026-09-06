@@ -8,7 +8,8 @@ import { createCommittedThumbHeight } from '../editor/scrollThumbMetrics'
 import { sampleCurveRampProgress } from '../editor/ScrollCurvePlan'
 import type { ScrollJourneyTiming } from '../editor/scrollJourney'
 import { measureAverageCharWidthPx } from '../editor/scrollBridgeTexture'
-import { createWheelNotchState, stepWheelNotch } from '../editor/wheelNotch'
+import { createWheelNotchState, resolveWheelEventUnits } from '../editor/wheelNotch'
+import { getWheelStepLines } from '../editor/wheelStep'
 import { appendWheelTrace, isWheelTraceOn } from '../editor/wheelTrace'
 import {
   cancelWheelSpin,
@@ -24,7 +25,6 @@ import {
 import {
   advanceWheelSpinGlide,
   createWheelSpinGlide,
-  resolveWheelSpinNudgePixels,
   type WheelSpinGlide,
 } from '../editor/wheelSpinGlide'
 import {
@@ -159,18 +159,15 @@ export function usePreviewScrollbar({
   const previewWheelSpinGlideRef = useRef<WheelSpinGlide | null>(null)
   const previewWheelSpinRafRef = useRef<number | null>(null)
   const previewWheelSpinLastFrameMsRef = useRef<number | null>(null)
-  /** Sub-pixel remainder, so a slow coast is not rounded to a standstill. */
+  /**
+   * Sub-pixel remainder owed to the reader, across every wheel write.
+   *
+   * Without it a slow coast rounds to a standstill and a fractional step
+   * quietly under-delivers on every notch. Shared by both, because both are
+   * the same debt.
+   */
   const previewWheelSpinCarryPxRef = useRef(0)
   const previewWheelSpinScrollBehaviorRef = useRef<string | null>(null)
-  /**
-   * Switches this pane's wheel listener between passive and interceptive.
-   *
-   * Installed by the effect that owns the listener; held in a ref because
-   * ending a coast is something the scrollbar's handlers and the unmount
-   * path do too, and all of them have to be able to hand the wheel back.
-   * See that effect for why the distinction is worth this much machinery.
-   */
-  const previewWheelInterceptRef = useRef<((intercept: boolean) => void) | null>(null)
   const [isPreviewScrollThumbActive, setIsPreviewScrollThumbActive] = useState(false)
   const [isDraggingPreviewScrollThumb, setIsDraggingPreviewScrollThumb] = useState(false)
 
@@ -197,9 +194,11 @@ export function usePreviewScrollbar({
     }
     previewWheelSpinGlideRef.current = null
     previewWheelSpinLastFrameMsRef.current = null
-    previewWheelSpinCarryPxRef.current = 0
+    // The sub-pixel carry deliberately survives: it is under one pixel by
+    // construction, it belongs to the reader rather than to any one gesture,
+    // and discarding it here would reintroduce exactly the drip of lost
+    // fractions it exists to stop.
     cancelWheelSpin(previewWheelSpinStateRef.current)
-    previewWheelInterceptRef.current?.(false)
 
     // `.markdown-preview` carries `scroll-behavior: smooth`, so the coast
     // borrows `auto` for its own writes and must hand back whatever was
@@ -1244,31 +1243,29 @@ export function usePreviewScrollbar({
   /**
    * Spin-to-keep-scrolling in the render view.
    *
-   * The gesture, its three sliders and its rules are the edit view's, whole
-   * and unchanged: `editor/wheelSpin.ts` decides what a spin is, how long
-   * the tail of one is ignored, when the next notch takes control back, and
-   * when the coast has damped out. Two things are different here, and both
-   * follow from this pane having no row grid:
+   * The gesture, its sliders and its rules are the edit view's, whole and
+   * unchanged: `editor/wheelSpin.ts` decides what a spin is, how long the
+   * tail of one is ignored, when the next notch takes control back, and when
+   * the coast has damped out. `editor/wheelNotch.ts` decides what counts as
+   * a notch, so the same wheel on the same desk makes a nudge in both panes
+   * at the same moment and a trackpad's sub-notch stream makes one in
+   * neither. `editor/wheelStep.ts` says what a notch is worth.
    *
-   *  1. **Real notches are still scrolled by the browser.** The edit view
-   *     has to intercept them, because it must land on a row boundary. Here
-   *     there is nothing to land on, so intercepting could only take away
-   *     the browser's own smoothing and give nothing back. The wheel
-   *     handler therefore reads the gesture and lets it through -- it only
-   *     ever calls `preventDefault` on the notches the SPIN owns: the tail
-   *     of the user's own gesture, and the notch that takes control back.
-   *  2. **The coast is continuous, not stepped.** Same schedule, paid out
-   *     as speed -- see `editor/wheelSpinGlide.ts` for why a hundred-pixel
-   *     step is a nudge rather than a coast once the dampening stretches
-   *     the interval.
+   * This pane owns every notch, exactly as the edit view does. It has to:
+   * the reader's `step` is a number of line heights, and a notch cannot be
+   * worth what they asked for while the browser is still scrolling it by
+   * whatever pixel delta the device happened to send. That has a real cost
+   * -- a non-passive wheel listener takes the pane's scrolling off the
+   * compositor, measured at 4ms to first movement when passive against 33ms
+   * when not, on a 1200-section note -- and it buys the thing the setting is
+   * for: the same gesture moves the same amount of READING at any text size,
+   * in both panes, on any machine.
    *
-   * Detection, though, is shared exactly: the same `wheelNotch` accumulator
-   * the edit view uses decides what counts as one nudge, so the same wheel
-   * on the same desk starts a spin in both panes at the same moment. It is
-   * used here purely as a detector; the pixels it reports are what the
-   * browser has just scrolled, which is what the coast then continues at.
-   * That is also what keeps a trackpad from reading as a permanent spin:
-   * its sub-notch deltas never become nudges, exactly as in the edit view.
+   * One thing is different from the edit view, and it follows from this pane
+   * having no row grid: **the coast is continuous, not stepped**. Same
+   * schedule, paid out as speed -- see `editor/wheelSpinGlide.ts` for why a
+   * step several lines tall is a nudge rather than a coast once the
+   * dampening has stretched the interval.
    */
   useEffect(() => {
     if (!isPreviewMode) return
@@ -1279,34 +1276,88 @@ export function usePreviewScrollbar({
     const spinState = previewWheelSpinStateRef.current
     const notchState = previewWheelNotchStateRef.current
 
-    /** The line height this pane actually renders at, for line-mode wheels. */
+    /**
+     * The line height this pane actually renders at.
+     *
+     * Measured once per effect run rather than per wheel event: a
+     * getComputedStyle inside a wheel handler is a forced style pass on
+     * every notch, and the answer only changes when the view style, text
+     * size or line spacing does -- all of which are in this effect's
+     * dependencies, so the measurement is retaken exactly when it can have
+     * moved.
+     */
+    let lineHeightPxCache: number | null = null
     const previewLineHeightPx = (): number => {
+      if (lineHeightPxCache !== null) return lineHeightPxCache
       const style = window.getComputedStyle(scroller)
       const parsed = Number.parseFloat(style.lineHeight)
-      if (Number.isFinite(parsed) && parsed > 0) return parsed
+      if (Number.isFinite(parsed) && parsed > 0) {
+        lineHeightPxCache = parsed
+        return parsed
+      }
+      // `line-height: normal` reports as the keyword, not a length. The
+      // 1.5 is this pane's own CSS default, not a guess at the browser's.
       const fontPx = Number.parseFloat(style.fontSize)
-      return Number.isFinite(fontPx) && fontPx > 0 ? fontPx * 1.5 : 24
+      lineHeightPxCache = Number.isFinite(fontPx) && fontPx > 0 ? fontPx * 1.5 : 24
+      return lineHeightPxCache
     }
 
-    /** What this event is worth in pixels, or 0 when it is not a nudge yet. */
+    /**
+     * What one wheel event is worth here, in pixels, or 0 when the device
+     * has not turned far enough to make a notch yet.
+     *
+     * Notches are counted by the shared accumulator (editor/wheelNotch.ts),
+     * so the same wheel on the same desk makes a nudge in this pane and the
+     * edit view at the same moment -- and a trackpad's sub-notch stream
+     * makes one in neither. What a notch is WORTH is the reader's `step`,
+     * measured in line heights (editor/wheelStep.ts): the same setting at
+     * any text size moves the same amount of reading, which a pixel figure
+     * cannot promise.
+     */
     const resolveNudgePixels = (event: WheelEvent): number => {
-      const isPixelMode = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
-      return resolveWheelSpinNudgePixels({
-        deltaY: event.deltaY,
-        deltaMode: event.deltaMode,
-        // The edit view's own gate, from the shared accumulator: a device
-        // that sends 50 per notch and one that sends 120 both make one nudge
-        // per click, and a trackpad's pixel stream makes none until it adds
-        // up.
-        units: isPixelMode ? stepWheelNotch(notchState, event.deltaY, performance.now()) : 0,
-        notchPx: notchState.notchPx,
-        // Only measured for the modes that need it. Every mouse wheel in
-        // this app reports pixels, and a getComputedStyle plus a clientHeight
-        // read on every wheel event is a forced style and layout pass for an
-        // answer that would go unused.
-        lineHeightPx: isPixelMode ? 0 : previewLineHeightPx(),
-        pageHeightPx: isPixelMode ? 0 : Math.max(1, scroller.clientHeight * 0.9),
-      })
+      const notches = resolveWheelEventUnits(event, notchState, performance.now())
+      if (notches === 0) return 0
+      return Math.abs(notches) * getWheelStepLines() * previewLineHeightPx()
+    }
+
+    /**
+     * The one write both a real notch and the coast's own motion go through.
+     *
+     * `.markdown-preview` carries `scroll-behavior: smooth` in CSS, which
+     * applies to programmatic writes and would turn every notch into an
+     * animation chasing the last one. The coast borrows `auto` for its whole
+     * run; a lone notch borrows and returns it here, because the property is
+     * only consulted at the moment of the write.
+     */
+    const scrollPreviewByPx = (deltaPx: number, traceLabel: string | null): boolean => {
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      const beforeTop = scroller.scrollTop
+      // Sub-pixel remainders are carried, not dropped. A step of 3.0 lines at
+      // 25.6px is 76.8px, and a scroller that reports whole pixels would eat
+      // the .8 on every notch -- a percent of the reader's setting, in the
+      // direction of "the slider does not quite do what it says". The same
+      // carry serves the coast, whose per-frame slice is a fraction of a
+      // pixel far more often than a notch is.
+      const owedPx = previewWheelSpinCarryPxRef.current + deltaPx
+      const wholePx = Math.trunc(owedPx)
+      previewWheelSpinCarryPxRef.current = owedPx - wholePx
+      const nextScrollTop = clamp(beforeTop + wholePx, 0, maxScrollTop)
+      const borrowed = previewWheelSpinScrollBehaviorRef.current === null
+      const previousBehavior = borrowed ? scroller.style.scrollBehavior : null
+      if (borrowed) scroller.style.scrollBehavior = 'auto'
+      if (Math.abs(nextScrollTop - beforeTop) > 0.01) {
+        scroller.scrollTop = nextScrollTop
+        syncPreviewCustomScrollbar()
+      }
+      if (borrowed && previousBehavior !== null) scroller.style.scrollBehavior = previousBehavior
+      if (traceLabel !== null && isWheelTraceOn()) {
+        appendWheelTrace(
+          `${traceLabel} px=${deltaPx.toFixed(2)} lh=${previewLineHeightPx().toFixed(2)}` +
+          ` step=${getWheelStepLines().toFixed(1)}` +
+          ` top ${beforeTop.toFixed(2)}->${scroller.scrollTop.toFixed(2)}`,
+        )
+      }
+      return scroller.scrollTop !== beforeTop
     }
 
     /**
@@ -1366,17 +1417,10 @@ export function usePreviewScrollbar({
       const elapsedMs = lastFrameMs === null ? 0 : clamp(nowMs - lastFrameMs, 0, 100)
       const step = advanceWheelSpinGlide(glide, elapsedMs, nextSegmentDurationMs)
 
-      const totalPx = previewWheelSpinCarryPxRef.current + step.pixels
-      const wholePx = Math.trunc(totalPx)
-      previewWheelSpinCarryPxRef.current = totalPx - wholePx
-
-      if (wholePx !== 0) {
+      if (step.pixels !== 0) {
+        scrollPreviewByPx(step.pixels, null)
         const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-        const nextScrollTop = clamp(scroller.scrollTop + wholePx, 0, maxScrollTop)
-        if (Math.abs(nextScrollTop - scroller.scrollTop) > 0.01) {
-          scroller.scrollTop = nextScrollTop
-          syncPreviewCustomScrollbar()
-        }
+        const nextScrollTop = scroller.scrollTop
 
         // Running out of scroller is not running out of document: a windowed
         // preview (editorSection/previewWindow.ts) reaches the end of its
@@ -1413,62 +1457,32 @@ export function usePreviewScrollbar({
       }
       scroller.style.scrollBehavior = 'auto'
       previewWheelSpinGlideRef.current = createWheelSpinGlide(direction, pixelsPerNudge)
-      previewWheelSpinCarryPxRef.current = 0
       // Null, not `nowMs`: the first frame pays out nothing and only
-      // establishes the clock, so the coast starts exactly one frame's worth
-      // of distance behind the hand rather than one frame's worth ahead of
-      // wherever the browser had got to.
+      // establishes the clock, so the coast begins one frame behind the
+      // notch that started it rather than one frame ahead of it.
       previewWheelSpinLastFrameMsRef.current = null
       previewWheelSpinRafRef.current = requestAnimationFrame(coastFrame)
-      // From here until the coast ends, the wheel is this handler's to
-      // decline -- and only from here.
-      setIntercepting(true)
-    }
-
-    // Passive until a coast is actually running, and non-passive only then.
-    //
-    // This is not a micro-optimisation. A non-passive wheel listener takes
-    // the pane's scrolling off the compositor: Chromium cannot scroll until
-    // the main thread has had the event and declined to cancel it. Measured
-    // on the real app, with a 1200-section note: a notch reached the pane in
-    // 4ms with the listener passive and 33ms with it non-passive -- on every
-    // wheel event, whether or not anybody ever spins. The edit view pays
-    // that price because it genuinely intercepts every notch; this pane
-    // intercepts exactly two kinds, both of which only occur while a coast
-    // is running, so it can pay only then. The swap is a remove-and-re-add
-    // of the same function, so nothing is double-handled.
-    let intercepting = false
-    const setIntercepting = (next: boolean) => {
-      if (next === intercepting) return
-      intercepting = next
-      scroller.removeEventListener('wheel', handleWheel)
-      scroller.addEventListener('wheel', handleWheel, next ? { passive: false } : { passive: true })
     }
 
     const handleWheel = (event: WheelEvent) => {
       const tracing = isWheelTraceOn()
+      // This pane owns its notches now, so a blocked transition means the
+      // wheel does nothing at all -- the same bargain the edit view makes.
+      // A transition that blocks input and then lets a wheel scroll under it
+      // is not blocking input.
+      event.preventDefault()
       if (shouldBlockPreviewInteraction()) {
-        // Deliberately no preventDefault: what a blocked transition does to
-        // a real wheel in this pane is whatever it did before this feature
-        // existed. Only the coast is this handler's to stop.
+        if (tracing) appendWheelTrace(`preview wheel dy=${event.deltaY} DECLINED blocked`)
         stopPreviewWheelSpin('scroll blocked')
         return
       }
       if (event.deltaY === 0) return
 
-      const thresholdMs = getWheelSpinEffectiveThresholdMs()
-      if (thresholdMs <= 0) {
-        // The slider's off position. The machinery is not consulted, not
-        // started, and the wheel is the browser's again -- one comparison.
-        stopPreviewWheelSpin('bypassed')
-        return
-      }
-
       const pixels = resolveNudgePixels(event)
-      if (pixels <= 0) {
+      if (pixels === 0) {
         if (tracing) {
           appendWheelTrace(
-            `preview wheel dy=${event.deltaY} mode=${event.deltaMode} sub-notch` +
+            `preview wheel dy=${event.deltaY} mode=${event.deltaMode} DECLINED sub-notch` +
             ` notch=${notchState.notchPx} pending=${notchState.pendingPx.toFixed(2)}`,
           )
         }
@@ -1476,42 +1490,44 @@ export function usePreviewScrollbar({
       }
 
       const direction: WheelSpinDirection = event.deltaY > 0 ? 1 : -1
+      const thresholdMs = getWheelSpinEffectiveThresholdMs()
+
+      if (thresholdMs <= 0) {
+        // The auto-scroll slider's off position: the spin machinery is not
+        // consulted and not started. The step still applies -- what a notch
+        // is worth is a different setting from whether a spin may outlive
+        // the hand, and turning the second off must not silently change the
+        // first.
+        stopPreviewWheelSpin('bypassed')
+        scrollPreviewByPx(direction * pixels, `preview wheel[spin off] dy=${event.deltaY} mode=${event.deltaMode}`)
+        return
+      }
+
       const action = registerWheelSpinNudge(spinState, {
         nowMs: performance.now(),
         direction,
+        // This pane's currency: pixels, not rows.
         rows: pixels,
         thresholdMs,
       })
 
       if (action.kind === 'ignore') {
         // The tail of the user's own spin, arriving while the coast runs.
-        // This one really is swallowed -- letting it through would add the
-        // hand's remaining notches to a scroll that is already carrying them.
-        // Guarded: both of these branches are reachable only while a coast
-        // runs, which is exactly when the listener is interceptive, but a
-        // preventDefault from a passive listener is a console warning and a
-        // silent no-op, and that is not a way to find out.
-        if (intercepting) event.preventDefault()
         if (tracing) appendWheelTrace(`preview wheel dy=${event.deltaY} SWALLOWED spin-tail`)
         return
       }
       if (action.kind === 'stop') {
         // The bargain the edit view makes: the notch that stops the coast
         // scrolls nothing, so you can halt on the line you meant to.
-        if (intercepting) event.preventDefault()
         stopPreviewWheelSpin('user nudge')
         return
       }
 
-      if (tracing) {
-        appendWheelTrace(
-          `preview wheel[b=${thresholdMs} c=${getWheelSpinDampenDivisor()}` +
-          `${action.startsCoast ? ' SPIN' : ''}] dy=${event.deltaY} mode=${event.deltaMode}` +
-          ` px/nudge=${action.rows.toFixed(2)} top=${scroller.scrollTop.toFixed(2)}`,
-        )
-      }
-      // Not scrolled here: an ordinary notch is the browser's to scroll, and
-      // it already has. `action.rows` is this pane's currency -- pixels.
+      scrollPreviewByPx(
+        direction * action.rows,
+        `preview wheel[b=${thresholdMs} c=${getWheelSpinDampenDivisor()}` +
+        `${action.startsCoast ? ' SPIN' : ''}] dy=${event.deltaY} mode=${event.deltaMode}`,
+      )
       if (action.startsCoast) startPreviewWheelSpin(direction, action.rows)
     }
 
@@ -1540,13 +1556,11 @@ export function usePreviewScrollbar({
       stopPreviewWheelSpin('keystroke')
     }
 
-    scroller.addEventListener('wheel', handleWheel, { passive: true })
-    previewWheelInterceptRef.current = setIntercepting
+    scroller.addEventListener('wheel', handleWheel, { passive: false })
     scroller.addEventListener('mousedown', cancelOnOtherInput, { capture: true })
     window.addEventListener('keydown', cancelOnWindowKeyDown, { capture: true })
 
     return () => {
-      previewWheelInterceptRef.current = null
       scroller.removeEventListener('wheel', handleWheel)
       scroller.removeEventListener('mousedown', cancelOnOtherInput, { capture: true })
       window.removeEventListener('keydown', cancelOnWindowKeyDown, { capture: true })
@@ -1561,6 +1575,12 @@ export function usePreviewScrollbar({
     stopPreviewWheelSpin,
     syncPreviewCustomScrollbar,
     activeNoteId,
+    // Not incidental: these are what the pane's line height is made of, and
+    // the step is measured in line heights. Re-running the effect is how the
+    // measurement is retaken.
+    viewStyle,
+    viewFontSize,
+    viewSpacing,
   ])
 
   // Native scroll (covers mouse wheel, trackpad, keyboard when not intercepted)

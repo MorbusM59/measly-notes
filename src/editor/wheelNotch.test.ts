@@ -4,6 +4,7 @@ import {
   stepWheelNotch,
   WHEEL_GESTURE_IDLE_MS,
   WHEEL_NOTCH_DEFAULT_PX,
+  resolveWheelEventUnits,
 } from './wheelNotch'
 
 /** A gesture: evenly spaced events, well inside the idle window. */
@@ -66,5 +67,30 @@ describe('stepWheelNotch', () => {
 
   it('turns a fast multi-notch event into that many rows', () => {
     expect(gesture([50, 150]).units).toEqual([1, 3])
+  })
+})
+
+describe('resolveWheelEventUnits', () => {
+  it('takes line and page mode at their word', () => {
+    const state = createWheelNotchState()
+    expect(resolveWheelEventUnits({ deltaY: 3, deltaMode: 1 }, state, 0)).toBe(3)
+    expect(resolveWheelEventUnits({ deltaY: -1, deltaMode: 2 }, state, 0)).toBe(-1)
+    // A fractional line delta is still at least one notch: a device that
+    // reports 0.4 lines has still been turned.
+    expect(resolveWheelEventUnits({ deltaY: -0.4, deltaMode: 1 }, state, 0)).toBe(-1)
+    // ...and it teaches the pixel-mode accumulator nothing.
+    expect(state.notchPx).toBe(WHEEL_NOTCH_DEFAULT_PX)
+  })
+
+  it('sends pixel mode through the accumulator, sub-notch deltas included', () => {
+    const state = createWheelNotchState()
+    expect(resolveWheelEventUnits({ deltaY: 4, deltaMode: 0 }, state, 0)).toBe(0)
+    expect(resolveWheelEventUnits({ deltaY: 120, deltaMode: 0 }, state, 10)).toBe(1)
+  })
+
+  it('declines an event that carries no movement at all', () => {
+    const state = createWheelNotchState()
+    expect(resolveWheelEventUnits({ deltaY: 0, deltaMode: 0 }, state, 0)).toBe(0)
+    expect(resolveWheelEventUnits({ deltaY: Number.NaN, deltaMode: 1 }, state, 0)).toBe(0)
   })
 })

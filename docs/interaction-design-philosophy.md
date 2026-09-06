@@ -142,6 +142,11 @@ The goal is deterministic behavior with one source of truth per interaction phas
   themselves differ -- see 3h.
 - In the edit view, every simulated nudge is an ordinary whole-row scroll, so
   3d holds through a coast exactly as it does under the hand.
+- A coast travels at the rate the hand set, which is now a rate the reader
+  set: one `step` (3h) per simulated nudge, in whichever unit the pane
+  counts in. Nothing in the spin model knows about either -- it carries
+  whatever the real nudge was worth -- which is why one number governs the
+  wheel and the coast together and they cannot drift apart.
 - **The tail of the gesture is not input.** A spin does not end on the notch
   that starts the coast; the remaining notches arrive while it runs, and
   acting on them doubles the speed while treating them as an interruption
@@ -169,37 +174,39 @@ The goal is deterministic behavior with one source of truth per interaction phas
   the text, a blocked scroll transition, the end of the document, unmounting
   -- ends it too. A page that keeps moving under a keypress is not a feature.
 
-### 3h. The render view coasts, it does not step
-- The render view has no row grid, so the two things the edit view's coast
-  does *because* of one are done differently there, and nothing else is
-  (`src/editorSection/usePreviewScrollbar.ts`).
-- **Real notches stay the browser's.** The edit view must intercept every
-  notch to land on a row boundary; here there is nothing to land on, so
-  interception could only take the browser's own smoothing away and give
-  nothing back. The render view's handler reads the gesture and lets it
-  through. It calls `preventDefault` on exactly the two notches the spin
-  owns -- the tail of the user's own gesture, and the one that takes control
-  back -- so "the stopping nudge scrolls nothing" holds in both panes.
-- **The wheel is only intercepted while a coast is running.** A non-passive
-  wheel listener takes a pane's scrolling off the compositor: nothing scrolls
-  until the main thread has seen the event and declined to cancel it.
-  Measured on the real app with a 1200-section note, a notch reached the
-  render view in 4ms with the listener passive and 33ms with it non-passive,
-  on every wheel event, spin or no spin. The edit view pays that because it
-  intercepts every notch by necessity; this pane intercepts only the two
-  kinds a coast owns, so its listener is passive until a coast starts and
-  passive again the moment one ends.
-- **The coast is continuous, not stepped** (`src/editor/wheelSpinGlide.ts`).
-  Same schedule, same decay, same cut off, same distance travelled by any
-  given moment -- paid out as speed rather than in jumps. A row is small
-  enough that a step reads as motion; one notch of a render-view wheel is
-  three text lines or so, and once the dampening has stretched the interval
-  toward the cut off, delivering that in one jump twice a second is a page
-  being nudged, not a page coasting to a stop.
-- **What counts as a nudge is decided identically**, by the same
-  `editor/wheelNotch.ts` accumulator the edit view learns its device on. The
-  same wheel on the same desk starts a spin in both panes at the same
-  moment, and a trackpad's sub-notch stream starts one in neither.
+### 3h. A notch is worth so much reading, and the reader sets how much
+- **A wheel notch is measured in text, in both panes** (`src/editor/wheelStep.ts`).
+  The edit view scrolls `step` whole rows per notch (1-10); the render view
+  scrolls `step` line heights (0.5-5, fractional). Neither is a pixel figure,
+  and that is the point: turn the text size or the line spacing up and the
+  same gesture still moves the same amount of *reading*. A pixel-delta wheel
+  -- which is what the render view used to have, straight from the device --
+  quietly scrolls less and less text as the reader makes the text bigger,
+  which is exactly backwards.
+- **Two settings, because the panes count in different units and always
+  have.** The edit view lands on row boundaries (3d), so its step can only
+  be a whole number of rows; the render view has no grid to land on, so its
+  step can be a fraction of a line. One shared number would have to be one
+  or the other, and would be lying to one of the panes.
+- **Which is why both panes intercept every notch.** A non-passive wheel
+  listener takes a pane's scrolling off the compositor: nothing moves until
+  the main thread has seen the event and declined to cancel it, measured on
+  the real app with a 1200-section note at 4ms to first movement when
+  passive against 33ms when not. That is a real cost, paid on every wheel
+  event, and it is the price of the notch being worth what the reader asked
+  for rather than what the device happened to send. It also makes the two
+  panes answer a wheel the same way, which they visibly did not before.
+- **What counts as a nudge is decided identically**, by the one
+  `editor/wheelNotch.ts` accumulator both panes learn the device on. The
+  same wheel on the same desk makes a nudge in both at the same moment, and
+  a trackpad's sub-notch stream makes one in neither.
+- **The render view's coast is continuous, not stepped**
+  (`src/editor/wheelSpinGlide.ts`). Same schedule, same decay, same cut off,
+  same distance travelled by any given moment -- paid out as speed rather
+  than in jumps. A row is small enough that a step reads as motion; a render
+  view step is several lines tall, and once the dampening has stretched the
+  interval toward the cut off, delivering that in one jump twice a second is
+  a page being nudged, not a page coasting to a stop.
 - **A coast ends at the document's edge, not the scroller's.** A windowed
   render view (`editorSection/previewWindow.ts`) runs out of mounted content
   many times on the way through a large note. The edit view can read "it did

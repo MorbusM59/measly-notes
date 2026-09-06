@@ -758,16 +758,26 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 > **Where?**
 > Settings panel → Animations.
 
-*Tunes the custom easing curve used for preview-mode scroll animations.*
+*Tunes the custom easing curve used for scroll animations the app makes on your behalf — a search jump, a page key, a chapter change. For what the wheel itself does, see [Scrolling]($#scrolling).*
 
 - Controls for ramp, speed, maximum speed, and overall curve shape. Response is auto-derived from ramp.
 - **Maximum speed** does two jobs at once. It caps how fast a scroll animation travels, and it also caps how *long* one may take: the longest any scroll can run is the time it would take to cover 200,000 pixels at the speed you've set — 2 seconds at the top of the slider, 2.5 at the default. Wind the speed up and long journeys get shorter as well as quicker; wind it down and a trip across a very large note becomes a proper voyage. A journey that can't fit under both limits keeps the time one and exceeds the speed one, so you're never left waiting.
+- These settings aren't part of a layout — they stay as you left them across layout switches and app restarts, the same way the custom cursor toggle does.
+
+### [Scrolling](#scrolling)
+
+> **Where?**
+> Settings panel → Scrolling.
+
+*What your own hand does to the page: how far one turn of the wheel goes, and whether a spin of it keeps going after you let go.*
+
+- **Edit step** and **view step** are how far one notch of the wheel scrolls, one for each pane. Edit mode counts in whole rows (1 to 10); render view counts in lines of text and will take fractions of one (0.5 to 5). Both are measured in text rather than pixels on purpose: make the text bigger, or the line spacing wider, and a notch still moves the same amount of *reading* rather than quietly moving less of it.
 - **Auto scroll** and **dampen** are a pair, and they work the same way in edit mode and render view. Spin the wheel — three notches in the same direction, each within the number of milliseconds **auto scroll** is set to — and the text keeps scrolling on its own at the speed you spun, without you having to keep turning. Slid all the way left, **auto scroll** reads “off” and the wheel behaves exactly as it always has.
 - **Dampen** decides how long the free scroll lasts before it winds down. It holds your speed for a good while and then lets go fairly quickly, rather than trailing off into a crawl; slide it right to have it let go sooner, left to make it last. At its leftmost position it never winds down at all — the text keeps going until you stop it. Either way, one more turn of the wheel stops it — as does typing, or clicking in the text. That stopping nudge only stops; it doesn't also scroll, so you can halt on the line you wanted rather than one past it.
-- **Cut off** is where the free scroll gives up: once the lines are arriving further apart than the number of milliseconds you set here, it stops. Between it and **dampen** you can have a scroll that eases off gently and ends early, or one that holds its pace and runs on until it hits the cut off.
-- In render view the free scroll glides rather than stepping from line to line — there are no lines to step between there — but it is the same spin, the same speed and the same three settings.
+- **Cut off** is where the free scroll gives up: once the steps are arriving further apart than the number of milliseconds you set here, it stops. Between it and **dampen** you can have a scroll that eases off gently and ends early, or one that holds its pace and runs on until it hits the cut off.
+- In render view the free scroll glides rather than stepping line to line — there is no row grid there to step between — but it is the same spin, at the same speed, from the same settings.
 - For half a second after a spin starts, the wheel is ignored. That's the tail of your own gesture: without it, the last few notches of the spin would either double the speed or cancel the scroll the instant it began.
-- These settings aren't part of a layout — they stay as you left them across layout switches and app restarts, the same way the custom cursor toggle does.
+- These settings aren't part of a layout either — they stay as you left them across layout switches and app restarts.
 
 ### [Cursor](#mouse-options)
 

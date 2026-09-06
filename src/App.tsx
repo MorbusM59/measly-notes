@@ -180,6 +180,16 @@ import {
   scrollToNonQuantizedSmooth,
 } from './editor/NonQuantizedSmoothScroll'
 import {
+  getWheelStepLines,
+  getWheelStepRows,
+  setWheelStepLines as applyWheelStepLines,
+  setWheelStepRows as applyWheelStepRows,
+  WHEEL_STEP_LINES_MAX,
+  WHEEL_STEP_LINES_MIN,
+  WHEEL_STEP_ROWS_MAX,
+  WHEEL_STEP_ROWS_MIN,
+} from './editor/wheelStep'
+import {
   getWheelSpinCutoffMs,
   getWheelSpinDampenDivisor,
   getWheelSpinThresholdMs,
@@ -2342,6 +2352,8 @@ function App() {
   const [wheelSpinThresholdMs, setWheelSpinThresholdMsState] = useState(() => getWheelSpinThresholdMs())
   const [wheelSpinDampenDivisor, setWheelSpinDampenDivisorState] = useState(() => getWheelSpinDampenDivisor())
   const [wheelSpinCutoffMs, setWheelSpinCutoffMsState] = useState(() => getWheelSpinCutoffMs())
+  const [wheelStepRows, setWheelStepRowsState] = useState(() => getWheelStepRows())
+  const [wheelStepLines, setWheelStepLinesState] = useState(() => getWheelStepLines())
   const [uiMode, setUiMode] = useState<UiLoadoutMode>('light')
   const [uiLoadoutEntries, setUiLoadoutEntries] = useState<UiLoadoutEntry[]>([])
   const [lastCustomIdByMode, setLastCustomIdByMode] = useState<{ light: number; dark: number }>({
@@ -4132,6 +4144,8 @@ function App() {
       wheelSpinThresholdMs,
       wheelSpinDampenDivisor,
       wheelSpinCutoffMs,
+      wheelStepRows,
+      wheelStepLines,
       glaze: glazeSettings,
       darkMode,
       uiMode,
@@ -4248,6 +4262,8 @@ function App() {
     wheelSpinThresholdMs,
     wheelSpinDampenDivisor,
     wheelSpinCutoffMs,
+    wheelStepRows,
+    wheelStepLines,
     audioKeyVolume,
     audioKeyVariance,
     audioPitch,
@@ -4675,6 +4691,14 @@ function App() {
   useEffect(() => {
     applyWheelSpinCutoffMs(wheelSpinCutoffMs)
   }, [wheelSpinCutoffMs])
+
+  useEffect(() => {
+    applyWheelStepRows(wheelStepRows)
+  }, [wheelStepRows])
+
+  useEffect(() => {
+    applyWheelStepLines(wheelStepLines)
+  }, [wheelStepLines])
 
   useEffect(() => {
     if (typeof document === 'undefined' || !('fonts' in document)) return
@@ -6175,6 +6199,16 @@ ${markdownHtml}
               appState.menu.wheelSpinCutoffMs ?? getWheelSpinCutoffMs(),
               WHEEL_SPIN_CUTOFF_MIN_MS,
               WHEEL_SPIN_CUTOFF_MAX_MS,
+            ))
+            setWheelStepRowsState(clamp(
+              appState.menu.wheelStepRows ?? getWheelStepRows(),
+              WHEEL_STEP_ROWS_MIN,
+              WHEEL_STEP_ROWS_MAX,
+            ))
+            setWheelStepLinesState(clamp(
+              appState.menu.wheelStepLines ?? getWheelStepLines(),
+              WHEEL_STEP_LINES_MIN,
+              WHEEL_STEP_LINES_MAX,
             ))
             setGlazeSettings(sanitizeGlazeSettings(appState.menu.glaze, DEFAULT_GLAZE_SETTINGS))
             setUiMode(appState.menu.uiMode === 'dark' ? 'dark' : 'light')
@@ -9292,6 +9326,10 @@ ${markdownHtml}
                         setWheelSpinThresholdMs={setWheelSpinThresholdMsState}
                         wheelSpinDampenDivisor={wheelSpinDampenDivisor}
                         setWheelSpinDampenDivisor={setWheelSpinDampenDivisorState}
+                        wheelStepRows={wheelStepRows}
+                        setWheelStepRows={setWheelStepRowsState}
+                        wheelStepLines={wheelStepLines}
+                        setWheelStepLines={setWheelStepLinesState}
                         wheelSpinCutoffMs={wheelSpinCutoffMs}
                         setWheelSpinCutoffMs={setWheelSpinCutoffMsState}
                         setRenderScrollSkew={setRenderScrollSkew}

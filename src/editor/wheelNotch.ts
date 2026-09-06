@@ -119,3 +119,40 @@ export function stepWheelNotch(state: WheelNotchState, deltaPx: number, nowMs: n
   state.pendingPx -= unitCount * state.notchPx * sign
   return unitCount * sign
 }
+
+/** The parts of a wheel event this module needs. */
+export interface WheelDelta {
+  deltaY: number
+  /** WheelEvent.deltaMode: 0 pixels, 1 lines, 2 pages. */
+  deltaMode: number
+}
+
+/**
+ * How many NOTCHES a wheel event is worth, signed, in any pane.
+ *
+ * The one place the three delta modes are read, so the two panes cannot
+ * drift apart on what counts as a nudge: the same wheel on the same desk
+ * must start a spin (editor/wheelSpin.ts) in both of them at the same
+ * moment, and a trackpad's sub-notch stream must start one in neither.
+ *
+ * Line and page mode state their own unit and are taken at their word --
+ * they are counts already, and no accumulator can improve on a count. Only
+ * pixel mode, where the device's notch size is a system setting nobody
+ * declares, goes through the accumulator above. 0 means "not a notch yet",
+ * which is the only case a caller should decline.
+ *
+ * What a notch is then WORTH to the reader is not this module's business:
+ * see editor/wheelStep.ts.
+ */
+export function resolveWheelEventUnits(
+  event: WheelDelta,
+  state: WheelNotchState,
+  nowMs: number,
+): number {
+  if (!Number.isFinite(event.deltaY) || event.deltaY === 0) return 0
+  const direction = event.deltaY > 0 ? 1 : -1
+  if (event.deltaMode === 1 || event.deltaMode === 2) {
+    return Math.max(1, Math.trunc(Math.abs(event.deltaY))) * direction
+  }
+  return stepWheelNotch(state, event.deltaY, nowMs)
+}

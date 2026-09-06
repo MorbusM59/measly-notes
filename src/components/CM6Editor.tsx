@@ -8,7 +8,8 @@ import { buildTokenPresentation } from '../editor/MarkdownLineClassification';
 import { suppressNextPlainTypingSoundOnce, typingSoundManager } from '../sound/TypingSoundManager';
 import { readSelectionRect, type SelectionRect } from '../editor/CaretRect';
 import { readSelectionLineRects } from '../editor/SelectionRects';
-import { createWheelNotchState, stepWheelNotch } from '../editor/wheelNotch';
+import { createWheelNotchState, resolveWheelEventUnits } from '../editor/wheelNotch';
+import { getWheelStepRows } from '../editor/wheelStep';
 import { appendWheelTrace, isWheelTraceOn } from '../editor/wheelTrace';
 import {
   cancelWheelSpin,
@@ -4131,28 +4132,20 @@ export function CM6Editor({
       if (event.deltaY === 0) return;
       event.preventDefault();
 
-      let units = 0;
-
-      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-        const lineUnits = Math.trunc(Math.abs(event.deltaY));
-        units = Math.max(1, lineUnits) * (event.deltaY > 0 ? 1 : -1);
-      } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-        const pageUnits = Math.trunc(Math.abs(event.deltaY));
-        units = Math.max(1, pageUnits) * (event.deltaY > 0 ? 1 : -1);
-      } else {
-        units = stepWheelNotch(wheelNotchState, event.deltaY, performance.now());
-        if (units === 0) {
-          if (tracing) {
-            appendWheelTrace(
-              `wheel dy=${event.deltaY} mode=${event.deltaMode} DECLINED sub-notch` +
-              ` notch=${wheelNotchState.notchPx} pending=${wheelNotchState.pendingPx.toFixed(2)}`,
-            );
-          }
-          return;
+      // How many notches (editor/wheelNotch.ts, shared with the render view
+      // so the same gesture reads the same way in both panes) times what the
+      // reader has said a notch is worth (editor/wheelStep.ts).
+      const notches = resolveWheelEventUnits(event, wheelNotchState, performance.now());
+      if (notches === 0) {
+        if (tracing) {
+          appendWheelTrace(
+            `wheel dy=${event.deltaY} mode=${event.deltaMode} DECLINED sub-notch` +
+            ` notch=${wheelNotchState.notchPx} pending=${wheelNotchState.pendingPx.toFixed(2)}`,
+          );
         }
+        return;
       }
-
-      if (units === 0) return;
+      const units = notches * getWheelStepRows();
 
       if (wheelSpinThresholdMs() <= 0) {
         // The off position the slider offers at its left end, resolved to

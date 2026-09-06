@@ -116,6 +116,11 @@ export interface PersistedMenuState {
   wheelSpinThresholdMs?: number;
   wheelSpinDampenDivisor?: number;
   wheelSpinCutoffMs?: number;
+  // What one wheel notch is worth, per pane (Options > Scrolling): whole
+  // rows in the edit view, line heights in the render view. Same reasoning
+  // again -- a scrolling habit, not a look.
+  wheelStepRows?: number;
+  wheelStepLines?: number;
   highlightCaretColor?: string;
   highlightSearchColor?: string;
   highlightSelectionColor?: string;
