@@ -201,12 +201,59 @@ The goal is deterministic behavior with one source of truth per interaction phas
   same wheel on the same desk makes a nudge in both at the same moment, and
   a trackpad's sub-notch stream makes one in neither.
 - **The render view's coast is continuous, not stepped**
-  (`src/editor/wheelSpinGlide.ts`). Same schedule, same decay, same cut off,
-  same distance travelled by any given moment -- paid out as speed rather
-  than in jumps. A row is small enough that a step reads as motion; a render
-  view step is several lines tall, and once the dampening has stretched the
-  interval toward the cut off, delivering that in one jump twice a second is
-  a page being nudged, not a page coasting to a stop.
+  (`src/editor/wheelSpinProfile.ts`). Same schedule, same decay, same cut
+  off, same distance travelled at every nudge time -- but the nudge distance
+  is a unit of calculation only, never of animation. A row is small enough
+  that a step reads as motion; a render view step is several lines tall, and
+  once the dampening has stretched the interval toward the cut off,
+  delivering that in one jump twice a second is a page being nudged, not a
+  page coasting to a stop. The coast is therefore planned once, at the
+  moment the spin is detected, as a series of dots -- at time T_n the reader
+  has travelled n nudges, arriving at speed P/d_(n-1) -- and ridden as a
+  monotone cubic through them: exact at every dot, C1 between them, sampled
+  from absolute elapsed time so a late frame self-corrects.
+- **A coast brakes, it does not stop.** The cut off says an interval this
+  long no longer reads as motion; it does not say the motion should end
+  mid-stride, which ending on the last nudge amounted to -- speed went from
+  a seventh of its starting value to zero in one frame. The nudge that would
+  have exceeded the cut off is spent braking instead, through
+  `buildReleaseRampDownPlanFromCurrentParams`: the same bell tail the
+  key-held continuous scroll releases with and every journey ramps down
+  through, so a coast ends the way every other motion in the app ends. That
+  shared bell is truncated at about 19% of its own peak rather than carried
+  to zero, so this is not a stop at rest -- it is a stop from 0.65px per
+  frame instead of 9.3px, which is below noticing. The absolute per-frame
+  figure is the thing to check if the ramp's shape is ever retuned.
+- **A gesture's shape is set by the hand that made it.** The dampening and
+  the cut off are read once, when the spin is detected, and the coast then
+  runs on those numbers. Moving either slider mid-coast does not re-shape a
+  gesture already in flight; it applies to the next one. The auto-scroll
+  threshold's off position is the exception, and stops a running coast at
+  once -- switching a feature off is a request to stop now.
+- **A single notch is travelled, not jumped** (`src/editor/wheelNotchTravel.ts`).
+  Owning the notch means nothing animates it any more, and an instantaneous
+  write of several line heights is the one kind of motion the eye cannot
+  follow at all. So a notch eases from rest to its distance over 110ms -- long
+  enough to be followed, short enough that notches at any reading cadence
+  overlap rather than landing as separate pulses.
+- **The second notch splices onto the first, it does not restart it.** A wheel
+  is turned, not tapped, so notches arrive while the previous one is still
+  being paid out. Each new one snapshots the in-flight motion's instantaneous
+  velocity AND acceleration and builds a quintic to the new total -- whatever
+  was left plus the new notch -- which is `buildContinuationPlan`, the same
+  mid-flight retargeting the escape-hold ring uses. Measured at 0.0% velocity
+  step across every cadence from 30 to 100ms, against the full drop to rest a
+  restart would have made at exactly the moment the reader asked for more.
+- **A spin carries what the notch had not delivered yet.** A spin is detected
+  on its third notch, by which point the glide still owes about 2.7 nudges --
+  notches arrive far faster than one is paid out. The coast inherits that
+  remainder rather than dropping it, so a spin travels what the hand actually
+  turned. It is folded in with a smootherstep (zero velocity and acceleration
+  at both ends, so it cannot reintroduce a step) spread across the whole
+  schedule rather than the coast's opening: the same 208px folded into the
+  first tenth of a second peaks 93% above the uncarried coast, and spread it
+  peaks 19% at a point where the coast has already slowed. A carry is owed,
+  not urgent.
 - **A coast ends at the document's edge, not the scroller's.** A windowed
   render view (`editorSection/previewWindow.ts`) runs out of mounted content
   many times on the way through a large note. The edit view can read "it did
