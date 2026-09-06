@@ -136,6 +136,52 @@ export function planPreviewWindowAround(
 }
 
 /**
+ * Whether `range` can simply be kept over a document of `blockCount` blocks.
+ *
+ * The question this answers is "does an edit to the document force the window
+ * to be rebuilt", and the answer is almost always no. A window is a run of
+ * block INDICES; typing a character inside one of those blocks changes what
+ * that block says, not which blocks the window holds. Rebuilding it anyway
+ * unmounts and remounts every block in it, and each remount is a full
+ * markdown parse -- see the dependency list of the re-plan effect in
+ * usePreviewWindow.tsx for what that cost when it was measured.
+ *
+ * Only two things genuinely make a range unusable: it holds nothing while the
+ * document has blocks (the window was planned before the text arrived), or it
+ * reaches past the end of a document that has since shrunk.
+ */
+export function isPreviewWindowRangeUsable(
+  range: PreviewWindowRange,
+  blockCount: number,
+): boolean {
+  if (blockCount <= 0) return range.endIndex < range.startIndex
+  return range.startIndex >= 0
+    && range.endIndex >= range.startIndex
+    && range.endIndex < blockCount
+}
+
+/**
+ * `range` pulled back inside a document of `blockCount` blocks, keeping its
+ * span and moving it as little as possible.
+ *
+ * For the one case above that an edit really can produce: a deletion large
+ * enough that the window now reaches past the last block. Re-planning from
+ * scratch would answer that by throwing the reader back to the top of the
+ * document, which is a far larger surprise than the deletion was. Sliding the
+ * same-sized window back to the new end keeps them where the text still is.
+ */
+export function clampPreviewWindowRange(
+  range: PreviewWindowRange,
+  blockCount: number,
+): PreviewWindowRange {
+  if (blockCount <= 0) return { startIndex: 0, endIndex: -1 }
+  const span = Math.max(1, range.endIndex - range.startIndex + 1)
+  const endIndex = Math.min(Math.max(0, range.endIndex), blockCount - 1)
+  const startIndex = Math.max(0, Math.min(Math.max(0, range.startIndex), endIndex - span + 1))
+  return { startIndex, endIndex }
+}
+
+/**
  * The window this geometry asks for, or null when the current one will do.
  *
  * Growing is considered before trimming and both may happen in one answer.

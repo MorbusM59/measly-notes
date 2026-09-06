@@ -13,6 +13,8 @@ import {
   type PreviewCharViewport,
 } from './previewCharPosition'
 import {
+  clampPreviewWindowRange,
+  isPreviewWindowRangeUsable,
   isWithinPreviewWindow,
   planPreviewWindowAround,
   resolvePreviewWindowAdjustment,
@@ -67,6 +69,16 @@ interface PreviewWindowAnchor {
  */
 const PREVIEW_TAIL_PROBE_INITIAL_BLOCKS = 8
 const PREVIEW_TAIL_PROBE_MAX_BLOCKS = 512
+
+/**
+ * How long the document has to stop changing before the tail probe re-runs.
+ *
+ * Long enough that a burst of typing costs one probe rather than one per
+ * character (see the edit-triggered effect below for why that matters), short
+ * enough that a reader who pauses and reaches for the scrollbar finds it
+ * already correct. Ordinary typing never leaves a gap this long.
+ */
+const PREVIEW_TAIL_PROBE_SETTLE_MS = 400
 
 /** A scroll that can only be performed once a particular window is mounted. */
 interface PendingWindowScroll {
@@ -482,11 +494,35 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
       : 0)
   }, [])
 
-  // A new document is the obvious trigger.
+  // A new document is the obvious trigger, and it is immediate: nothing the
+  // probe learned about the previous document's tail is true of this one.
   useEffect(() => {
     if (!enabled) return
     restartTailProbe()
-  }, [enabled, previewBlocks, renderedDisplayText, activeNoteId, restartTailProbe])
+  }, [enabled, activeNoteId, restartTailProbe])
+
+  // An edit to the document already on screen is the other trigger, and it is
+  // deliberately NOT immediate.
+  //
+  // Restarting the probe mounts the document's last blocks into the hidden
+  // host and measures them -- eight full markdown parses at the first step,
+  // and more each time it has to double. This used to run on every keystroke
+  // (it shared the dependency list above), which on a 400,000-character note
+  // meant 8 of the 40 blocks remounted per character while the pane was not
+  // even visible.
+  //
+  // What the probe answers is how many characters the document's LAST SCREEN
+  // holds, which is what sizes the scrollbar's span. That number moves by a
+  // character or two per keystroke and nothing reads it mid-edit, so being a
+  // beat stale cannot be seen; a reader who stops typing gets the exact answer
+  // one settle later. Debouncing also collapses a burst of typing into a
+  // single probe instead of one per character, which is where most of the
+  // saving is.
+  useEffect(() => {
+    if (!enabled) return undefined
+    const handle = window.setTimeout(restartTailProbe, PREVIEW_TAIL_PROBE_SETTLE_MS)
+    return () => window.clearTimeout(handle)
+  }, [enabled, previewBlocks, renderedDisplayText, restartTailProbe])
 
   // A change of typography or pane width is the subtle one, and it was missed
   // on the first pass: the answer is a count of characters in one SCREEN, so it
@@ -657,19 +693,51 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     return () => observer.disconnect()
   }, [enabled, rebuildMeasurements, adjust, range])
 
-  // A new document -- or the same one re-rendered -- starts a new window. The
-  // reader's position is restored by whoever owns it (the source-anchor
-  // restore in useEditorSectionMount), so this only has to open somewhere
-  // sane and let the adjustment pass size it from real geometry.
+  // A NEW DOCUMENT starts a new window. The same document, edited, does not.
+  //
+  // This effect used to say "or the same one re-rendered" and list
+  // `renderedDisplayText` and `previewBlocks` in its dependencies -- both of
+  // which change on every keystroke. So every keystroke re-planned the window
+  // around block 0 at PREVIEW_WINDOW_INITIAL_BLOCKS, and the adjustment pass
+  // immediately trimmed it back to what the viewport actually needs. Measured
+  // on a 400,000-character note, typing one character in EDIT MODE with this
+  // pane hidden: the window cycled 0..47 -> 0..15 -> 0..47 and 40 blocks were
+  // unmounted and remounted per character -- every one of them a fresh
+  // ReactMarkdown parse of text that had not changed. That was ~90ms of
+  // scheduled work per keystroke on a modern machine, against an editor whose
+  // own commit cost 1-3ms, and it was the whole of the typing regression the
+  // windowed preview introduced. A remount is invisible to prop-level
+  // memoization, which is why it survived a pane whose per-block memo was
+  // otherwise carefully correct: React was not asked to compare props, it was
+  // asked to build the subtree again.
+  //
+  // The reader's position is restored by whoever owns it (the source-anchor
+  // restore in useEditorSectionMount), so a new document only has to open
+  // somewhere sane and let the adjustment pass size it from real geometry.
+  // An edit keeps the window it has -- the blocks it holds are the same blocks
+  // -- and is clamped only if the document shrank out from under it.
+  const plannedForNoteRef = useRef<string | null>(null)
   useEffect(() => {
     if (!enabled) return
     const blockCount = previewBlocks.length
+    const isNewDocument = plannedForNoteRef.current !== (activeNoteId ?? null)
+    plannedForNoteRef.current = activeNoteId ?? null
+
+    if (!isNewDocument) {
+      const current = rangeRef.current
+      if (isPreviewWindowRangeUsable(current, blockCount)) return
+      const clamped = clampPreviewWindowRange(current, blockCount)
+      rangeRef.current = clamped
+      setRange(clamped)
+      return
+    }
+
     const next = planPreviewWindowAround(0, blockCount)
     rangeRef.current = next
     pendingAnchorRef.current = null
     pendingScrollRef.current = null
     setRange(next)
-  }, [enabled, activeNoteId, renderedDisplayText, previewBlocks])
+  }, [enabled, activeNoteId, previewBlocks])
 
   // ---------------------------------------------------------------------
   // Position, in the character space everything outside this module speaks.

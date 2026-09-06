@@ -2914,3 +2914,133 @@ undoes.
 
 The check is worth keeping either way: "the text holds still when nobody is
 touching it" is easy to break and easy to miss.
+
+---
+
+## The windowed preview rebuilt itself on every keystroke — found and fixed
+
+A user reported that typing had become sluggish "even on a modern PC" after the
+scroll rework, and asked for the airy typing back without giving up the
+scrolling gains. Both held: the regression was one dependency list, and no
+scrolling behaviour had to be traded to fix it.
+
+### The instrument came first, and the old one could not have found this
+
+`npm run perf:input-lag`'s burst mode times `await page.keyboard.press(...)`
+from Node, so every sample carries a full CDP round trip. Measured on this
+machine: **13.8ms/keystroke on a 3,000-character note and 16.0ms on a
+400,000-character one.** The instrument's floor is ~14ms; it can resolve about
+2ms of real app cost. Three commits spanning the entire rework — `ba6c387`
+(before it), `ea636ac` (mid), and `HEAD` — all reported ~16ms, which reads as
+"no regression exists" and is in fact "this tool cannot see one".
+
+`scripts/perf/measureTypeLatency.mjs` was written for this and is the one to
+reach for first now. It measures inside the page, where there is no wire:
+
+* `handler` — keydown to the end of the synchronous task it ran on, via a
+  `MessageChannel` continuation (a task, run after the current task and its
+  microtask drain, and not clamped the way `setTimeout(0)` is).
+* `frame` — keydown to the frame that presented the result, via a double
+  `requestAnimationFrame`. Structurally includes one extra frame; read it as a
+  relative number, not an absolute latency.
+* a `longtask` observer, which is what actually caught this: work a keystroke
+  *schedules* rather than *runs* is invisible to any handler-side timing.
+
+The same run against the same commits, on a 400,000-character note:
+
+| commit | frame mean | frame max | long tasks |
+| --- | --- | --- | --- |
+| `ba6c387` (before the rework) | 25.6ms | 32.9ms | 5 (3 of them mount-time) |
+| `a1a2741` (windowed rendering framework) | 34.3ms | 100.4ms | 24 |
+| `HEAD` (before this fix) | 53.4ms | 107.4ms | 23 |
+| `HEAD` + this fix | 31.0ms | 36.4ms | 3 (all mount-time) |
+
+`a1a2741` is where it entered, and the shape is unmistakable: ~20 long tasks of
+~80–95ms, one per keystroke, on a document where the editor's own commit costs
+1–3ms (`thockdown:debug-input-lag` reports `commitMs=1.2 paintMs=17.1`).
+
+### What it was
+
+A JS sampling profile put the cost in micromark/remark — a full markdown parse
+per keystroke. Attributing those samples to their nearest app-source ancestor
+(`--stacks` in the same script) did *not* explain it: React's render work runs
+from a scheduler task whose stack contains no app frame at all, so most of the
+parse time is unattributable by construction. Worth knowing before trusting
+that view; it is why the census below was needed.
+
+The census (a temporary render counter in `PreviewMarkdownBlock` plus a
+`MutationObserver` on the preview pane) gave the answer in one read. Typing in
+**edit mode, with the preview pane hidden**, on a 400,000-character note:
+
+* before the rework: **0** preview DOM mutations per keystroke;
+* after: **33 nodes added per keystroke, 40 block renders — and 40 block
+  MOUNTS.** Every render was a mount. The window was not re-rendering, it was
+  being destroyed and rebuilt.
+
+The trace of the window's own range said the rest: per keystroke it cycled
+`0..47 -> 0..15 -> 0..47`. `usePreviewWindow.tsx`'s re-plan effect listed
+`renderedDisplayText` and `previewBlocks` in its dependencies — both change on
+every keystroke — so every character re-planned the window around block 0 at
+`PREVIEW_WINDOW_INITIAL_BLOCKS`, and the adjustment pass immediately trimmed it
+back to what the viewport needs. The effect's own comment said "a new document
+-- or the same one re-rendered -- starts a new window"; a keystroke is not a new
+document. The tail probe (`restartTailProbe`) shared the same dependency list
+and contributed the other 8 remounts.
+
+**A remount is invisible to prop-level memoization.** This pane's per-block
+`memo` is careful and correct, and it never got the chance to run: React was not
+asked to compare props, it was asked to build the subtree again. That is the
+transferable lesson — when a memoized subtree is re-doing expensive work, count
+mounts before auditing props.
+
+### The fix
+
+Two effects in `usePreviewWindow.tsx`, plus two pure helpers in
+`previewWindow.ts` (`isPreviewWindowRangeUsable`, `clampPreviewWindowRange`,
+unit-tested):
+
+* the re-plan effect watches `activeNoteId`, not the text. A new document plans
+  a new window; an edit keeps the window it has, because the blocks it holds are
+  the same blocks. The window is clamped — slid back, not re-planned to the top
+  — only when a deletion leaves it reaching past the last block.
+* the tail probe still restarts immediately on a new document, and is debounced
+  by `PREVIEW_TAIL_PROBE_SETTLE_MS` (400ms) on an edit. It answers how many
+  characters the last screen holds, which sizes the scrollbar's span; that
+  cannot be seen a beat stale, and debouncing collapses a typing burst into one
+  probe.
+
+Verification: the census re-run (0 mutations per keystroke, matching the
+pre-rework baseline exactly); the latency table above; `npm test` (862/862);
+lint clean on the changed files; `verifyPreviewWindow`,
+`verifyPreviewTrackLanding`, `verifyPreviewRestStability` and
+`verifyPreviewCharThumb` all passing; and a new
+`scripts/perf/verifyPreviewWindowNoteSwitch.mjs` covering the direction this fix
+could have broken — that a genuinely new document still re-plans the window off
+the old one's block indices.
+
+### What this did NOT fix, and is not a regression
+
+At **1,500,000 characters under 6x CPU throttle**, a keystroke costs ~204ms, and
+essentially all of it is synchronous handler time (`frame` is approximately
+`handler`), i.e. the editor's own path, not the preview. The pre-rework commit
+measures **226ms** on the identical run — so the fixed build is now slightly
+*better* than the baseline at that scale, and this cost predates the scroll work
+entirely. It is the same diffuse, many-small-functions cost this document
+describes further up, carried over from the Lexical era into CM6 and still
+unattributed to any single villain. Anyone picking that up should start from
+`measureTypeLatency.mjs` with `--throttle=6 --chars=1500000`, and should not
+expect `perf:input-lag` burst mode to resolve it.
+
+### Two pre-existing faults noticed in passing, not touched
+
+* `npx tsc --noEmit` and `npm run lint` both fail on `main` as of this work —
+  `usePreviewMarkdownRendering.tsx` (a react-virtual `Map<Key, number>` type
+  mismatch around line 2420, an unnecessary semicolon, an unused
+  eslint-disable) and two `no-explicit-any` errors in
+  `PreviewVisibleText.test.ts`. Confirmed pre-existing by stashing this round's
+  changes and re-running both. Five lint errors and one type error, none in
+  code this round touched.
+* Creating a new note from the note-tab bar appears to leave the section's tab
+  bar holding only the new note, with no tab back to the note that was open.
+  Observed while building the note-switch check; reproduced identically with
+  this round's changes stashed, so it is not from this work. Not investigated.

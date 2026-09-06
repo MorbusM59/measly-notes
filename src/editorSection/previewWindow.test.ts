@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   PREVIEW_WINDOW_INITIAL_BLOCKS,
+  clampPreviewWindowRange,
+  isPreviewWindowRangeUsable,
   PREVIEW_WINDOW_MIN_BLOCKS,
   PREVIEW_WINDOW_MIN_STEP_BLOCKS,
   isWithinPreviewWindow,
@@ -146,5 +148,55 @@ describe('resolvePreviewWindowAdjustment', () => {
 
   it('says nothing before the pane has a height', () => {
     expect(resolvePreviewWindowAdjustment({ startIndex: 0, endIndex: 40 }, 10_000, geometry({ clientHeightPx: 0 }))).toBeNull()
+  })
+})
+
+
+describe('isPreviewWindowRangeUsable', () => {
+  // The whole point of this predicate: an edit to the document the window is
+  // already over must not be a reason to rebuild the window, because every
+  // rebuild remounts (and so re-parses) every block in it.
+  it('keeps a grown window when the document is merely edited', () => {
+    expect(isPreviewWindowRangeUsable({ startIndex: 300, endIndex: 347 }, 5_000)).toBe(true)
+  })
+
+  it('rejects a window planned before the document had any blocks', () => {
+    expect(isPreviewWindowRangeUsable({ startIndex: 0, endIndex: -1 }, 900)).toBe(false)
+  })
+
+  it('accepts the empty window while the document really is empty', () => {
+    expect(isPreviewWindowRangeUsable({ startIndex: 0, endIndex: -1 }, 0)).toBe(true)
+  })
+
+  it('rejects a window reaching past the end of a shrunken document', () => {
+    expect(isPreviewWindowRangeUsable({ startIndex: 300, endIndex: 347 }, 320)).toBe(false)
+  })
+
+  it('accepts a window ending exactly on the last block', () => {
+    expect(isPreviewWindowRangeUsable({ startIndex: 300, endIndex: 347 }, 348)).toBe(true)
+  })
+})
+
+describe('clampPreviewWindowRange', () => {
+  it('slides a same-sized window back to the new end rather than to the top', () => {
+    const clamped = clampPreviewWindowRange({ startIndex: 300, endIndex: 347 }, 320)
+    expect(clamped.endIndex).toBe(319)
+    expect(clamped.endIndex - clamped.startIndex + 1).toBe(48)
+    expect(clamped.startIndex).toBe(272)
+  })
+
+  it('shrinks rather than going negative when the document is smaller than the span', () => {
+    const clamped = clampPreviewWindowRange({ startIndex: 300, endIndex: 347 }, 10)
+    expect(clamped.startIndex).toBe(0)
+    expect(clamped.endIndex).toBe(9)
+  })
+
+  it('leaves a window that already fits exactly alone', () => {
+    const clamped = clampPreviewWindowRange({ startIndex: 12, endIndex: 59 }, 5_000)
+    expect(clamped).toEqual({ startIndex: 12, endIndex: 59 })
+  })
+
+  it('answers the empty window for an empty document', () => {
+    expect(clampPreviewWindowRange({ startIndex: 300, endIndex: 347 }, 0)).toEqual({ startIndex: 0, endIndex: -1 })
   })
 })
