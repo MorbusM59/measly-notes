@@ -10,6 +10,7 @@ import type { ScrollJourneyTiming } from '../editor/scrollJourney'
 import { measureAverageCharWidthPx } from '../editor/scrollBridgeTexture'
 import { createWheelNotchState, resolveWheelEventUnits } from '../editor/wheelNotch'
 import { getWheelStepLines } from '../editor/wheelStep'
+import { borrowAutoScrollBehavior } from '../editor/scrollBehaviorLock'
 import { appendWheelTrace, isWheelTraceOn } from '../editor/wheelTrace'
 import {
   cancelWheelSpin,
@@ -143,7 +144,7 @@ export function usePreviewScrollbar({
   const previewContinuousScrollRafRef = useRef<number | null>(null)
   const previewContinuousScrollLastTsRef = useRef<number | null>(null)
   const previewReleaseRampDownRafRef = useRef<number | null>(null)
-  const previewContinuousPreviousScrollBehaviorRef = useRef<string | null>(null)
+  const previewContinuousPreviousScrollBehaviorRef = useRef<(() => void) | null>(null)
   const previewPageKeysHeldRef = useRef(new Set<string>())
   const previewContinuousHandoffTimeoutRef = useRef<number | null>(null)
   const previewScrollbarRightHoldRef = useRef<{
@@ -197,7 +198,16 @@ export function usePreviewScrollbar({
    * the same debt.
    */
   const previewWheelSpinCarryPxRef = useRef(0)
-  const previewWheelSpinScrollBehaviorRef = useRef<string | null>(null)
+  /**
+   * The wheel's hold on `scroll-behavior` (editor/scrollBehaviorLock.ts).
+   *
+   * A borrow rather than a saved string: a journey, a held page key and a
+   * thumb drag all want the same property, and a saved string hands back
+   * whatever the last writer happened to leave -- which is how a wheel
+   * gesture followed by a scrollbar click used to kill the click's animation
+   * four pixels in.
+   */
+  const previewWheelSpinScrollBehaviorRef = useRef<(() => void) | null>(null)
   const [isPreviewScrollThumbActive, setIsPreviewScrollThumbActive] = useState(false)
   const [isDraggingPreviewScrollThumb, setIsDraggingPreviewScrollThumb] = useState(false)
 
@@ -247,14 +257,11 @@ export function usePreviewScrollbar({
     // there -- the same borrow-and-return the page-key scroll does, and for
     // the same reason: a per-frame write that the browser then animates is
     // a coast chasing its own tail.
-    const scroller = previewScrollRef.current
-    if (scroller && previewWheelSpinScrollBehaviorRef.current !== null) {
-      scroller.style.scrollBehavior = previewWheelSpinScrollBehaviorRef.current
-      previewWheelSpinScrollBehaviorRef.current = null
-    }
+    previewWheelSpinScrollBehaviorRef.current?.()
+    previewWheelSpinScrollBehaviorRef.current = null
 
     if (wasRunning && isWheelTraceOn()) appendWheelTrace(`preview   coast ENDED (${reason})`)
-  }, [previewScrollRef])
+  }, [])
 
   const applyPreviewThumbDom = useCallback((topPx: number, heightPx: number) => {
     previewScrollThumbTopRef.current = topPx
@@ -671,11 +678,14 @@ export function usePreviewScrollbar({
     const scroller = previewScrollRef.current
     if (!scroller) return
 
-    scroller.style.scrollBehavior = isDraggingPreviewScrollThumb ? 'auto' : ''
-
-    return () => {
-      scroller.style.scrollBehavior = ''
-    }
+    // A drag is a cross-frame borrow like any other, so it goes through the
+    // lock. Writing the property directly here is what made this a stealer:
+    // the effect re-runs on every drag state change and used to hand the
+    // property back to the empty string, whether or not a journey or a coast
+    // was in the middle of using it.
+    if (!isDraggingPreviewScrollThumb) return
+    const release = borrowAutoScrollBehavior(scroller)
+    return release
   }, [isDraggingPreviewScrollThumb, previewScrollRef])
 
   // Right-click-and-hold on the track pages in the clicked direction for as
@@ -942,16 +952,14 @@ export function usePreviewScrollbar({
     if (event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
-    const scroller = previewScrollRef.current
-    if (scroller) {
-      scroller.style.scrollBehavior = 'auto'
-    }
+    // The borrow belongs to the drag effect above, which runs before any
+    // mousemove can be delivered.
     setIsDraggingPreviewScrollThumb(true)
     previewScrollbarDragOriginRef.current = {
       pointerY: event.clientY,
       thumbTopPx: previewScrollThumbTopRef.current,
     }
-  }, [previewScrollRef, shouldBlockPreviewInteraction, stopPreviewWheelSpin])
+  }, [shouldBlockPreviewInteraction, stopPreviewWheelSpin])
 
   const stopPreviewContinuousScroll = useCallback(() => {
     previewContinuousScrollDirectionRef.current = 0
@@ -967,7 +975,7 @@ export function usePreviewScrollbar({
 
     const scroller = previewScrollRef.current
     if (scroller && previewContinuousPreviousScrollBehaviorRef.current !== null) {
-      scroller.style.scrollBehavior = previewContinuousPreviousScrollBehaviorRef.current
+      previewContinuousPreviousScrollBehaviorRef.current?.()
       previewContinuousPreviousScrollBehaviorRef.current = null
     }
   }, [previewScrollRef])
@@ -1073,9 +1081,8 @@ export function usePreviewScrollbar({
     }
 
     if (previewContinuousPreviousScrollBehaviorRef.current === null) {
-      previewContinuousPreviousScrollBehaviorRef.current = scroller.style.scrollBehavior
+      previewContinuousPreviousScrollBehaviorRef.current = borrowAutoScrollBehavior(scroller)
     }
-    scroller.style.scrollBehavior = 'auto'
 
     const startScrollTop = scroller.scrollTop
     const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
@@ -1108,10 +1115,8 @@ export function usePreviewScrollbar({
         && (previewDocumentPositionRef?.current?.isAtDocumentEdge?.(rampDirection) ?? true)
       if (elapsedSec >= rampDownPlan.tailDurationSec || hitBoundary) {
         previewReleaseRampDownRafRef.current = null
-        if (previewContinuousPreviousScrollBehaviorRef.current !== null) {
-          scroller.style.scrollBehavior = previewContinuousPreviousScrollBehaviorRef.current
-          previewContinuousPreviousScrollBehaviorRef.current = null
-        }
+        previewContinuousPreviousScrollBehaviorRef.current?.()
+        previewContinuousPreviousScrollBehaviorRef.current = null
         return
       }
 
@@ -1129,9 +1134,8 @@ export function usePreviewScrollbar({
     cancelNonQuantizedSmoothScroll(scroller)
 
     if (previewContinuousPreviousScrollBehaviorRef.current === null) {
-      previewContinuousPreviousScrollBehaviorRef.current = scroller.style.scrollBehavior
+      previewContinuousPreviousScrollBehaviorRef.current = borrowAutoScrollBehavior(scroller)
     }
-    scroller.style.scrollBehavior = 'auto'
 
     const previousDirection = previewContinuousScrollDirectionRef.current
     previewContinuousScrollDirectionRef.current = direction
@@ -1386,14 +1390,15 @@ export function usePreviewScrollbar({
       const wholePx = Math.trunc(owedPx)
       previewWheelSpinCarryPxRef.current = owedPx - wholePx
       const nextScrollTop = clamp(beforeTop + wholePx, 0, maxScrollTop)
-      const borrowed = previewWheelSpinScrollBehaviorRef.current === null
-      const previousBehavior = borrowed ? scroller.style.scrollBehavior : null
-      if (borrowed) scroller.style.scrollBehavior = 'auto'
+      // Borrowed for the single write rather than conditionally on whether
+      // the coast already holds one: the lock counts, so taking a second
+      // borrow while one is held costs an increment and cannot disturb it.
+      const releaseForWrite = borrowAutoScrollBehavior(scroller)
       if (Math.abs(nextScrollTop - beforeTop) > 0.01) {
         scroller.scrollTop = nextScrollTop
         syncPreviewCustomScrollbar()
       }
-      if (borrowed && previousBehavior !== null) scroller.style.scrollBehavior = previousBehavior
+      releaseForWrite()
       if (traceLabel !== null && isWheelTraceOn()) {
         appendWheelTrace(
           `${traceLabel} px=${deltaPx.toFixed(2)} lh=${previewLineHeightPx().toFixed(2)}` +
@@ -1429,9 +1434,8 @@ export function usePreviewScrollbar({
         previewNotchTravelRafRef.current = null
       }
       previewNotchTravelRef.current = null
-      if (previewWheelSpinProfileRef.current === null
-        && previewWheelSpinScrollBehaviorRef.current !== null) {
-        scroller.style.scrollBehavior = previewWheelSpinScrollBehaviorRef.current
+      if (previewWheelSpinProfileRef.current === null) {
+        previewWheelSpinScrollBehaviorRef.current?.()
         previewWheelSpinScrollBehaviorRef.current = null
       }
     }
@@ -1476,9 +1480,8 @@ export function usePreviewScrollbar({
       // Whatever else was travelling, the hand has just overruled it.
       cancelNonQuantizedSmoothScroll(scroller)
       if (previewWheelSpinScrollBehaviorRef.current === null) {
-        previewWheelSpinScrollBehaviorRef.current = scroller.style.scrollBehavior
+        previewWheelSpinScrollBehaviorRef.current = borrowAutoScrollBehavior(scroller)
       }
-      scroller.style.scrollBehavior = 'auto'
 
       const nowMs = performance.now()
       previewNotchTravelRef.current = retargetWheelNotchTravel(
@@ -1587,9 +1590,8 @@ export function usePreviewScrollbar({
       // Whatever else was travelling, the hand has just overruled it.
       cancelNonQuantizedSmoothScroll(scroller)
       if (previewWheelSpinScrollBehaviorRef.current === null) {
-        previewWheelSpinScrollBehaviorRef.current = scroller.style.scrollBehavior
+        previewWheelSpinScrollBehaviorRef.current = borrowAutoScrollBehavior(scroller)
       }
-      scroller.style.scrollBehavior = 'auto'
       // The glide's remainder is already in `carryPx`; the coast owns the
       // scroller and the borrow from here. Two writers is the one thing this
       // pane must never have.

@@ -18,6 +18,7 @@ import {
 import { planScrollJourney, type ScrollJourneyTiming } from './scrollJourney';
 import { resolveScrollBridge } from './scrollBridge';
 
+import { borrowAutoScrollBehavior } from './scrollBehaviorLock';
 /** See NonQuantizedSmoothScroll's own note: answered per call, not cached. */
 function prefersReducedMotion(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
@@ -62,7 +63,7 @@ const BRIDGE_MEASURE_FRAMES = 2;
 interface AnimationState {
   rafId: number;
   targetScrollTopPx: number;
-  previousScrollBehavior: string;
+  releaseScrollBehavior: () => void;
   /** Torn down however the animation ends -- see the render engine's own note. */
   onCancel?: () => void;
 }
@@ -87,7 +88,7 @@ const cancelExistingAnimation = (scroller: HTMLElement): void => {
   if (!current) return;
   cancelAnimationFrame(current.rafId);
   current.onCancel?.();
-  scroller.style.scrollBehavior = current.previousScrollBehavior;
+  current.releaseScrollBehavior();
   activeAnimations.delete(scroller);
 };
 
@@ -155,8 +156,7 @@ export function scrollToQuantizedSmooth(
 
   const signedDistance = quantizedTargetPx - quantizedStartPx;
 
-  const previousScrollBehavior = scroller.style.scrollBehavior;
-  scroller.style.scrollBehavior = 'auto';
+  const releaseScrollBehavior = borrowAutoScrollBehavior(scroller);
 
   // Every write in this engine goes through here. The row grid is the whole
   // point of the edit view (see editor/rowGridGuard.ts), and a bridged journey
@@ -176,7 +176,7 @@ export function scrollToQuantizedSmooth(
 
   const finish = () => {
     step(landingPx);
-    scroller.style.scrollBehavior = previousScrollBehavior;
+    releaseScrollBehavior();
     activeAnimations.delete(scroller);
   };
 
@@ -185,7 +185,7 @@ export function scrollToQuantizedSmooth(
     activeAnimations.set(scroller, {
       rafId: requestAnimationFrame(frame),
       targetScrollTopPx: landingPx,
-      previousScrollBehavior,
+      releaseScrollBehavior,
       onCancel,
     });
   };

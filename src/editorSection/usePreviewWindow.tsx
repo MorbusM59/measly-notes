@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import type { MutableRefObject, ReactNode } from 'react'
 import type { PreviewMarkdownBlock as PreviewBlock } from '../editor/PreviewBlockSplit'
 import { isNonQuantizedSmoothScrollActive } from '../editor/NonQuantizedSmoothScroll'
+import { traceScroll } from '../editor/scrollTrace'
 import {
   findBlockAtChar,
   findBlockAtPixel,
@@ -45,41 +46,6 @@ import {
  * formatting context, which reproduces the virtualized spacing exactly while
  * letting the browser do the positioning.
  */
-
-/**
- * Opt-in trace of every window movement -- see CLAUDE.md's diagnostic traces.
- *
- * `localStorage['thockdown:debug-preview-window'] = '1'`, reload, reproduce,
- * then `copy(window.__previewWindowTrace.join('\n'))`. Attaches nothing when
- * unset.
- *
- * Buffered as well as logged, because the interesting defects here are the ones
- * that repeat: a two-state oscillation is invisible in a console that is
- * scrolling past, and obvious in forty lines side by side. Every line carries
- * the scrollTop BEFORE and AFTER, because a movement of the window and a
- * movement of the reader are different events that look identical from outside.
- */
-let previewWindowDebugFlag: boolean | null = null
-function isPreviewWindowDebugOn(): boolean {
-  if (previewWindowDebugFlag === null) {
-    try {
-      previewWindowDebugFlag = typeof window !== 'undefined'
-        && window.localStorage.getItem('thockdown:debug-preview-window') === '1'
-    } catch {
-      previewWindowDebugFlag = false
-    }
-  }
-  return previewWindowDebugFlag
-}
-
-function tracePreviewWindow(line: string): void {
-  if (!isPreviewWindowDebugOn()) return
-  const w = window as unknown as { __previewWindowTrace?: string[] }
-  if (!w.__previewWindowTrace) w.__previewWindowTrace = []
-  w.__previewWindowTrace.push(line)
-  if (w.__previewWindowTrace.length > 400) w.__previewWindowTrace.shift()
-  console.log('[preview-window] ' + line)
-}
 
 /** How the reader's position is carried across a window change. */
 interface PreviewWindowAnchor {
@@ -366,7 +332,7 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     if (next.startIndex !== current.startIndex && pendingScrollRef.current === null) {
       pendingAnchorRef.current = readAnchor()
     }
-    tracePreviewWindow(`move    ${current.startIndex}..${current.endIndex} -> ${next.startIndex}..${next.endIndex}`
+    traceScroll(() => `win move    ${current.startIndex}..${current.endIndex} -> ${next.startIndex}..${next.endIndex}`
       + ` top=${Math.round(previewScrollRef.current?.scrollTop ?? -1)}`
       + `${next.startIndex !== current.startIndex ? ' FRONT' : ''}${options?.synchronous ? ' sync' : ''}`)
     pendingCommitRef.current = true
@@ -437,7 +403,7 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     if (!measurement) return
     pendingScrollRef.current = null
     const target = measurement.start + (measurement.size * pending.fraction)
-    tracePreviewWindow(`land    block=${pending.blockIndex} frac=${pending.fraction.toFixed(3)}`
+    traceScroll(() => `win land    block=${pending.blockIndex} frac=${pending.fraction.toFixed(3)}`
       + ` top=${Math.round(scroller.scrollTop)} -> ${Math.round(target)}`)
     // A landing is a deliberate move to somewhere else in the document, so the
     // texture is entitled to jump with it -- what it must not do is drift on
@@ -494,7 +460,7 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     // where it had been. Restating the anchor's position outright cannot do
     // that: run it twice and the second run is a no-op.
     const target = measurement.start + (anchor.scrollTopPx - anchor.startPx)
-    tracePreviewWindow(`carry   block=${anchor.blockIndex} was=${Math.round(anchor.startPx)}@${Math.round(anchor.scrollTopPx)}`
+    traceScroll(() => `win carry   block=${anchor.blockIndex} was=${Math.round(anchor.startPx)}@${Math.round(anchor.scrollTopPx)}`
       + ` now=${Math.round(measurement.start)} top=${Math.round(scroller.scrollTop)} -> ${Math.round(target)}`)
     if (Math.abs(scroller.scrollTop - target) < 0.5) return
     // Whatever this correction takes out of scrollTop, the continuous offset
@@ -607,10 +573,18 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     // after it ends. The one caller that must not be deferred is the cut's own
     // settle, which runs DURING the animation on purpose and is exempt.
     if (!settlingRef.current && isNonQuantizedSmoothScrollActive(scroller)) {
+      // Silent until now, and the first thing to suspect when a travel across
+      // a large note stalls: for the whole of a journey the window does not
+      // move, so a reader carried past its edge is carried into unmounted
+      // space and the scroller has nothing left to give.
+      traceScroll(() => `win defer   journey owns scroller,`
+        + ` top=${Math.round(scroller.scrollTop)}`
+        + ` max=${Math.round(Math.max(0, scroller.scrollHeight - scroller.clientHeight))}`
+        + ` win=${rangeRef.current.startIndex}..${rangeRef.current.endIndex}`)
       scheduleAdjustRef.current?.()
       return
     }
-    tracePreviewWindow(`adjust  top=${Math.round(scroller.scrollTop)} h=${Math.round(contentHeightRef.current)} win=${rangeRef.current.startIndex}..${rangeRef.current.endIndex} avg=${Math.round(averageBlockHeightRef.current)}`)
+    traceScroll(() => `win adjust  top=${Math.round(scroller.scrollTop)} h=${Math.round(contentHeightRef.current)} win=${rangeRef.current.startIndex}..${rangeRef.current.endIndex} avg=${Math.round(averageBlockHeightRef.current)}`)
     const blockCount = previewBlocksRef.current.length
     const next = resolvePreviewWindowAdjustment(rangeRef.current, blockCount, {
       scrollTopPx: scroller.scrollTop,
@@ -618,7 +592,22 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
       contentHeightPx: contentHeightRef.current,
       averageBlockHeightPx: averageBlockHeightRef.current,
     })
-    if (next) moveWindow(next, { synchronous: settlingRef.current })
+    if (next) {
+      moveWindow(next, { synchronous: settlingRef.current })
+      return
+    }
+    // The other silent branch: the pass ran and decided the window is already
+    // right. Worth a line because "the window did not move" and "the window
+    // was never asked" look identical from outside, and only one of them is a
+    // bug. `headroom` is how much scrolling the mounted window can still
+    // absorb -- when that reaches zero and the window still holds, the reader
+    // is against a boundary the window is refusing to open.
+    traceScroll(() => {
+      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      return `win hold    top=${Math.round(scroller.scrollTop)}`
+        + ` headroom=${Math.round(maxTop - scroller.scrollTop)}/${Math.round(maxTop)}`
+        + ` win=${rangeRef.current.startIndex}..${rangeRef.current.endIndex}/${blockCount}`
+    })
   }, [enabled, previewScrollRef, moveWindow])
 
   const adjustRef = useRef(adjust)
@@ -722,11 +711,17 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     const scroller = previewScrollRef.current
     if (!scroller) return
 
-    // Already mounted: this is an ordinary scroll within the window, and the
-    // pixel it lands on is a measured one.
+    // Mounted AND reachable: an ordinary scroll within the window, landing on
+    // a measured pixel. Being mounted is not enough on its own -- the last
+    // screenful of the window cannot be brought to the top of the pane,
+    // because nothing is mounted below it to scroll into, so asking for that
+    // pixel clamps and lands short. Anything the scroller cannot reach is
+    // re-anchored instead, which is the same rule the animated path follows
+    // (usePreviewMarkdownRendering's smoothScrollToChar).
     if (isWithinPreviewWindow(rangeRef.current, target.blockIndex)) {
       const px = resolveCharOffsetPx(charOffset)
-      if (px !== null) {
+      const maxScrollTopPx = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      if (px !== null && px >= 0 && px <= maxScrollTopPx) {
         const previousBehavior = scroller.style.scrollBehavior
         scroller.style.scrollBehavior = 'auto'
         scroller.scrollTop = px

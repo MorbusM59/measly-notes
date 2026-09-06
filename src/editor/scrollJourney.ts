@@ -43,6 +43,7 @@ import {
   buildReleaseRampDownPlanFromCurrentParams,
   buildScrollRampUpPlanFromCurrentParams,
   getRenderScrollMaxSpeedPxPerSec,
+  sampleCurveRampPlan,
   type CurveRampPlan,
 } from './ScrollCurvePlan';
 
@@ -125,7 +126,28 @@ export function resolveBridgeDurationMs(distancePx: number, thresholdPx: number)
  * only when the curve settings cannot produce a ramp at all, which the caller
  * should also treat as "travel it directly".
  */
-export function planScrollJourney(signedDistancePx: number): ScrollJourney | null {
+export function planScrollJourney(
+  signedDistancePx: number,
+  options?: {
+    /**
+     * Bridge however short the journey is.
+     *
+     * The threshold below asks "is there a middle worth cutting", which is
+     * the right question for a pane holding its whole document: a hop shorter
+     * than the two ramps has no middle, and the ordinary curve does it well.
+     *
+     * On a WINDOWED pane it is the wrong question entirely. What decides
+     * there is whether a plain scroll can reach the target at all, and for a
+     * destination outside the mounted window it cannot -- at any distance.
+     * Measured, the threshold is 11,369px at the default curve, which on a
+     * 371px pane is about thirty screenfuls: every scrollbar click landing
+     * nearer than that was planned as direct, aimed at a pixel the scroller
+     * did not have, clamped, and arrived short with no curtain. In a document
+     * past the windowing threshold that is nearly every click.
+     */
+    requireBridge?: boolean
+  },
+): ScrollJourney | null {
   const distancePx = Math.abs(signedDistancePx);
   if (!(distancePx > 0)) return { kind: 'direct', signedDistancePx };
 
@@ -147,7 +169,9 @@ export function planScrollJourney(signedDistancePx: number): ScrollJourney | nul
   };
 
   const thresholdPx = Math.abs(rampUp.signedDistancePx) + Math.abs(rampDown.signedDistancePx);
-  if (!(distancePx > thresholdPx)) return { kind: 'direct', signedDistancePx };
+  if (!options?.requireBridge && !(distancePx > thresholdPx)) {
+    return { kind: 'direct', signedDistancePx };
+  }
 
   const bridgeDurationSec = resolveBridgeDurationMs(distancePx, thresholdPx) / 1000;
 
@@ -169,4 +193,63 @@ export function planScrollJourney(signedDistancePx: number): ScrollJourney | nul
  */
 export function resolveBridgeLandingPx(journey: BridgedJourney, targetScrollTopPx: number): number {
   return targetScrollTopPx - journey.rampDown.signedDistancePx;
+}
+
+// ---------------------------------------------------------------------------
+// The journey as one continuous displacement.
+//
+// A bridged journey used to be three phases with three different notions of
+// motion: the scroller moved for the ramps, the curtain moved for the middle,
+// and the middle's motion was a constant speed because that was the only phase
+// with one. That is why the curtain could only ever cover the middle -- and on
+// a windowed pane, where the mounted runway is a couple of thousand pixels
+// against ramps of tens of thousands, the middle is a small fraction of the
+// time the real text is unavailable. The rest of it was the reader staring at
+// a pinned scroller: measured at 94 consecutive frames, about 1.6 seconds.
+//
+// These three functions replace that with one quantity: where the document
+// WOULD be, relative to where it set off, if every block of it were mounted.
+// The engine then has only one decision to make each frame -- whether that
+// position can be shown with real text or has to be shown with spoof -- and
+// the curtain covers exactly the interval where it cannot. See
+// NonQuantizedSmoothScroll.ts.
+//
+// It also makes both seams continuous by construction. The curtain is driven
+// by this same displacement, so it enters at exactly the speed the real text
+// was moving when the runway ran out, and leaves at exactly the speed the real
+// text picks up again -- rather than at a constant peak speed that matches
+// neither end.
+// ---------------------------------------------------------------------------
+
+/** Signed displacement from the start of a bridged journey, at `elapsedSec`. */
+export function sampleJourneyDisplacement(journey: BridgedJourney, elapsedSec: number): number {
+  if (!(elapsedSec > 0)) return 0;
+  const rampUpSec = journey.rampUp.durationSec;
+  const plateauEndSec = rampUpSec + journey.bridgeDurationSec;
+
+  if (elapsedSec < rampUpSec) return sampleCurveRampPlan(journey.rampUp, elapsedSec);
+
+  const afterRampUpPx = journey.rampUp.signedDistancePx;
+  if (elapsedSec < plateauEndSec) {
+    const direction = journey.signedDistancePx >= 0 ? 1 : -1;
+    return afterRampUpPx + (direction * journey.peakSpeedPxPerSec * (elapsedSec - rampUpSec));
+  }
+
+  return afterRampUpPx
+    + journey.bridgeDistancePx
+    + sampleCurveRampPlan(journey.rampDown, elapsedSec - plateauEndSec);
+}
+
+/** Everything the journey covers, start to finish. Signed. */
+export function journeyTotalDisplacementPx(journey: BridgedJourney): number {
+  return journey.rampUp.signedDistancePx
+    + journey.bridgeDistancePx
+    + journey.rampDown.signedDistancePx;
+}
+
+/** How long it all takes. */
+export function journeyDurationSec(journey: BridgedJourney): number {
+  return journey.rampUp.durationSec
+    + journey.bridgeDurationSec
+    + journey.rampDown.durationSec;
 }

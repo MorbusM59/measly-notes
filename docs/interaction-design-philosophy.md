@@ -117,6 +117,120 @@ The goal is deterministic behavior with one source of truth per interaction phas
   missing reading, and treating it as one leaves the last edge standing, so
   every later press in any direction drags the caret back to it.
 
+### 3e3. A long journey is one displacement, shown two ways
+- **The curve is the whole-document curve.** `sampleJourneyDisplacement`
+  (`src/editor/scrollJourney.ts`) says where the document *would* be at any
+  moment if every block of it were mounted — ramp up, plateau, ramp down, as a
+  single continuous position. A windowed pane does not get a different or
+  shorter journey; it gets the same one, shown differently.
+- **The only per-frame question is whether that position can be shown with
+  real text.** If it can, the scroller scrolls. If it cannot, the curtain
+  covers it. The curtain is therefore up for exactly the interval the pane
+  cannot show, which on a windowed pane is most of the journey rather than
+  only its middle.
+- **What this replaced.** Three phases with three notions of motion, in which
+  the curtain was driven at a constant peak speed because the plateau was the
+  only phase that had one. It could only ever cover the plateau, so on a
+  windowed pane — a mounted runway of a couple of thousand pixels against ramps
+  of tens of thousands — the reader spent the rest of the journey watching a
+  pinned scroller: measured at **94 consecutive frames, about 1.6 seconds**, of
+  which the curtain covered one. There are now zero pinned frames, because
+  nothing ever asks the scroller for a position it cannot give.
+- **Both seams are continuous by construction.** The curtain is driven by the
+  same displacement, so it enters at exactly the speed the real text was moving
+  when the runway ran out, and leaves at exactly the speed the real text picks
+  up again. Measured on a windowed travel: entering at 1.13 viewports per frame
+  and leaving at 0.57, against 3.58 under the old constant peak-speed drive.
+  That is also what made the spoof visible again — it used to cross the pane
+  faster than it could be read.
+- **Full cover has to be reached as the runway runs out, not after it.** The
+  leading seam must sweep in over text that is still moving; a frozen strip
+  beside a moving one is more obviously wrong than the cut it is hiding. So
+  cover starts a viewport's worth of travel early.
+- **Two lower bounds decide when the curtain lifts, and the longer wins.** The
+  landing runway (cover until there is real text to arrive over) and the
+  plateau (the middle is skipped rather than travelled, and that skip stays
+  covered however much document sits either side of it). Without the second, a
+  pane holding the whole document lifts the curtain after a single frame and
+  shows a 126,909px jump.
+- **The curtain's length is free.** It is a childless element clipped by a
+  viewport-sized host, so only the visible strip is laid out and painted.
+  Measured across band heights from 6,000px to 1,000,000px: **0.17–0.19
+  ms/frame, flat** — about 1% of a 60fps budget, and independent of how far the
+  journey goes.
+
+### 3e3b. Mounted is not reachable
+- A windowed pane has three different answers to "where is that character",
+  and only one of them decides whether a travel needs the curtain:
+  **is it mounted** (a measurement exists), **is it in the window** (the block
+  index is in range), and **can a plain scroll get there** (its pixel is inside
+  `[0, maxScrollTop]`). Only the third is a question about `scrollTop`, and it
+  is the one that must be asked.
+- Conflating the first with the third is what sent most scrollbar clicks in a
+  large note nowhere. The window's last screenful is mounted, in range, and
+  *unreachable*: it cannot be brought to the top of the pane because nothing is
+  mounted below it to scroll into. Asking for that pixel clamps, so the travel
+  lands short of where the reader clicked — and no curtain is raised, because
+  the branch that clamped had already decided none was needed.
+- So the rule is: **the curtain is raised whenever a plain scroll cannot
+  reach the target**, not whenever the target is outside the window. In a
+  document past the 50,000-character windowing threshold that is almost every
+  scrollbar click. Both paths follow it — the animated one
+  (`smoothScrollToChar`) and the instant one (`scrollToChar`).
+- The old predicate came from the chunked virtualizer, where "in the current
+  chunk" and "reachable" genuinely were the same question. Windowing replaced
+  chunking and they stopped being the same; the predicate did not follow.
+- **Distance does not decide whether a windowed travel is bridged.** The
+  journey planner's own threshold asks "is there a middle worth cutting" — a
+  hop shorter than the two ramps has none, so it plays as an ordinary curve.
+  That is right for a pane holding its whole document and wrong for a windowed
+  one, where a target outside the window is unreachable *at any distance*.
+  Measured: the threshold is 11,369px at the default curve, about **thirty
+  screenfuls** of a 371px pane, so every scrollbar click landing nearer than
+  that was planned as direct, aimed at a pixel the scroller did not have,
+  clamped, and arrived short with no curtain. In a document past the windowing
+  threshold that is nearly every click, and only the longest ones ever
+  bridged.
+- So the planner takes `requireBridge`, and the engine sets it from
+  `journeyDistancePx` — the option one caller passes for exactly one reason,
+  that the destination has no pixel in this scroller. Inferred from the option
+  already there rather than given a flag of its own: two flags meaning the same
+  thing is how they come to disagree, which is the bug directly above.
+- **A ratio that cannot be resolved must still move the reader.** The tail
+  probe measures how many characters the last screen holds, and restarts on
+  every change of document, typography or pane width. Until it answers, the
+  ratio-to-character mapping used to return null — and a null there made the
+  click do nothing at all, silently. Mapping straight through the document is
+  slightly low at the very bottom of the track and the scroller clamps that
+  itself; a dropped click has no such excuse.
+
+### 3e4. `scroll-behavior` has one owner and many borrowers
+- `.markdown-preview` carries `scroll-behavior: smooth` in CSS, so anything
+  driving its own animation must hold `auto` for the length of its run. Four
+  things in the render view do, and they overlap constantly: a journey, a wheel
+  glide or coast, a held page key, a thumb drag.
+- Save-set-restore is correct for one borrower and wrong for two, and both
+  failures shipped. **Inner finishes first:** it hands the property back to
+  what it found, which is the outer borrower's `auto`, and the pane never sees
+  its CSS again. **Outer finishes first:** it restores the real value while the
+  inner one is still animating, so every remaining write is natively
+  smooth-scrolled and each frame retargets the last — measured, a 400px journey
+  that should run 0-19-65-201-336-382-397-400 instead moved **four pixels and
+  stopped.** It reads as a short nudge in the right direction that gives up.
+- That second one happened on every wheel gesture followed by a scrollbar
+  click, because the glide's teardown fires precisely when it notices a journey
+  has taken the scroller. It was invisible on long journeys — their ramps are
+  under the curtain and the landing is set directly — and fatal on short ones.
+- So the property is owned by `src/editor/scrollBehaviorLock.ts` and callers
+  take a counted borrow. First borrow records the real inline value and sets
+  `auto`; last release puts it back. Releases are idempotent, because teardown
+  here is reached from a frame loop finishing, a cancel and an unmount, and any
+  two can fire for the same borrow.
+- **Synchronous save-set-restore around a single write does not need the lock**
+  — nothing can interleave with it, and whatever it saves is what it restores.
+  Only borrows that outlive a frame do. Adding a new one of those without
+  taking a borrow reintroduces the whole class.
+
 ### 3f. A journey in flight is not interruptible, except to end it
 - While a scroll is travelling, an ordinary click on the track is ignored. A
   second journey would inherit the stretched thumb as its own base size and

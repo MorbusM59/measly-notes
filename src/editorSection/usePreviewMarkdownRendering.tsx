@@ -29,6 +29,7 @@ import type { ParsedInternalNoteLink } from '../shared/internalNoteLinks'
 import { splitMarkdownIntoPreviewBlocksIncremental, type PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
 import { resolvePreviewBlockIndexForSourceLine } from '../editor/PreviewBlockIndex'
 import { isNonQuantizedSmoothScrollActive, scrollToNonQuantizedSmooth } from '../editor/NonQuantizedSmoothScroll'
+import { traceScroll } from '../editor/scrollTrace'
 import {
   isContinuousDocument,
   resolveChunkedCharTarget,
@@ -1686,13 +1687,28 @@ export function usePreviewMarkdownRendering({
     const scroller = previewScrollRef.current
     if (!scroller) return null
     if (isWindowed) {
-      // A destination inside the window is an ordinary curve over measured
-      // pixels. One outside it has no pixel in this scroller at all, so the
-      // journey is planned from the CHARACTER distance and the window is
-      // re-anchored at the cut, under the curtain -- see the onBridgeCut
-      // option in NonQuantizedSmoothScroll.ts.
+      // A destination the scroller can actually reach is an ordinary curve
+      // over measured pixels. Anything else is planned from the CHARACTER
+      // distance and the window is re-anchored at the cut, under the curtain
+      // -- see the onBridgeCut option in NonQuantizedSmoothScroll.ts.
+      //
+      // MOUNTED IS NOT REACHABLE, and conflating the two is what sent most
+      // scrollbar clicks in a large note nowhere. A block can be inside the
+      // window and still sit past `maxScrollTop`: the window's last screenful
+      // cannot be brought to the top of the pane, because nothing is mounted
+      // below it to scroll into. Asking for that pixel clamps, so the travel
+      // lands short of where the reader clicked -- and no curtain is raised,
+      // because this branch has already decided none is needed. The question
+      // is not "is it mounted" but "can a plain scroll get there", and only
+      // the second one is a question about `scrollTop`.
       const mounted = previewWindow.api.resolveCharOffsetPx(charOffset)
-      if (mounted !== null) return scrollToNonQuantizedSmooth(scroller, mounted)
+      const maxScrollTopPx = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      const reachable = mounted !== null && mounted >= 0 && mounted <= maxScrollTopPx
+      traceScroll(() => `route   char=${charOffset}`
+        + ` mounted=${mounted === null ? 'not in window' : Math.round(mounted)}`
+        + ` max=${Math.round(maxScrollTopPx)}`
+        + ` -> ${reachable ? 'plain scroll' : 'BRIDGE'}`)
+      if (reachable) return scrollToNonQuantizedSmooth(scroller, mounted)
 
       const viewport = previewWindow.api.readCharViewport()
       const startChar = viewport?.startChar ?? 0
@@ -1952,9 +1968,26 @@ export function usePreviewMarkdownRendering({
 
     const resolveChunkedTarget = (ratio: number) => {
       const viewport = readCharViewport()
+      if (!viewport) return null
+      // The tail probe measures how many characters the last screen holds, so
+      // that the bottom of the track means the end of the document rather
+      // than a screen short of it. It restarts on every change of document,
+      // typography or pane width, and until it answers this used to return
+      // null -- which made `travelToRatio` return null, which made the click
+      // do NOTHING AT ALL. A click that is silently dropped is far worse than
+      // one that lands slightly low at the very bottom of the track, and the
+      // scroller clamps that overshoot itself, so zero is the honest stand-in
+      // while the real answer is still being measured.
       const lastScreenChars = readLastScreenChars()
-      if (!viewport || lastScreenChars === null) return null
-      return resolveChunkedCharTarget({ ratio, totalChars: viewport.totalChars, lastScreenChars })
+      if (lastScreenChars === null) {
+        traceScroll(() => `route   ratio=${ratio.toFixed(4)} tail probe not ready,`
+          + ` mapping straight through the document`)
+      }
+      return resolveChunkedCharTarget({
+        ratio,
+        totalChars: viewport.totalChars,
+        lastScreenChars: lastScreenChars ?? 0,
+      })
     }
 
     return {

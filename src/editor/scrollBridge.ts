@@ -27,6 +27,7 @@
 // same as one that is two thousand.
 
 import { drawBridgeTile, sampleDocumentLineRhythm } from './scrollBridgeTexture'
+import { traceScroll } from './scrollTrace'
 
 export interface ScrollBridgeStyle {
   /** The document's own text, for its line rhythm. */
@@ -95,6 +96,20 @@ export interface ScrollBridge {
   begin: (requestedDistancePx: number, direction: -1 | 1) => number | null
   /** Moves the curtain to `travelledPx` into its sweep. */
   advance: (travelledPx: number) => void
+  /**
+   * Re-sizes the sweep once its true length is known.
+   *
+   * The curtain has to stop covering exactly when real text becomes available
+   * again, and how far away that is depends on where the journey lands --
+   * which is not known until the cut, because the cut is what decides it. So
+   * the band opens at its longest and is trimmed here.
+   *
+   * Legal only while fully covering, which is when the cut happens: the band
+   * is trimmed from its trailing edge, and that edge is below the pane. A
+   * caller that resized at any other moment would be dragging a visible edge
+   * across the reader's view.
+   */
+  resizeSweep: (sweepPx: number) => number
   /** Whether the viewport is fully covered, and so safe to jump underneath. */
   isCovering: (travelledPx: number) => boolean
   end: () => void
@@ -139,6 +154,11 @@ export function resolveScrollBridge(scroller: HTMLElement): ScrollBridge | null 
   let sweepDistancePx = 0
   let direction: -1 | 1 = 1
   let rowGrid: { heightPx: number; phasePx: number } | null = null
+  // Trace-only bookkeeping; costs two assignments per frame when the flag is
+  // off, which is cheaper than the branch that would avoid them.
+  let lastTravelledPx: number | null = null
+  let wasCovering = false
+  let tileHeightForTrace = 1
 
   /**
    * Where the band may actually sit.
@@ -164,6 +184,13 @@ export function resolveScrollBridge(scroller: HTMLElement): ScrollBridge | null 
   }
 
   const teardown = () => {
+    if (root) {
+      traceScroll(() => `bridge end     last travelled=${lastTravelledPx === null ? 'never advanced' : Math.round(lastTravelledPx)}`
+        + ` of sweep=${Math.round(sweepDistancePx)}`
+        + (lastTravelledPx === null ? ' <-- curtain was raised but NEVER MOVED' : ''))
+    }
+    lastTravelledPx = null
+    wasCovering = false
     root?.remove()
     root = null
     band = null
@@ -176,10 +203,16 @@ export function resolveScrollBridge(scroller: HTMLElement): ScrollBridge | null 
       const host = surface.host
       viewportHeightPx = host.clientHeight
       const widthPx = host.clientWidth
-      if (!(viewportHeightPx > 0) || !(widthPx > 0)) return null
+      if (!(viewportHeightPx > 0) || !(widthPx > 0)) {
+        traceScroll(() => `bridge DECLINED host has no box (${widthPx}x${viewportHeightPx})`)
+        return null
+      }
 
       const style = surface.readStyle()
-      if (!style) return null
+      if (!style) {
+        traceScroll(() => 'bridge DECLINED readStyle() returned null')
+        return null
+      }
 
       const key = [
         widthPx, style.lineHeightPx, style.fontPx, style.fontFamily,
@@ -201,10 +234,14 @@ export function resolveScrollBridge(scroller: HTMLElement): ScrollBridge | null 
           cellWidthPx: style.cellWidthPx,
           devicePixelRatio: typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1,
         })
-        if (!drawn) return null
+        if (!drawn) {
+          traceScroll(() => 'bridge DECLINED drawBridgeTile() returned null')
+          return null
+        }
         tile = { key, dataUri: drawn.dataUri, heightPx: drawn.heightPx }
         tiles.set(host, tile)
       }
+      tileHeightForTrace = Math.max(1, tile.heightPx)
 
       rowGrid = style.rowGrid && style.rowGrid.heightPx > 0 ? style.rowGrid : null
       direction = nextDirection
@@ -233,12 +270,60 @@ export function resolveScrollBridge(scroller: HTMLElement): ScrollBridge | null 
       // position first.
       const startTop = placeBandTopPx(direction > 0 ? viewportHeightPx : -bandHeightPx, 'out')
       band.style.top = `${startTop}px`
+
+      // The three numbers that decide whether the curtain can read as text at
+      // all. It sweeps at the journey's peak speed, so at 60fps it advances
+      // `sweep/duration/60` per frame; when that is more than a viewport the
+      // reader sees disjoint slices rather than motion, and when it is near a
+      // half-multiple of the tile period the slices alternate between two
+      // phases and it reads as a flicker -- the wagon-wheel case
+      // BRIDGE_TILE_LINES was chosen to avoid. `requested` vs `sweep` also
+      // shows when MINIMUM_SWEEP_VIEWPORTS had to stretch a short bridge.
+      traceScroll(() => {
+        const tileHeightPx = tile ? tile.heightPx : 0
+        return `bridge begin   requested=${Math.round(requestedDistancePx)}`
+          + ` sweep=${Math.round(sweepDistancePx)} band=${Math.round(bandHeightPx)}`
+          + ` viewport=${Math.round(viewportHeightPx)} tile=${Math.round(tileHeightPx)}`
+          + ` dir=${direction} grid=${rowGrid ? 'rows' : 'free'}`
+      })
+      return sweepDistancePx
+    },
+
+    resizeSweep: (nextSweepPx) => {
+      if (!band) return sweepDistancePx
+      const nextSweep = Math.max(nextSweepPx, viewportHeightPx * MINIMUM_SWEEP_VIEWPORTS)
+      if (Math.abs(nextSweep - sweepDistancePx) < 1) return sweepDistancePx
+      sweepDistancePx = nextSweep
+      bandHeightPx = sweepDistancePx - viewportHeightPx
+      band.style.height = `${bandHeightPx}px`
+      traceScroll(() => `bridge resize  sweep=${Math.round(sweepDistancePx)} band=${Math.round(bandHeightPx)}`)
       return sweepDistancePx
     },
 
     advance: (travelledPx) => {
       if (!band) return
       const travelled = Math.max(0, Math.min(sweepDistancePx, travelledPx))
+      // Per-frame advance, measured rather than assumed: this is the number
+      // that says whether the spoof could be seen. Logged on the first
+      // advance and then only when cover starts or ends, so a bridge costs a
+      // handful of lines rather than one per frame.
+      if (lastTravelledPx === null) {
+        traceScroll(() => `bridge advance first travelled=${Math.round(travelled)}`)
+      } else if (travelled !== lastTravelledPx) {
+        const stepPx = travelled - lastTravelledPx
+        const covering = travelled >= viewportHeightPx && travelled <= bandHeightPx
+        if (covering !== wasCovering) {
+          wasCovering = covering
+          traceScroll(() => `bridge ${covering ? 'COVERS ' : 'uncover'} travelled=${Math.round(travelled)}`
+            + ` step=${Math.round(stepPx)}px/frame`
+            + ` =${(stepPx / Math.max(1, viewportHeightPx)).toFixed(2)} viewports`
+            + `, ${(stepPx / Math.max(1, tileHeightForTrace)).toFixed(3)} tiles`
+            + (Math.abs((stepPx / Math.max(1, tileHeightForTrace)) % 1 - 0.5) < 0.12
+              ? ' <-- near half a tile per frame: reads as a two-state flicker'
+              : ''))
+        }
+      }
+      lastTravelledPx = travelled
       // Downward journeys move content up the screen, so the band comes up
       // from below; upward journeys are the mirror.
       const topPx = placeBandTopPx(direction > 0

@@ -11,12 +11,19 @@
 
 import {
   buildScrollPlanFromCurrentParams,
-  sampleCurveRampPlan,
   sampleScrollPlan,
 } from './ScrollCurvePlan';
-import { planScrollJourney, type ScrollJourneyTiming } from './scrollJourney';
+import {
+  journeyDurationSec,
+  journeyTotalDisplacementPx,
+  planScrollJourney,
+  sampleJourneyDisplacement,
+  type ScrollJourneyTiming,
+} from './scrollJourney';
 import { resolveScrollBridge } from './scrollBridge';
+import { traceScroll } from './scrollTrace';
 
+import { borrowAutoScrollBehavior } from './scrollBehaviorLock';
 /**
  * Whether the reader has asked for less movement.
  *
@@ -86,7 +93,7 @@ interface NonQuantizedSmoothScrollOptions {
 interface AnimationState {
   rafId: number;
   targetScrollTopPx: number;
-  previousScrollBehavior: string;
+  releaseScrollBehavior: () => void;
   /**
    * Torn down whether the animation finishes or is interrupted.
    *
@@ -106,7 +113,7 @@ const cancelExistingAnimation = (scroller: HTMLElement): void => {
   if (!current) return;
   cancelAnimationFrame(current.rafId);
   current.onCancel?.();
-  scroller.style.scrollBehavior = current.previousScrollBehavior;
+  current.releaseScrollBehavior();
   activeAnimations.delete(scroller);
 };
 
@@ -173,18 +180,54 @@ export function scrollToNonQuantizedSmooth(
     return null;
   }
 
-  const previousScrollBehavior = scroller.style.scrollBehavior;
-  scroller.style.scrollBehavior = 'auto';
+  const releaseScrollBehavior = borrowAutoScrollBehavior(scroller);
 
   const finish = () => {
-    scroller.scrollTop = clamp(targetPx, 0, maxScrollTopPx);
+    const landed = clamp(targetPx, 0, maxScrollTopPx);
+    traceScroll(() => `journey land    at=${Math.round(landed)}`
+      + ` target=${Math.round(targetPx)} max=${Math.round(maxScrollTopPx)}`
+      + (Math.abs(landed - targetPx) > 0.5 ? ' (SHORT: target outside scroller)' : ''));
+    scroller.scrollTop = landed;
     options?.onStep?.();
-    scroller.style.scrollBehavior = previousScrollBehavior;
+    releaseScrollBehavior();
     activeAnimations.delete(scroller);
   };
 
-  const step = (nextPx: number) => {
+  // How many frames in a row the engine has asked for a position the scroller
+  // could not give it. Counted rather than logged per frame: a journey that
+  // spends its whole bridge pinned against a boundary would otherwise bury
+  // everything else in the buffer, and the number of consecutive frames is
+  // the diagnostic anyway -- one is rounding, forty is a wall.
+  let pinnedFrames = 0;
+
+  const step = (nextPx: number, hidden = false) => {
     const clamped = clamp(nextPx, 0, maxScrollTopPx);
+    if (hidden) {
+      // Behind the curtain the scroller's position is not visible, so a clamp
+      // here is the design working rather than a scroll failing to arrive --
+      // reporting it would bury the real ones.
+      if (scroller.scrollTop !== clamped) {
+        scroller.scrollTop = clamped;
+        options?.onStep?.();
+      }
+      return;
+    }
+    // The silent failure this trace exists for: the engine is asking the
+    // scroller to go somewhere it cannot, because on a windowed pane the
+    // mounted content is a few screenfuls and the destination is not in it.
+    // From outside this looks exactly like a scroll that stopped arriving.
+    if (Math.abs(nextPx - clamped) > 0.5) {
+      pinnedFrames += 1;
+      if (pinnedFrames === 1 || pinnedFrames % 15 === 0) {
+        traceScroll(() => `journey PINNED  want=${Math.round(nextPx)}`
+          + ` got=${Math.round(clamped)} max=${Math.round(maxScrollTopPx)}`
+          + ` short=${Math.round(nextPx - clamped)}px frames=${pinnedFrames}`);
+      }
+    } else if (pinnedFrames > 0) {
+      const held = pinnedFrames;
+      pinnedFrames = 0;
+      traceScroll(() => `journey freed   after ${held} pinned frame(s), top=${Math.round(clamped)}`);
+    }
     if (scroller.scrollTop !== clamped) {
       scroller.scrollTop = clamped;
       options?.onStep?.();
@@ -196,7 +239,7 @@ export function scrollToNonQuantizedSmooth(
     activeAnimations.set(scroller, {
       rafId: requestAnimationFrame(frame),
       targetScrollTopPx: targetPx,
-      previousScrollBehavior,
+      releaseScrollBehavior,
       onCancel,
     });
   };
@@ -204,24 +247,69 @@ export function scrollToNonQuantizedSmooth(
   // A journey long enough to have a middle worth cutting, on a pane that can
   // cover the cut. Everything else falls through to the plain point-to-point
   // curve below.
-  const journey = planScrollJourney(signedDistance);
+  // `journeyDistancePx` is set by exactly one caller, for exactly one reason:
+  // the destination has no pixel in this scroller, because the pane is
+  // windowed and the target is outside the mounted window. That is the same
+  // condition as "a plain scroll cannot reach it", so its presence is what
+  // makes the curtain mandatory rather than a function of distance. Inferred
+  // from the option already present rather than given a flag of its own --
+  // two flags meaning the same thing is how they come to disagree.
+  const journey = planScrollJourney(signedDistance, {
+    requireBridge: options?.journeyDistancePx !== undefined,
+  });
+  traceScroll(() => `journey plan    kind=${journey?.kind ?? 'null'}`
+    + ` asked=${Math.round(signedDistance)}px`
+    + ` reachable=${Math.round(targetPx - startPx)}px`
+    + ` start=${Math.round(startPx)} target=${Math.round(targetPx)} max=${Math.round(maxScrollTopPx)}`
+    + (options?.journeyDistancePx !== undefined ? ' (windowed: curtain required)' : ''));
   const bridge = journey?.kind === 'bridged' ? resolveScrollBridge(scroller) : null;
   const direction: -1 | 1 = signedDistance >= 0 ? 1 : -1;
+  // How much real scrolling is available before the reader runs out of mounted
+  // document, and therefore how much of the journey has to be spoofed. On a
+  // pane holding the whole document this is the whole distance and the curtain
+  // is never needed; on a windowed one it is a screenful or two against a
+  // journey of tens of thousands of pixels.
+  const viewportPx = Math.max(1, scroller.clientHeight);
+  const runwayPx = direction > 0 ? maxScrollTopPx - startPx : startPx;
+  // Full cover has to be reached exactly as the runway runs out, so the
+  // leading seam sweeps in over text that is still moving. A frozen strip
+  // beside a moving one is more obviously wrong than the cut it is hiding.
+  //
+  // Bounded by the ramp-up as well as by the runway, and for a different
+  // reason: a bridged journey deliberately does not travel its whole distance
+  // -- the middle is cut -- so the cut has to happen, and cannot happen until
+  // the pane is covered. On a windowed pane the runway is the binding
+  // constraint; on one holding the whole document the ramp-up is, and without
+  // this term the curtain would never rise there and the journey would stop
+  // short by everything the cut was meant to skip.
+  const coverStartPx = Math.max(0, Math.min(
+    runwayPx,
+    journey?.kind === 'bridged' ? Math.abs(journey.rampUp.signedDistancePx) : runwayPx,
+  ) - viewportPx);
+  const totalVirtualPx = journey?.kind === 'bridged' ? journeyTotalDisplacementPx(journey) : 0;
+  // Opened at its longest -- the landing runway is nil until the cut says
+  // otherwise -- and trimmed by resizeSweep once the cut knows better.
   const sweepPx = journey?.kind === 'bridged' && bridge
-    ? bridge.begin(Math.abs(journey.bridgeDistancePx), direction)
+    ? bridge.begin(Math.abs(totalVirtualPx) - coverStartPx + viewportPx, direction)
     : null;
 
   if (journey?.kind === 'bridged' && bridge && sweepPx !== null) {
-    // The curtain may sweep further than the plan asked -- it has to be at
-    // least a few viewports to cover anything -- so the bridge's own duration
-    // comes from what it actually does, not from what it was asked for.
-    const bridgeSec = sweepPx / journey.peakSpeedPxPerSec;
-    const rampUpSec = journey.rampUp.durationSec;
-    const bridgeEndSec = rampUpSec + bridgeSec;
-    const totalSec = bridgeEndSec + journey.rampDown.durationSec;
-
-    const afterRampUpPx = startPx + journey.rampUp.signedDistancePx;
-    let beforeRampDownPx = targetPx - journey.rampDown.signedDistancePx;
+    // ONE journey, shown two ways.
+    //
+    // `sampleJourneyDisplacement` says where the document would be if all of
+    // it were mounted -- the same curve a whole-document pane would follow.
+    // Each frame this asks one question of that position: can it be shown
+    // with real text, or does it have to be shown with spoof? The curtain is
+    // up for exactly the interval where the answer is spoof, which on a
+    // windowed pane is most of the journey rather than only its middle.
+    //
+    // This replaces three phases with three notions of motion, under which
+    // the curtain could only ever cover the constant-speed middle -- about
+    // one frame in ninety-four of the time the pane could not actually move.
+    // See scrollJourney.ts for why the displacement lives there.
+    const totalSec = journeyDurationSec(journey);
+    const totalMagnitudePx = Math.abs(totalVirtualPx);
+    let sweep = sweepPx;
     let jumped = false;
     let startTimeMs: number | null = null;
     onCancel = () => bridge.end();
@@ -236,36 +324,67 @@ export function scrollToNonQuantizedSmooth(
         return;
       }
 
-      if (elapsedSec < rampUpSec) {
-        step(startPx + sampleCurveRampPlan(journey.rampUp, elapsedSec));
-      } else if (elapsedSec < bridgeEndSec) {
-        const travelled = (elapsedSec - rampUpSec) * journey.peakSpeedPxPerSec;
-        bridge.advance(travelled);
-        // Before the cut the pane is only partly covered, so the real content
-        // has to keep moving at the same speed the curtain is -- a frozen
-        // strip beside a moving one is more obviously wrong than the cut this
-        // is hiding. After the cut the same rule runs backwards from the far
-        // end, so the ramp-down starts from exactly where it expects to.
-        if (!jumped && bridge.isCovering(travelled)) {
-          jumped = true;
-          // The pane is fully covered: the one moment a caller may put its
-          // destination somewhere else entirely. Re-read the geometry
-          // afterwards -- a windowed pane's scroll space is a different size
-          // now, and every clamp below depends on it.
-          const relocated = options?.onBridgeCut?.();
-          if (relocated !== null && relocated !== undefined) {
-            maxScrollTopPx = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-            targetPx = clamp(relocated, 0, maxScrollTopPx);
-            beforeRampDownPx = targetPx - journey.rampDown.signedDistancePx;
-          }
-        }
-        step(jumped
-          ? beforeRampDownPx - (direction * (sweepPx - travelled))
-          : afterRampUpPx + (direction * travelled));
-      } else {
-        bridge.advance(sweepPx);
-        step(beforeRampDownPx + sampleCurveRampPlan(journey.rampDown, elapsedSec - bridgeEndSec));
+      const virtualPx = sampleJourneyDisplacement(journey, elapsedSec);
+      const travelledPx = Math.abs(virtualPx) - coverStartPx;
+
+      // Still inside the mounted runway: ordinary scrolling, no curtain.
+      if (travelledPx <= 0) {
+        step(startPx + virtualPx);
+        keepAnimating(animateJourney);
+        return;
       }
+
+      bridge.advance(travelledPx);
+      const covering = bridge.isCovering(travelledPx);
+
+      if (!jumped && covering) {
+        jumped = true;
+        traceScroll(() => `journey CUT     covered at travelled=${Math.round(travelledPx)}px,`
+          + ` relocating destination`);
+        // The pane is fully covered: the one moment a caller may put its
+        // destination somewhere else entirely. Re-read the geometry
+        // afterwards -- a windowed pane's scroll space is a different size
+        // now, and every clamp below depends on it.
+        const relocated = options?.onBridgeCut?.();
+        traceScroll(() => `journey cut->   onBridgeCut returned ${relocated ?? 'null (target kept)'}`);
+        if (relocated !== null && relocated !== undefined) {
+          maxScrollTopPx = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+          targetPx = clamp(relocated, 0, maxScrollTopPx);
+        }
+        // Only now is it known how much real scrolling is available on the
+        // far side, and therefore where the curtain must stop covering. Safe
+        // to trim here and nowhere else: the trailing edge being moved is
+        // below the pane, because the pane is fully covered.
+        const landingRunwayPx = direction > 0 ? targetPx : maxScrollTopPx - targetPx;
+        // Two lower bounds on how long the curtain stays up, and the longer
+        // one wins. The first is the landing runway: cover until there is
+        // real text to arrive over. The second is the plateau: the middle of
+        // a bridged journey is skipped rather than travelled, and that skip
+        // has to stay covered however much mounted document sits either side
+        // of it -- on a pane holding the whole document the landing runway
+        // can be a hundred thousand pixels, which would otherwise lift the
+        // curtain after a single frame and show the jump it exists to hide.
+        const throughPlateauPx = Math.abs(journey.rampUp.signedDistancePx)
+          + Math.abs(journey.bridgeDistancePx);
+        sweep = bridge.resizeSweep(Math.max(
+          totalMagnitudePx - landingRunwayPx,
+          throughPlateauPx,
+        ) - coverStartPx + viewportPx);
+        traceScroll(() => `journey cut ok  newMax=${Math.round(maxScrollTopPx)}`
+          + ` target=${Math.round(targetPx)}`
+          + ` landingRunway=${Math.round(landingRunwayPx)} sweep=${Math.round(sweep)}`);
+      }
+
+      // Where the reader is, relative to the target, in the space they will
+      // actually arrive in. Before the cut that space is still the old
+      // window, so this is written from the start instead.
+      const remainingPx = totalMagnitudePx - Math.abs(virtualPx);
+      step(
+        jumped ? targetPx - (direction * remainingPx) : startPx + virtualPx,
+        // Fully covered means nothing here is visible, so a clamp is the
+        // design and not a defect.
+        covering,
+      );
 
       keepAnimating(animateJourney);
     };
@@ -274,7 +393,7 @@ export function scrollToNonQuantizedSmooth(
     return {
       rampUp: journey.rampUp,
       rampDown: journey.rampDown,
-      bridgeDurationSec: bridgeSec,
+      bridgeDurationSec: journey.bridgeDurationSec,
     };
   }
 
