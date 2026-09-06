@@ -6,7 +6,13 @@ import {
   WHEEL_SPIN_DAMPEN_ENDLESS,
   resolveWheelSpinDecay,
 } from './wheelSpin'
-import { buildWheelSpinProfile, sampleWheelSpinProfile } from './wheelSpinProfile'
+import {
+  addWheelSpinProfileCarry,
+  buildWheelSpinProfile,
+  sampleWheelSpinProfile,
+  wheelSpinProfileEndMs,
+  wheelSpinProfileSpeedPxPerMs,
+} from './wheelSpinProfile'
 
 const PIXELS_PER_NUDGE = 76.8
 
@@ -269,7 +275,7 @@ describe('buildWheelSpinProfile', () => {
         carryPx: CARRY_PX,
       })
       const plain = buildDefault()
-      expect(carried.carryBlendMs).toBeCloseTo(carried.tailStartMs, 6)
+      expect(carried.carries[0].blendMs).toBeCloseTo(carried.tailStartMs, 6)
 
       const h = 0.25
       const speedAt = (profile: typeof carried, tMs: number) =>
@@ -294,14 +300,100 @@ describe('buildWheelSpinProfile', () => {
         carryPx: -50,
         carryBlendMs: CARRY_BLEND_MS,
       })
-      expect(profile.carryPx).toBe(0)
+      expect(profile.carries).toHaveLength(0)
     })
 
     it('is measured in the direction of travel, whichever way that is', () => {
       const up = buildCarried(-1)
-      expect(up.carryPx).toBeCloseTo(CARRY_PX, 6)
+      expect(up.carries[0].px).toBeCloseTo(CARRY_PX, 6)
       expect(sampleWheelSpinProfile(up, up.totalDurationMs).travelledPx)
         .toBeGreaterThan(sampleWheelSpinProfile(buildDefault(), up.totalDurationMs).travelledPx)
+    })
+  })
+
+  describe('a nudge given DURING a coast', () => {
+    const BLEND_MS = 200
+
+    it('adds exactly one nudge, on top of everything else', () => {
+      const plain = buildDefault()
+      const extended = buildDefault()
+      addWheelSpinProfileCarry(extended, PIXELS_PER_NUDGE, 600, BLEND_MS)
+      const endMs = wheelSpinProfileEndMs(extended)
+      const gained = sampleWheelSpinProfile(extended, endMs).travelledPx
+        - sampleWheelSpinProfile(plain, endMs).travelledPx
+      expect(gained).toBeCloseTo(PIXELS_PER_NUDGE, 6)
+    })
+
+    it('changes nothing before the moment it was asked for', () => {
+      const plain = buildDefault()
+      const extended = buildDefault()
+      addWheelSpinProfileCarry(extended, PIXELS_PER_NUDGE, 600, BLEND_MS)
+      for (const tMs of [0, 100, 400, 599]) {
+        expect(sampleWheelSpinProfile(extended, tMs).travelledPx)
+          .toBeCloseTo(sampleWheelSpinProfile(plain, tMs).travelledPx, 6)
+      }
+    })
+
+    it('adds no velocity step at either end of its blend', () => {
+      const extended = buildDefault()
+      addWheelSpinProfileCarry(extended, PIXELS_PER_NUDGE, 600, BLEND_MS)
+      for (const edgeMs of [600, 600 + BLEND_MS]) {
+        const before = wheelSpinProfileSpeedPxPerMs(extended, edgeMs - 3)
+        const after = wheelSpinProfileSpeedPxPerMs(extended, edgeMs + 3)
+        expect(Math.abs(after - before) / before).toBeLessThan(0.1)
+      }
+    })
+
+    it('accumulates when the reader keeps nudging', () => {
+      const plain = buildDefault()
+      const extended = buildDefault()
+      for (let n = 0; n < 4; n += 1) {
+        addWheelSpinProfileCarry(extended, PIXELS_PER_NUDGE, 400 + (n * 150), BLEND_MS)
+      }
+      const endMs = wheelSpinProfileEndMs(extended)
+      expect(sampleWheelSpinProfile(extended, endMs).travelledPx
+        - sampleWheelSpinProfile(plain, endMs).travelledPx)
+        .toBeCloseTo(PIXELS_PER_NUDGE * 4, 6)
+    })
+
+    it('refuses a nudge pointing the other way -- that stops a coast, it does not shorten one', () => {
+      const extended = buildDefault()
+      addWheelSpinProfileCarry(extended, -PIXELS_PER_NUDGE, 600, BLEND_MS)
+      expect(extended.carries).toHaveLength(0)
+    })
+
+    it('is not finished while a late nudge is still arriving', () => {
+      // Reporting the coast over here would drop the very distance the
+      // reader last asked for.
+      const extended = buildDefault()
+      const lateMs = extended.totalDurationMs - 20
+      addWheelSpinProfileCarry(extended, PIXELS_PER_NUDGE, lateMs, BLEND_MS)
+      expect(wheelSpinProfileEndMs(extended)).toBeGreaterThan(extended.totalDurationMs)
+      expect(sampleWheelSpinProfile(extended, extended.totalDurationMs).finished).toBe(false)
+      expect(sampleWheelSpinProfile(extended, wheelSpinProfileEndMs(extended)).finished).toBe(true)
+    })
+
+    it('still never reverses', () => {
+      const extended = buildDefault()
+      addWheelSpinProfileCarry(extended, PIXELS_PER_NUDGE, 600, BLEND_MS)
+      addWheelSpinProfileCarry(extended, PIXELS_PER_NUDGE, 1700, BLEND_MS)
+      let previousPx = -1
+      for (let tMs = 0; tMs <= wheelSpinProfileEndMs(extended); tMs += 1) {
+        const { travelledPx } = sampleWheelSpinProfile(extended, tMs)
+        expect(travelledPx).toBeGreaterThan(previousPx)
+        previousPx = travelledPx
+      }
+    })
+
+    it('reports a speed a respin can be judged against', () => {
+      const profile = buildDefault()
+      const opening = wheelSpinProfileSpeedPxPerMs(profile, 1)
+      const late = wheelSpinProfileSpeedPxPerMs(profile, profile.tailStartMs - 1)
+      expect(opening).toBeCloseTo(PIXELS_PER_NUDGE / 20, 2)
+      // A coast well into its decay is far slower than the rate it was set
+      // at -- which is exactly why a respin is judged against this and not
+      // against the coast's original gap.
+      expect(late).toBeLessThan(opening * 0.25)
     })
   })
 })

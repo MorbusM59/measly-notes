@@ -105,6 +105,34 @@ import { resolveWheelSpinCutoffMs, resolveWheelSpinDecay } from './wheelSpin'
 export type WheelSpinProfileDirection = -1 | 1
 
 /**
+ * Distance added to a coast without disturbing its schedule.
+ *
+ * Two different things need this and they want different pacing, which is
+ * why the blend is per-carry rather than a property of the profile.
+ *
+ * The first is the remainder of the notch that STARTED the coast -- distance
+ * the reader asked for before the coast existed and which is merely
+ * undelivered. It is owed, not urgent, so it spreads across the whole
+ * schedule where it cannot be seen arriving.
+ *
+ * The second is a nudge the reader gives DURING a coast, asking for one more
+ * line. That is a fresh request and should visibly answer, so it arrives
+ * over a notch's own travel time.
+ *
+ * Both use a smootherstep, whose zero velocity and zero acceleration at each
+ * end mean an added distance cannot put a step into the curve it is added
+ * to -- the whole point of the module it is being added to.
+ */
+export interface WheelSpinCarry {
+  /** Unsigned pixels, along the coast's direction of travel. */
+  px: number
+  /** Profile time at which this begins folding in. */
+  startMs: number
+  /** How long it takes to fold in. */
+  blendMs: number
+}
+
+/**
  * A ceiling on how many nudges a coast may be planned as.
  *
  * The schedule terminates on its own for any positive decay -- the longest
@@ -152,9 +180,11 @@ export interface WheelSpinProfile {
   tailDistancePx: number
   /** Past this the coast is over. */
   totalDurationMs: number
-  /** Unpaid distance inherited from the notch that started the coast. */
-  carryPx: number
-  carryBlendMs: number
+  /**
+   * Extra distance owed on top of the schedule, each folded in from its own
+   * moment. See `WheelSpinCarry`.
+   */
+  carries: WheelSpinCarry[]
   /** Forward-walking sample cursor. Mutable; a profile belongs to one coast. */
   cursor: number
 }
@@ -271,8 +301,9 @@ export function buildWheelSpinProfile(input: WheelSpinProfileInput): WheelSpinPr
       tailDurationMs: 0,
       tailDistancePx: 0,
       totalDurationMs: Number.POSITIVE_INFINITY,
-      carryPx,
-      carryBlendMs: Math.max(1, input.carryBlendMs ?? ENDLESS_CARRY_BLEND_MS),
+      carries: carryPx > 0
+        ? [{ px: carryPx, startMs: 0, blendMs: Math.max(1, input.carryBlendMs ?? ENDLESS_CARRY_BLEND_MS) }]
+        : [],
       cursor: 0,
     }
   }
@@ -336,8 +367,7 @@ export function buildWheelSpinProfile(input: WheelSpinProfileInput): WheelSpinPr
     tailDurationMs,
     tailDistancePx,
     totalDurationMs: tailStartMs + tailDurationMs,
-    carryPx,
-    carryBlendMs,
+    carries: carryPx > 0 ? [{ px: carryPx, startMs: 0, blendMs: carryBlendMs }] : [],
     cursor: 0,
   }
 }
@@ -355,10 +385,69 @@ function smootherstep(x: number): number {
   return x * x * x * ((x * ((x * 6) - 15)) + 10)
 }
 
-/** The carry delivered so far, `carryPx` once the blend is done. */
+/** Everything every carry has delivered by `elapsedMs`. */
 function carryAt(profile: WheelSpinProfile, elapsedMs: number): number {
-  if (profile.carryPx === 0) return 0
-  return profile.carryPx * smootherstep(elapsedMs / profile.carryBlendMs)
+  let total = 0
+  for (const carry of profile.carries) {
+    total += carry.px * smootherstep((elapsedMs - carry.startMs) / carry.blendMs)
+  }
+  return total
+}
+
+/**
+ * Add distance to a coast already running, folded in from `atMs`.
+ *
+ * This is what a nudge in the coast's own direction does: the reader asking
+ * for one more line, answered without disturbing the schedule underneath.
+ * A carry pointing the other way is not this coast's to deliver and is
+ * refused -- a reversal stops a coast, it does not shorten one.
+ */
+export function addWheelSpinProfileCarry(
+  profile: WheelSpinProfile,
+  signedPx: number,
+  atMs: number,
+  blendMs: number,
+): void {
+  if (!Number.isFinite(signedPx) || signedPx * profile.direction <= 0) return
+  profile.carries.push({
+    px: Math.abs(signedPx),
+    startMs: Math.max(0, atMs),
+    blendMs: Math.max(1, blendMs),
+  })
+}
+
+/**
+ * When everything this profile owes has been delivered.
+ *
+ * Not simply `totalDurationMs`: a carry added late in a coast can still be
+ * folding in after the schedule and its tail are both spent, and reporting
+ * the coast finished then would drop the very distance the reader last asked
+ * for.
+ */
+export function wheelSpinProfileEndMs(profile: WheelSpinProfile): number {
+  let endMs = profile.totalDurationMs
+  for (const carry of profile.carries) {
+    endMs = Math.max(endMs, carry.startMs + carry.blendMs)
+  }
+  return endMs
+}
+
+/**
+ * How fast the coast is travelling at `atMs`, in px/ms.
+ *
+ * Central difference over the sampler, so it reads the schedule, the tail
+ * and any carry in flight alike. Its inverse -- pixels per nudge divided by
+ * this -- is the coast's effective nudge interval, which is the number a
+ * fresh spin has to beat to be worth adopting.
+ */
+export function wheelSpinProfileSpeedPxPerMs(profile: WheelSpinProfile, atMs: number): number {
+  const h = 0.25
+  const from = Math.max(0, atMs - h)
+  const to = atMs + h
+  const span = to - from
+  if (span <= 0) return 0
+  return (sampleWheelSpinProfile(profile, to).travelledPx
+    - sampleWheelSpinProfile(profile, from).travelledPx) / span
 }
 
 export interface WheelSpinProfileSample {
@@ -414,7 +503,7 @@ export function sampleWheelSpinProfile(
   if (at >= profile.totalDurationMs) {
     return {
       travelledPx: profile.tailStartPx + profile.tailDistancePx + carriedPx,
-      finished: true,
+      finished: at >= wheelSpinProfileEndMs(profile),
     }
   }
 

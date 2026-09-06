@@ -13,6 +13,7 @@ import {
   retargetWheelNotchTravel,
   takeWheelNotchTravelStep,
   resolveWheelNotchTravelMs,
+  WHEEL_NOTCH_TRAVEL_TIME_FRACTION,
   type WheelNotchTravel,
 } from './wheelNotchTravel'
 
@@ -166,13 +167,16 @@ describe('wheelNotchTravel', () => {
       }
     })
 
-    it('speed sets the notch duration, at a quarter of the journey time', () => {
+    it('speed sets the notch duration, as a share of the journey time', () => {
       const restore = getRenderScrollTotalTimeSec()
       try {
         setRenderScrollTotalTimeSec(0.4)
-        expect(resolveWheelNotchTravelMs()).toBeCloseTo(100, 6)
+        expect(resolveWheelNotchTravelMs())
+          .toBeCloseTo(400 * WHEEL_NOTCH_TRAVEL_TIME_FRACTION, 6)
+        // The ceiling bites before the slider's top end does.
         setRenderScrollTotalTimeSec(2)
-        expect(resolveWheelNotchTravelMs()).toBeCloseTo(500, 6)
+        expect(resolveWheelNotchTravelMs())
+          .toBeCloseTo(Math.min(1000, 2000 * WHEEL_NOTCH_TRAVEL_TIME_FRACTION), 6)
         // The slider's own floor is 0; a notch still takes a frame.
         setRenderScrollTotalTimeSec(0)
         expect(resolveWheelNotchTravelMs()).toBe(16)

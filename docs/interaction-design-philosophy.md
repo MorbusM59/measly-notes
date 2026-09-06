@@ -269,6 +269,27 @@ The goal is deterministic behavior with one source of truth per interaction phas
   first tenth of a second peaks 93% above the uncarried coast, and spread it
   peaks 19% at a point where the coast has already slowed. A carry is owed,
   not urgent.
+- **Only a nudge the OTHER way stops a coast.** A nudge the coast's own way
+  is not an interruption, it is a request for more of what is already
+  happening -- so it adds one more nudge of distance and the coast runs on.
+  The reversal still scrolls nothing, so you can halt on the line you meant
+  to, and it is honoured inside the grace window as well as outside it: a
+  hand finishing its own spin does not reverse, so a reversal in there is a
+  real one, and making the reader wait 500ms for it reads as the wheel being
+  ignored.
+- **Three quick nudges the coast's way are a respin, adopted only if they are
+  faster.** The reader spinning harder wants more speed; the reader spinning
+  slower than the coast has not asked it to slow down, and those nudges just
+  extend it instead. "Faster" is measured against what the coast is ACTUALLY
+  doing at that instant, not the rate it was planned at -- a coast a second
+  and a half old has decayed to a fifth of its opening speed, and the same
+  30ms respin is correctly declined at 200ms (coast 3,464px/s against the
+  gesture's 2,560px/s) and adopted at 1,500ms (coast 723px/s). Adopting
+  re-opens the grace window, because the new spin has a tail of its own.
+- **`wheelSpin.ts` reports a respin, it does not take one.** Only the caller
+  knows how fast its own coast is going -- the render view rides a
+  precomputed curve and measures it, the edit view reads its decayed interval
+  -- so the gesture layer offers the rate and the animation layer decides.
 - **A coast ends at the document's edge, not the scroller's.** A windowed
   render view (`editorSection/previewWindow.ts`) runs out of mounted content
   many times on the way through a large note. The edit view can read "it did

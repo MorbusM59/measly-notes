@@ -17,18 +17,22 @@ import {
   getWheelSpinCutoffMs,
   getWheelSpinDampenDivisor,
   getWheelSpinEffectiveThresholdMs,
+  refreshWheelSpinCoast,
   registerWheelSpinNudge,
   type WheelSpinDirection,
 } from '../editor/wheelSpin'
 import {
   remainingWheelNotchTravelPx,
   retargetWheelNotchTravel,
+  resolveWheelNotchTravelMs,
   takeWheelNotchTravelStep,
   type WheelNotchTravel,
 } from '../editor/wheelNotchTravel'
 import {
+  addWheelSpinProfileCarry,
   buildWheelSpinProfile,
   sampleWheelSpinProfile,
+  wheelSpinProfileSpeedPxPerMs,
   type WheelSpinProfile,
 } from '../editor/wheelSpinProfile'
 import {
@@ -1673,6 +1677,67 @@ export function usePreviewScrollbar({
         // The bargain the edit view makes: the notch that stops the coast
         // scrolls nothing, so you can halt on the line you meant to.
         stopPreviewWheelSpin('user nudge')
+        return
+      }
+
+      /**
+       * One more line, on top of a coast already running.
+       *
+       * Added to the profile as a carry from the current clock rather than
+       * scrolled directly: the coast owns the scroller, and a second writer
+       * would fight it. The blend is a notch's own travel time, because this
+       * is a fresh request from the reader and should visibly answer --
+       * unlike the carry a coast is born with, which is merely owed.
+       */
+      const extendCoastByOneNudge = (rows: number, label: string): boolean => {
+        const profile = previewWheelSpinProfileRef.current
+        if (!profile) return false
+        addWheelSpinProfileCarry(
+          profile,
+          direction * rows,
+          previewWheelSpinClockMsRef.current,
+          resolveWheelNotchTravelMs(),
+        )
+        if (isWheelTraceOn()) appendWheelTrace(`${label} px=${(direction * rows).toFixed(2)}`)
+        return true
+      }
+
+      if (action.kind === 'extend') {
+        // A nudge the coast's own way: not an interruption, a request for
+        // more of what is already happening.
+        if (extendCoastByOneNudge(action.rows, `preview wheel EXTEND dy=${event.deltaY}`)) return
+        travelPreviewByNotch(direction * action.rows, `preview wheel[no coast] dy=${event.deltaY}`)
+        return
+      }
+
+      if (action.kind === 'respin') {
+        // Three quick nudges the coast's way. Worth adopting only if the
+        // hand is now turning FASTER than the coast is going -- a reader
+        // spinning harder wants more speed, and one spinning slower than the
+        // coast has not asked it to slow down. The comparison is against the
+        // profile's real speed at this instant, not the rate the coast was
+        // planned at: a coast a second and a half old has decayed to a
+        // seventh of that, and a respin that beats what is actually
+        // happening is the one the reader can feel.
+        const profile = previewWheelSpinProfileRef.current
+        const currentSpeedPxPerMs = profile
+          ? wheelSpinProfileSpeedPxPerMs(profile, previewWheelSpinClockMsRef.current)
+          : 0
+        const respinSpeedPxPerMs = action.rows / Math.max(1, action.averageGapMs)
+        if (profile && respinSpeedPxPerMs > currentSpeedPxPerMs) {
+          if (isWheelTraceOn()) {
+            appendWheelTrace(
+              `preview wheel RESPIN gap=${action.averageGapMs.toFixed(1)}ms` +
+              ` ${(currentSpeedPxPerMs * 1000).toFixed(0)}->${(respinSpeedPxPerMs * 1000).toFixed(0)}px/s`,
+            )
+          }
+          refreshWheelSpinCoast(spinState, performance.now(), action.averageGapMs, action.rows)
+          startPreviewWheelSpin(direction, action.rows, action.averageGapMs, direction * action.rows)
+          return
+        }
+        // Not faster: it is still three nudges the reader asked for.
+        if (extendCoastByOneNudge(action.rows, `preview wheel RESPIN-declined dy=${event.deltaY}`)) return
+        travelPreviewByNotch(direction * action.rows, `preview wheel[no coast] dy=${event.deltaY}`)
         return
       }
 

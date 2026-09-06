@@ -5,6 +5,7 @@ import {
   DEFAULT_WHEEL_SPIN_DAMPEN_DIVISOR,
   DEFAULT_WHEEL_SPIN_THRESHOLD_MS,
   nextWheelSpinDelayMs,
+  refreshWheelSpinCoast,
   registerWheelSpinNudge,
   resolveWheelSpinDecay,
   takeWheelSpinNudge,
@@ -74,11 +75,58 @@ describe('registerWheelSpinNudge', () => {
     expect(state.coast?.direction).toBe(1)
   })
 
-  it('swallows real input for a flat 500ms, then stops on the next nudge', () => {
+  it('swallows real input for a flat 500ms, then answers it', () => {
     const state = coasting()
     expect(nudge(state, 80 + WHEEL_SPIN_GRACE_MS - 1)).toEqual({ kind: 'ignore' })
-    expect(nudge(state, 80 + WHEEL_SPIN_GRACE_MS)).toEqual({ kind: 'stop' })
+    // Same way, past the grace: a request for more, not an interruption.
+    expect(nudge(state, 80 + WHEEL_SPIN_GRACE_MS)).toEqual({ kind: 'extend', rows: 1 })
+    expect(state.coast).not.toBeNull()
+  })
+
+  it('stops only on a nudge the other way', () => {
+    const state = coasting()
+    // However many times the reader nudges along with it, the coast lives.
+    for (let n = 1; n <= 5; n += 1) {
+      expect(nudge(state, 1000 + (n * 200))).toEqual({ kind: 'extend', rows: 1 })
+      expect(state.coast).not.toBeNull()
+    }
+    expect(nudge(state, 3000, 1)).toEqual({ kind: 'stop' })
     expect(state.coast).toBeNull()
+  })
+
+  it('honours a reversal inside the grace window, without waiting it out', () => {
+    // The grace is the hand finishing its own spin, and a hand finishing a
+    // spin does not reverse -- so a reversal in there is a real one, and
+    // making the reader wait 500ms for it reads as the wheel being ignored.
+    const state = coasting()
+    expect(nudge(state, 80 + 10, 1)).toEqual({ kind: 'stop' })
+    expect(state.coast).toBeNull()
+  })
+
+  it('offers a fresh spin the same way as a respin, without adopting it', () => {
+    const state = coasting()
+    const past = 80 + WHEEL_SPIN_GRACE_MS
+    expect(nudge(state, past)).toEqual({ kind: 'extend', rows: 1 })
+    expect(nudge(state, past + 20)).toEqual({ kind: 'extend', rows: 1 })
+    expect(nudge(state, past + 40)).toEqual({ kind: 'respin', rows: 1, averageGapMs: 20 })
+    // Deliberately untouched: only the caller knows how fast the coast is
+    // actually going, so only the caller can decide this is worth taking.
+    expect(state.coast?.averageGapMs).toBe(40)
+    expect(state.coast?.ignoreUntilMs).toBe(80 + WHEEL_SPIN_GRACE_MS)
+  })
+
+  it('re-opens the grace window when a respin is adopted', () => {
+    const state = coasting()
+    const past = 80 + WHEEL_SPIN_GRACE_MS
+    nudge(state, past)
+    nudge(state, past + 20)
+    nudge(state, past + 40)
+    refreshWheelSpinCoast(state, past + 40, 20, 3)
+    expect(state.coast?.averageGapMs).toBe(20)
+    expect(state.coast?.rowsPerNudge).toBe(3)
+    expect(state.coast?.firedCount).toBe(0)
+    // The new spin has a tail of its own, exactly as the first one did.
+    expect(nudge(state, past + 60)).toEqual({ kind: 'ignore' })
   })
 
   it('gives a fast spin the same 500ms of grace as a slow one', () => {
@@ -95,7 +143,7 @@ describe('registerWheelSpinNudge', () => {
 
   it('lets a stopped coast be re-started by a fresh spin', () => {
     const state = coasting()
-    nudge(state, 1000) // past the grace window: stops, scrolls nothing
+    nudge(state, 1000, 1) // the other way: stops, scrolls nothing
     expect(state.coast).toBeNull()
     nudge(state, 1500)
     nudge(state, 1540)
@@ -215,8 +263,9 @@ describe('nextWheelSpinDelayMs', () => {
       expect(nextWheelSpinDelayMs(state, WHEEL_SPIN_DAMPEN_ENDLESS, CUTOFF_MS)).toBe(40)
       takeWheelSpinNudge(state)
     }
-    // ...and it is still the user, not the clock, that ends it.
-    expect(nudge(state, 100_000)).toEqual({ kind: 'stop' })
+    // ...and it is still the user, not the clock, that ends it -- by
+    // reversing, which is now the only nudge that means stop.
+    expect(nudge(state, 100_000, 1)).toEqual({ kind: 'stop' })
     expect(nextWheelSpinDelayMs(state, WHEEL_SPIN_DAMPEN_ENDLESS, CUTOFF_MS)).toBeNull()
   })
 

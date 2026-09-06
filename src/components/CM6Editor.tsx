@@ -17,7 +17,9 @@ import {
   getWheelSpinCutoffMs,
   getWheelSpinDampenDivisor,
   getWheelSpinEffectiveThresholdMs,
+  currentWheelSpinDelayMs,
   nextWheelSpinDelayMs,
+  refreshWheelSpinCoast,
   registerWheelSpinNudge,
   takeWheelSpinNudge,
   type WheelSpinDirection,
@@ -4172,7 +4174,36 @@ export function CM6Editor({
         return;
       }
       if (action.kind === 'stop') {
-        stopWheelSpin('user nudge');
+        // Only a nudge the OTHER way gets here now -- see wheelSpin.ts's
+        // WheelSpinAction. It scrolls nothing, so you can halt on the line
+        // you meant to.
+        stopWheelSpin('reverse nudge');
+        return;
+      }
+      if (action.kind === 'extend') {
+        // The coast's own way: one more row of distance, coast untouched.
+        // The timeout chain is not disturbed -- this rides on top of it.
+        scrollRows(direction * action.rows, `wheel EXTEND dy=${event.deltaY}`);
+        return;
+      }
+      if (action.kind === 'respin') {
+        // Worth adopting only if the hand is now turning faster than the
+        // coast is currently going -- which for this pane is the coast's own
+        // decayed interval, since it advances `firedCount` as it steps.
+        const currentDelayMs = currentWheelSpinDelayMs(wheelSpinState, getWheelSpinDampenDivisor());
+        const faster = currentDelayMs !== null && action.averageGapMs < currentDelayMs;
+        if (faster) {
+          if (tracing) {
+            appendWheelTrace(
+              `wheel RESPIN gap=${action.averageGapMs.toFixed(1)}ms (was ${currentDelayMs.toFixed(1)}ms)`,
+            );
+          }
+          refreshWheelSpinCoast(wheelSpinState, performance.now(), action.averageGapMs, action.rows);
+          scrollRows(direction * action.rows, `wheel[RESPIN] dy=${event.deltaY}`);
+          scheduleWheelSpinNudge();
+          return;
+        }
+        scrollRows(direction * action.rows, `wheel RESPIN-declined dy=${event.deltaY}`);
         return;
       }
 

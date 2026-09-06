@@ -70,10 +70,9 @@ import {
  *
  * The `speed` slider says how long a scroll animation runs, and a notch is a
  * scroll animation, so it should answer to it -- but not at full length: a
- * journey's 400ms spent on one line lags the hand badly, at nearly four
- * times the pacing that felt right. A quarter puts the default at 100ms,
- * which is where it wants to be, and still hands the reader the whole range:
- * 25ms at the fast end of the slider, 500ms at the slow one.
+ * journey's 400ms spent on one line lags the hand badly. A half puts the
+ * default at 200ms and still hands the reader the whole range: 25ms at the
+ * fast end of the slider, 500ms at the slow one (the ceiling below).
  */
 export const WHEEL_NOTCH_TRAVEL_TIME_FRACTION = 0.5
 

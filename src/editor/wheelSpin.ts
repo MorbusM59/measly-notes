@@ -154,14 +154,33 @@ export function createWheelSpinState(): WheelSpinState {
 /**
  * What the caller should do about a real wheel nudge.
  *
- * `scroll` is the ordinary case. `ignore` is the tail of a spin. `stop` is
- * the user taking control back -- it ends the coast and scrolls nothing, so
- * the gesture that stops the page cannot also move it.
+ * `scroll` is the ordinary case, with no coast running. The rest are what a
+ * nudge means to a coast that IS running, and they divide on direction:
+ *
+ * `stop` is the reader taking it back, and only a nudge the OTHER way means
+ * that. It ends the coast and scrolls nothing, so the gesture that stops the
+ * page cannot also move it -- you can halt on the line you meant to.
+ *
+ * A nudge the SAME way is not an interruption at all, it is a request for
+ * more of what is already happening, and it gets `extend`: one more nudge of
+ * distance, coast untouched. `ignore` still swallows the tail of the spin
+ * that started the coast, because those nudges are the hand finishing its
+ * own gesture rather than asking for anything.
+ *
+ * `respin` is three same-way nudges quick enough to be a spin of their own,
+ * arriving while a coast runs. It reports the rate they were turned at and
+ * leaves the decision to the caller, which is the only party that knows how
+ * fast the coast is going right now: adopt it with `refreshWheelSpinCoast`
+ * if it is faster, and treat it as an `extend` if it is not. A reader
+ * spinning harder wants to go faster; a reader spinning slower than the
+ * coast already is has not asked for it to slow down.
  */
 export type WheelSpinAction =
   | { kind: 'scroll'; rows: number; startsCoast: boolean }
   | { kind: 'ignore' }
   | { kind: 'stop' }
+  | { kind: 'extend'; rows: number }
+  | { kind: 'respin'; rows: number; averageGapMs: number }
 
 export interface WheelSpinInput {
   nowMs: number
@@ -191,9 +210,43 @@ export function registerWheelSpinNudge(state: WheelSpinState, input: WheelSpinIn
   const { nowMs, direction, rows, thresholdMs } = input
 
   if (state.coast) {
+    // A nudge the other way is the reader taking it back, and it is the only
+    // thing that is -- checked before the grace window, because a hand
+    // finishing its own spin does not reverse, so a reversal inside the
+    // window is a real one and waiting 500ms to honour it would read as the
+    // page ignoring the wheel.
+    if (direction !== state.coast.direction) {
+      cancelWheelSpin(state)
+      return { kind: 'stop' }
+    }
+    // Still the tail of the spin that started this. See WHEEL_SPIN_GRACE_MS:
+    // these nudges are the hand stopping, not a request for more, and
+    // extending on them would add the whole tail of every spin.
     if (nowMs < state.coast.ignoreUntilMs) return { kind: 'ignore' }
-    cancelWheelSpin(state)
-    return { kind: 'stop' }
+
+    // Past the grace, and going the same way. Every one of these is worth an
+    // extra nudge; the streak is tracked as well, so three quick ones can be
+    // recognised as a fresh spin and offered to the caller.
+    const coastGapMs = state.lastNudgeMs === null ? Number.POSITIVE_INFINITY : nowMs - state.lastNudgeMs
+    if (state.lastDirection !== direction || coastGapMs > thresholdMs) {
+      resetStreak(state, nowMs, direction)
+      return { kind: 'extend', rows }
+    }
+
+    state.gapsMs.push(coastGapMs)
+    state.lastNudgeMs = nowMs
+    state.lastDirection = direction
+    if (state.gapsMs.length < WHEEL_SPIN_NUDGE_COUNT - 1) {
+      return { kind: 'extend', rows }
+    }
+
+    const respinGapMs = state.gapsMs.reduce((total, gap) => total + gap, 0) / state.gapsMs.length
+    state.gapsMs = []
+    // Deliberately does NOT touch the coast: the caller may decline this, and
+    // a declined respin must leave the grace window and the rate exactly as
+    // they were, or a slower spin would silently mute the next half second of
+    // nudges. `refreshWheelSpinCoast` is what adopting it looks like.
+    return { kind: 'respin', rows, averageGapMs: respinGapMs }
   }
 
   const gapMs = state.lastNudgeMs === null ? Number.POSITIVE_INFINITY : nowMs - state.lastNudgeMs
@@ -223,6 +276,49 @@ export function registerWheelSpinNudge(state: WheelSpinState, input: WheelSpinIn
   state.gapsMs = []
   // The third nudge is a real one: it scrolls, AND it starts the coast.
   return { kind: 'scroll', rows, startsCoast: true }
+}
+
+/**
+ * Adopt a `respin`: the coast now runs at the rate that gesture was turned at.
+ *
+ * Called only by a caller that has decided the new rate is the faster one.
+ * The grace window is reopened because the new spin has a tail of its own,
+ * exactly as the first one did -- the hand is still turning.
+ */
+export function refreshWheelSpinCoast(
+  state: WheelSpinState,
+  nowMs: number,
+  averageGapMs: number,
+  rowsPerNudge: number,
+): void {
+  if (!state.coast) return
+  state.coast.averageGapMs = averageGapMs
+  state.coast.rowsPerNudge = rowsPerNudge
+  state.coast.firedCount = 0
+  state.coast.ignoreUntilMs = nowMs + WHEEL_SPIN_GRACE_MS
+  state.gapsMs = []
+}
+
+/**
+ * The interval the coast is running at right now, in ms.
+ *
+ * The same `d_n = d_avg * (1 + n*a)^n` the schedule is built from, read at
+ * the nudge the coast has reached rather than the one it starts on -- which
+ * is the number a fresh spin has to beat to be worth adopting. Null when no
+ * coast is running. Callers that do not advance `firedCount` (the render
+ * view rides a precomputed curve instead) measure their own rate and do not
+ * use this.
+ */
+export function currentWheelSpinDelayMs(
+  state: WheelSpinState,
+  dampenDivisor: number,
+): number | null {
+  const coast = state.coast
+  if (!coast) return null
+  const decay = resolveWheelSpinDecay(dampenDivisor)
+  const n = coast.firedCount
+  const delayMs = coast.averageGapMs * Math.pow(1 + (n * decay), n)
+  return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null
 }
 
 /**
