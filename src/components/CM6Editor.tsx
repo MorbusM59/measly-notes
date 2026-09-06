@@ -1198,7 +1198,15 @@ export function CM6Editor({
       ratio,
       provisionalRatio: viewportHeight / contentHeight,
       usableTrackHeightPx: usableTrackHeight,
-      minThumbHeightPx: SCROLL_TRACK_MIN_THUMB_HEIGHT_PX,
+      // The thumb's floor is its own WIDTH, so the smallest it can be is a
+      // square -- the same rule the render view's thumb follows. Read from the
+      // element rather than from a constant: the width follows
+      // --canonical-scroll-thickness and the handle gap, both of which move
+      // with the reader's own spacing settings, and a hardcoded 28px would
+      // stop being square the moment either changed.
+      // `||`, not `??`: before the thumb is laid out `offsetWidth` is 0, which
+      // is a real number and a useless floor.
+      minThumbHeightPx: scrollThumbElRef.current?.offsetWidth || SCROLL_TRACK_MIN_THUMB_HEIGHT_PX,
     });
     const maxThumbTravelPx = Math.max(0, usableTrackHeight - thumbHeightPx);
 
