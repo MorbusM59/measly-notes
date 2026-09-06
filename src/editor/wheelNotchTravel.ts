@@ -11,22 +11,34 @@
 // cannot track at all. A coast got a curve; the single notch that did not
 // become a coast kept the jump.
 //
-// ## Why the second notch splices rather than restarts
+// ## Two kinds of leg, and why there have to be two
 //
-// A wheel is turned, not tapped, so notches arrive while the previous one is
-// still being paid out -- at the spin threshold's own range, 10-50ms apart,
-// against a delivery measured in tens of milliseconds. Planning a fresh
-// curve from rest for each one would discard the speed the view already has
-// and read as a stutter exactly when the reader is moving fastest.
+// A lone notch -- nothing in flight, the view at rest -- rides **the shared
+// bell**, the same shape every journey and ramp in the app is cut from, so
+// the ramp and shape sliders reach a single line of scrolling. That is the
+// whole reason this module does not simply use a continuation for
+// everything: a quintic Hermite is fixed entirely by its four boundary
+// conditions and reads no curve parameters at all, so a notch built on one
+// measured byte-identical across the full range of every slider. The reader
+// moved shape from end to end and nothing happened, which is the bug this
+// split exists to fix.
 //
-// So each notch snapshots the in-flight motion's instantaneous velocity AND
-// acceleration (`estimateVelocityAndAcceleration`) and builds a quintic
-// Hermite from those to the new total -- whatever was left of the old notch
-// plus the new one -- landing at rest. That is
-// `ScrollCurvePlan.ts`'s `buildContinuationPlan`, the same mid-flight
-// retargeting the escape-hold ring uses, and it composes: the snapshot reads
-// whichever leg is running, including an earlier continuation, so a run of
-// notches is one accelerating motion rather than a train of pulses.
+// A notch arriving while another is still being paid out gets **a quintic
+// continuation** instead. A wheel is turned, not tapped, so this is the
+// common case at speed: notches land 10-50ms apart against a delivery
+// measured in tens of milliseconds. Restarting a bell from rest for each one
+// would discard the speed the view already has and stutter exactly when the
+// reader is moving fastest, and the bell cannot be started from a velocity it
+// did not plan for. So the splice snapshots the in-flight motion's
+// instantaneous velocity AND acceleration
+// (`estimateVelocityAndAcceleration`) and builds
+// `ScrollCurvePlan.ts`'s `buildContinuationPlan` from those to the new total
+// -- whatever was left of the old notch plus the new one -- landing at rest.
+// Measured at a 0.0% velocity step across every cadence from 30 to 100ms.
+//
+// The snapshot reads whichever leg is running, bell or continuation, so the
+// two compose: a run of notches is one gathering movement, and it is only
+// the FIRST of them whose character the shape slider sets.
 //
 // ## What the reader is owed, and the sign of it
 //
@@ -40,33 +52,90 @@
 
 import {
   buildContinuationPlan,
+  buildCurvePlan,
   estimateVelocityAndAcceleration,
+  getRenderScrollDynamic,
+  getRenderScrollResponsiveness,
+  getRenderScrollSkew,
+  getRenderScrollTotalTimeSec,
+  RENDER_SCROLL_SKEW_MAX,
+  RENDER_SCROLL_SKEW_MIN,
+  sampleCdf,
   sampleContinuationPlan,
   type ContinuationPlan,
 } from './ScrollCurvePlan'
 
 /**
- * How long one notch's worth of distance takes to arrive.
+ * A notch takes this share of the journey curve's total time.
  *
- * Not a slider, and deliberately not derived from one. The two numbers that
- * look like candidates answer other questions and are wrong here: the
- * journey curve's total time is 400ms, tuned for travel across a document
- * and long enough that a notch would visibly lag the hand; the spin cut off
- * is about when a coast stops being motion, and follows the dampening rather
- * than the wheel.
- *
- * What this has to satisfy is only: long enough that the eye can follow the
- * distance rather than being shown two positions, and short enough that
- * consecutive notches at an ordinary reading cadence overlap and splice
- * instead of landing as separate pulses. The spin threshold's own range says
- * a turning wheel delivers notches 10-50ms apart, and a browsing hand rather
- * more slowly than that; anything comfortably above that range overlaps, and
- * this sits just under the shortest cut off the reader can choose.
+ * The `speed` slider says how long a scroll animation runs, and a notch is a
+ * scroll animation, so it should answer to it -- but not at full length: a
+ * journey's 400ms spent on one line lags the hand badly, at nearly four
+ * times the pacing that felt right. A quarter puts the default at 100ms,
+ * which is where it wants to be, and still hands the reader the whole range:
+ * 25ms at the fast end of the slider, 500ms at the slow one.
  */
-export const WHEEL_NOTCH_TRAVEL_MS = 110
+export const WHEEL_NOTCH_TRAVEL_TIME_FRACTION = 0.5
+
+/** Floor and ceiling on the resolved duration, in ms. */
+const WHEEL_NOTCH_TRAVEL_MIN_MS = 16
+const WHEEL_NOTCH_TRAVEL_MAX_MS = 1000
+
+/** How long one notch's worth of distance takes to arrive, right now. */
+export function resolveWheelNotchTravelMs(): number {
+  const fromSlider = getRenderScrollTotalTimeSec() * 1000 * WHEEL_NOTCH_TRAVEL_TIME_FRACTION
+  if (!Number.isFinite(fromSlider)) return 100
+  // The speed slider's own floor is 0, which would mean a notch arrives in no
+  // time at all. One frame is the shortest honest answer to "how long did
+  // that take", and it is what the reader gets there.
+  return Math.max(WHEEL_NOTCH_TRAVEL_MIN_MS, Math.min(WHEEL_NOTCH_TRAVEL_MAX_MS, fromSlider))
+}
+
+/**
+ * The bell's normalized position curve for the current ramp/shape settings.
+ *
+ * Memoized because a turning wheel asks for this ten times a second while
+ * the answer only changes when a slider moves. `tSec` is passed as 1 and not
+ * cached against: `buildCurvePlan` normalizes every x by it, so it cancels
+ * out of the shape entirely -- which is what lets the same curve be played
+ * over a notch's duration rather than a journey's.
+ */
+let cachedCurveCdf: Float64Array | null = null
+let cachedCurveKey = ''
+
+function currentCurveCdf(): Float64Array {
+  const a = Math.max(0.0001, getRenderScrollDynamic())
+  const b = Math.max(0.0001, getRenderScrollResponsiveness())
+  const skew = Math.max(
+    RENDER_SCROLL_SKEW_MIN,
+    Math.min(RENDER_SCROLL_SKEW_MAX, getRenderScrollSkew()),
+  )
+  const key = `${a}|${b}|${skew}`
+  if (cachedCurveCdf !== null && cachedCurveKey === key) return cachedCurveCdf
+  cachedCurveCdf = buildCurvePlan(a, b, 1, skew).cdf
+  cachedCurveKey = key
+  return cachedCurveCdf
+}
+
+/** A leg from rest, shaped by the ramp and shape sliders. */
+interface CurveLeg {
+  kind: 'curve'
+  cdf: Float64Array
+  signedDistance: number
+  durationSec: number
+}
+
+/** A leg picking up an in-flight motion's velocity and acceleration. */
+interface ContinuationLeg {
+  kind: 'continuation'
+  plan: ContinuationPlan
+  durationSec: number
+}
+
+export type WheelNotchLeg = CurveLeg | ContinuationLeg
 
 export interface WheelNotchTravel {
-  plan: ContinuationPlan
+  leg: WheelNotchLeg
   startMs: number
   /** Signed pixels already handed to the scroller on this leg. */
   paidPx: number
@@ -76,8 +145,18 @@ export interface WheelNotchTravel {
   sign: 1 | -1
 }
 
-const sampleLeg = (travel: WheelNotchTravel, elapsedSec: number): number =>
-  sampleContinuationPlan(travel.plan, elapsedSec)
+/** Signed displacement from the leg's start, at `elapsedSec` into it. */
+function sampleLeg(leg: WheelNotchLeg, elapsedSec: number): number {
+  if (leg.kind === 'continuation') return sampleContinuationPlan(leg.plan, elapsedSec)
+  if (elapsedSec <= 0) return 0
+  if (elapsedSec >= leg.durationSec) return leg.signedDistance
+  return leg.signedDistance * sampleCdf(leg.cdf, elapsedSec / leg.durationSec)
+}
+
+/** What the leg still owes, whatever kind it is. */
+function legDistance(leg: WheelNotchLeg): number {
+  return leg.kind === 'continuation' ? leg.plan.signedDistance : leg.signedDistance
+}
 
 /**
  * How much of the current leg has not been delivered yet.
@@ -93,44 +172,53 @@ export function remainingWheelNotchTravelPx(
 ): number {
   if (!travel) return 0
   const elapsedSec = Math.max(0, (nowMs - travel.startMs) / 1000)
-  return travel.plan.signedDistance - sampleLeg(travel, elapsedSec)
+  return legDistance(travel.leg) - sampleLeg(travel.leg, elapsedSec)
 }
 
 /**
  * Begin a leg carrying `addedPx` on top of whatever is still owed.
  *
  * `travel` is the leg in flight, or null to start from rest. The returned
- * leg always replaces it.
+ * leg always replaces it. Which of the two kinds it is follows from that
+ * one fact and nothing else -- see the module comment.
  */
 export function retargetWheelNotchTravel(
   travel: WheelNotchTravel | null,
   addedPx: number,
   nowMs: number,
-  travelMs: number = WHEEL_NOTCH_TRAVEL_MS,
+  travelMs: number = resolveWheelNotchTravelMs(),
 ): WheelNotchTravel {
-  let initialVelocity = 0
-  let initialAcceleration = 0
-  let remainingPx = 0
+  const durationSec = Math.max(0.0001, travelMs / 1000)
 
-  if (travel) {
-    const elapsedSec = Math.max(0, (nowMs - travel.startMs) / 1000)
-    const snapshot = estimateVelocityAndAcceleration(
-      (atSec) => sampleLeg(travel, atSec),
-      elapsedSec,
-    )
-    initialVelocity = snapshot.velocity
-    initialAcceleration = snapshot.acceleration
-    remainingPx = travel.plan.signedDistance - sampleLeg(travel, elapsedSec)
+  if (!travel) {
+    return {
+      leg: { kind: 'curve', cdf: currentCurveCdf(), signedDistance: addedPx, durationSec },
+      startMs: nowMs,
+      paidPx: 0,
+      reachedPx: 0,
+      sign: addedPx >= 0 ? 1 : -1,
+    }
   }
 
+  const elapsedSec = Math.max(0, (nowMs - travel.startMs) / 1000)
+  const snapshot = estimateVelocityAndAcceleration(
+    (atSec) => sampleLeg(travel.leg, atSec),
+    elapsedSec,
+  )
+  const remainingPx = legDistance(travel.leg) - sampleLeg(travel.leg, elapsedSec)
   const signedDistance = remainingPx + addedPx
+
   return {
-    plan: buildContinuationPlan(
-      signedDistance,
-      initialVelocity,
-      initialAcceleration,
-      travelMs / 1000,
-    ),
+    leg: {
+      kind: 'continuation',
+      plan: buildContinuationPlan(
+        signedDistance,
+        snapshot.velocity,
+        snapshot.acceleration,
+        durationSec,
+      ),
+      durationSec,
+    },
     startMs: nowMs,
     paidPx: 0,
     reachedPx: 0,
@@ -157,7 +245,7 @@ export function takeWheelNotchTravelStep(
   nowMs: number,
 ): WheelNotchTravelStep {
   const elapsedSec = Math.max(0, (nowMs - travel.startMs) / 1000)
-  const raw = sampleLeg(travel, elapsedSec)
+  const raw = sampleLeg(travel.leg, elapsedSec)
 
   // Never pay backwards within a leg -- see the module comment.
   const travelled = travel.sign > 0
@@ -170,6 +258,6 @@ export function takeWheelNotchTravelStep(
 
   return {
     pixels,
-    finished: elapsedSec >= travel.plan.totalDurationSec,
+    finished: elapsedSec >= travel.leg.durationSec,
   }
 }

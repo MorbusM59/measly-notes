@@ -1483,10 +1483,15 @@ export function usePreviewScrollbar({
         nowMs,
       )
       if (traceLabel !== null && isWheelTraceOn()) {
+        // Which kind of leg it is matters more than any single number here:
+        // a `curve` leg is the one the ramp and shape sliders shape, a
+        // `continuation` is the one that had to match a velocity instead.
+        const leg = previewNotchTravelRef.current.leg
         appendWheelTrace(
-          `${traceLabel} px=${signedPixels.toFixed(2)}` +
-          ` owed=${previewNotchTravelRef.current.plan.signedDistance.toFixed(2)}` +
-          ` v0=${previewNotchTravelRef.current.plan.initialVelocity.toFixed(1)}`,
+          `${traceLabel} px=${signedPixels.toFixed(2)} leg=${leg.kind}` +
+          ` owed=${(leg.kind === 'continuation' ? leg.plan.signedDistance : leg.signedDistance).toFixed(2)}` +
+          ` over=${(leg.durationSec * 1000).toFixed(0)}ms` +
+          (leg.kind === 'continuation' ? ` v0=${leg.plan.initialVelocity.toFixed(1)}` : ''),
         )
       }
       if (previewNotchTravelRafRef.current === null) {

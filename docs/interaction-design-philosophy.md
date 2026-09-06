@@ -233,9 +233,18 @@ The goal is deterministic behavior with one source of truth per interaction phas
 - **A single notch is travelled, not jumped** (`src/editor/wheelNotchTravel.ts`).
   Owning the notch means nothing animates it any more, and an instantaneous
   write of several line heights is the one kind of motion the eye cannot
-  follow at all. So a notch eases from rest to its distance over 110ms -- long
-  enough to be followed, short enough that notches at any reading cadence
-  overlap rather than landing as separate pulses.
+  follow at all. So a notch is played across time instead.
+- **A lone notch rides the shared bell, so the sliders reach one line of
+  scrolling.** `ramp` and `shape` cut a single notch's curve exactly as they
+  cut a journey's, and `speed` sets its duration at a quarter of the journey
+  time -- 100ms at the default, 25ms to 500ms across the slider. A quarter
+  and not the whole: a journey's 400ms spent on one line lags the hand badly.
+  This is not decoration. Built on a quintic alone, a notch measured
+  byte-identical across the full range of every slider -- `shape` from 0.1 to
+  0.9 moved nothing, because a quintic Hermite is fixed entirely by its
+  boundary conditions and reads no curve parameters at all. Now `shape` moves
+  the apex from 10% to 89% of the notch: at 0.1 half the distance is gone in
+  the first quarter and the rest glides out, at 0.9 it has barely started.
 - **The second notch splices onto the first, it does not restart it.** A wheel
   is turned, not tapped, so notches arrive while the previous one is still
   being paid out. Each new one snapshots the in-flight motion's instantaneous
@@ -244,6 +253,12 @@ The goal is deterministic behavior with one source of truth per interaction phas
   mid-flight retargeting the escape-hold ring uses. Measured at 0.0% velocity
   step across every cadence from 30 to 100ms, against the full drop to rest a
   restart would have made at exactly the moment the reader asked for more.
+- **Only the first notch of a run is shaped, and that is the trade.** The bell
+  cannot be started from a velocity it did not plan for, and the splice must
+  match one exactly -- so a notch landing mid-flight is a quintic and carries
+  no slider character. The reader judging `shape` is turning the wheel once,
+  which is the case that answers to it; the reader spinning it is asking for
+  continuity, which is the case that cannot.
 - **A spin carries what the notch had not delivered yet.** A spin is detected
   on its third notch, by which point the glide still owes about 2.7 nudges --
   notches arrive far faster than one is paid out. The coast inherits that

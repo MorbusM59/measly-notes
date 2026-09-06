@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  getRenderScrollDynamic,
+  getRenderScrollSkew,
+  getRenderScrollTotalTimeSec,
+  setRenderScrollDynamic,
+  setRenderScrollSkew,
+  setRenderScrollTotalTimeSec,
+} from './ScrollCurvePlan'
+import {
   remainingWheelNotchTravelPx,
   retargetWheelNotchTravel,
   takeWheelNotchTravelStep,
-  WHEEL_NOTCH_TRAVEL_MS,
+  resolveWheelNotchTravelMs,
   type WheelNotchTravel,
 } from './wheelNotchTravel'
 
@@ -41,9 +49,9 @@ describe('wheelNotchTravel', () => {
 
   it('pays out exactly one notch, and no more', () => {
     const travel = retargetWheelNotchTravel(null, NOTCH_PX, 0)
-    const { paidPx } = playTo(travel, 0, WHEEL_NOTCH_TRAVEL_MS + 40)
+    const { paidPx } = playTo(travel, 0, resolveWheelNotchTravelMs() + 40)
     expect(paidPx).toBeCloseTo(NOTCH_PX, 6)
-    expect(takeWheelNotchTravelStep(travel, WHEEL_NOTCH_TRAVEL_MS + 40).finished).toBe(true)
+    expect(takeWheelNotchTravelStep(travel, resolveWheelNotchTravelMs() + 40).finished).toBe(true)
   })
 
   it('carries the unpaid remainder into the next notch', () => {
@@ -53,7 +61,9 @@ describe('wheelNotchTravel', () => {
     expect(paidPx + remaining).toBeCloseTo(NOTCH_PX, 4)
 
     const second = retargetWheelNotchTravel(first, NOTCH_PX, 30)
-    expect(second.plan.signedDistance).toBeCloseTo(remaining + NOTCH_PX, 6)
+    expect(second.leg.kind).toBe('continuation')
+    if (second.leg.kind !== 'continuation') throw new Error('expected a continuation leg')
+    expect(second.leg.plan.signedDistance).toBeCloseTo(remaining + NOTCH_PX, 6)
   })
 
   it('splices without a velocity step when a second notch lands mid-flight', () => {
@@ -76,7 +86,7 @@ describe('wheelNotchTravel', () => {
       totalPaid += playTo(travel, (n - 1) * 20, atMs).paidPx
       travel = retargetWheelNotchTravel(travel, NOTCH_PX, atMs)
     }
-    totalPaid += playTo(travel, 80, 80 + WHEEL_NOTCH_TRAVEL_MS + 40).paidPx
+    totalPaid += playTo(travel, 80, 80 + resolveWheelNotchTravelMs() + 40).paidPx
     // Five notches asked for, five notches delivered -- nothing dropped by
     // the splicing.
     expect(totalPaid).toBeCloseTo(NOTCH_PX * 5, 4)
@@ -88,7 +98,7 @@ describe('wheelNotchTravel', () => {
     const fast = retargetWheelNotchTravel(null, NOTCH_PX * 4, 0)
     playTo(fast, 0, 60, 1)
     const tiny = retargetWheelNotchTravel(fast, 1, 60)
-    for (let tMs = 61; tMs <= 60 + WHEEL_NOTCH_TRAVEL_MS; tMs += 1) {
+    for (let tMs = 61; tMs <= 60 + resolveWheelNotchTravelMs(); tMs += 1) {
       expect(takeWheelNotchTravelStep(tiny, tMs).pixels).toBeGreaterThanOrEqual(0)
     }
   })
@@ -98,7 +108,7 @@ describe('wheelNotchTravel', () => {
     playTo(down, 0, 30)
     const up = retargetWheelNotchTravel(down, -NOTCH_PX * 2, 30)
     expect(up.sign).toBe(-1)
-    const { paidPx } = playTo(up, 30, 30 + WHEEL_NOTCH_TRAVEL_MS + 40)
+    const { paidPx } = playTo(up, 30, 30 + resolveWheelNotchTravelMs() + 40)
     expect(paidPx).toBeLessThan(0)
   })
 
@@ -108,5 +118,78 @@ describe('wheelNotchTravel', () => {
     const finePaid = playTo(fine, 0, 60, 2).paidPx
     const coarsePaid = playTo(coarse, 0, 60, 30).paidPx
     expect(coarsePaid).toBeCloseTo(finePaid, 4)
+  })
+
+  describe('the animation sliders reach a single notch', () => {
+    // The bug this split fixes: built on a quintic alone, one notch measured
+    // byte-identical across the full range of every slider -- the reader
+    // could move shape from end to end and nothing happened.
+
+    /** Where the notch has got to at a quarter, half and three quarters. */
+    const notchProgress = () => {
+      const durationMs = resolveWheelNotchTravelMs()
+      const travel = retargetWheelNotchTravel(null, NOTCH_PX, 0)
+      const at = (fraction: number) =>
+        NOTCH_PX - remainingWheelNotchTravelPx(travel, durationMs * fraction)
+      return [at(0.25), at(0.5), at(0.75)]
+    }
+
+    it('shape moves the apex from the start of the notch to the end', () => {
+      const restore = getRenderScrollSkew()
+      try {
+        setRenderScrollSkew(0.1)
+        const early = notchProgress()
+        setRenderScrollSkew(0.9)
+        const late = notchProgress()
+        // Apex early: over half the distance is gone in the first quarter,
+        // and the rest glides out. Apex late: it has barely started.
+        expect(early[0]).toBeGreaterThan(NOTCH_PX * 0.4)
+        expect(late[0]).toBeLessThan(NOTCH_PX * 0.1)
+        expect(early[1]).toBeGreaterThan(late[1] * 3)
+      } finally {
+        setRenderScrollSkew(restore)
+      }
+    })
+
+    it('ramp changes how sharply the notch peaks', () => {
+      const restore = getRenderScrollDynamic()
+      try {
+        setRenderScrollDynamic(0.1)
+        const gentle = notchProgress()
+        setRenderScrollDynamic(5)
+        const sharp = notchProgress()
+        // Gentle is close to a straight line through the notch; sharp holds
+        // back and then goes.
+        expect(gentle[0]).toBeGreaterThan(sharp[0] * 5)
+      } finally {
+        setRenderScrollDynamic(restore)
+      }
+    })
+
+    it('speed sets the notch duration, at a quarter of the journey time', () => {
+      const restore = getRenderScrollTotalTimeSec()
+      try {
+        setRenderScrollTotalTimeSec(0.4)
+        expect(resolveWheelNotchTravelMs()).toBeCloseTo(100, 6)
+        setRenderScrollTotalTimeSec(2)
+        expect(resolveWheelNotchTravelMs()).toBeCloseTo(500, 6)
+        // The slider's own floor is 0; a notch still takes a frame.
+        setRenderScrollTotalTimeSec(0)
+        expect(resolveWheelNotchTravelMs()).toBe(16)
+      } finally {
+        setRenderScrollTotalTimeSec(restore)
+      }
+    })
+
+    it('still splices with a continuation, which no slider can shape', () => {
+      // The splice has to match a velocity and an acceleration exactly, and
+      // the bell cannot be started from a motion it did not plan. So a notch
+      // landing mid-flight is a quintic, and only the FIRST notch of a run
+      // carries the shape slider's character.
+      const first = retargetWheelNotchTravel(null, NOTCH_PX, 0)
+      expect(first.leg.kind).toBe('curve')
+      const second = retargetWheelNotchTravel(first, NOTCH_PX, 30)
+      expect(second.leg.kind).toBe('continuation')
+    })
   })
 })
