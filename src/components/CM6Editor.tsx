@@ -870,6 +870,9 @@ export function CM6Editor({
   // layout reads paid on every keystroke").
   const scrollerRectRef = useRef<DOMRect | null>(null);
   const caretLayerRectRef = useRef<DOMRect | null>(null);
+  // The caret's own DOM node, so its new position can be written in the SAME
+  // frame that computed it. See applyCaretStyle below for why that matters.
+  const caretElRef = useRef<HTMLDivElement | null>(null);
   const [highlightRects, setHighlightRects] = useState<HighlightRect[]>([]);
   const highlightAnimationFrameRef = useRef<number | null>(null);
 
@@ -1803,6 +1806,43 @@ export function CM6Editor({
    *   adding if runtime font-metric drift from the prop ever actually
    *   matters here; not assumed to.
    */
+  /**
+   * Moves the caret now, and tells React where it went.
+   *
+   * `updateCaret` runs inside a requestAnimationFrame, i.e. before that
+   * frame's paint. A `setState` from there does NOT make that frame: React
+   * schedules the re-render as its own task, so the commit -- and the paint
+   * that shows it -- land on the frame AFTER the one that already had the
+   * answer in hand. Measured on a 400,000-character note, one Enter:
+   * keydown -> caret painted was 46.5ms, of which the rAF callback itself was
+   * 0.1ms. The caret was not slow to compute, it was slow to be allowed out.
+   *
+   * That extra frame is what the reader hears as the caret trailing the
+   * typing sound, which is dispatched inside the keydown handler ~2ms in.
+   *
+   * So the position is written straight onto the node as well. React state
+   * stays the source of truth -- every subsequent render still positions the
+   * caret from `caretStyle`, and this writes exactly the values that state is
+   * about to carry, so the two cannot disagree. If some other render lands
+   * first with the old style, React's own diff (previous props against next
+   * props, never against the DOM) sees no change and writes nothing, leaving
+   * this value in place rather than fighting it.
+   *
+   * Only the move case takes this path. Hiding the caret (`null`) unmounts
+   * the element, which nothing here can do sooner than React can.
+   */
+  const applyCaretStyle = useCallback((style: { transform: string; width: number; height: number }) => {
+    const caretEl = caretElRef.current;
+    if (caretEl) {
+      caretEl.style.transform = style.transform;
+      // Explicit units: React appends `px` to a bare number for these
+      // properties, the CSSOM does not.
+      caretEl.style.width = `${style.width}px`;
+      caretEl.style.height = `${style.height}px`;
+    }
+    setCaretStyle(style);
+  }, []);
+
   const updateCaret = useCallback(() => {
     const view = viewRef.current;
     const layerEl = layerRef.current;
@@ -1875,7 +1915,7 @@ export function CM6Editor({
     const caretWidthPx = Math.max(1, runtimeCellWidthPx - CARET_INSET_PX + (caretSizeDeviation * 2));
     const caretHeightPx = Math.max(1, lineHeightPxNow - CARET_INSET_PX + (caretSizeDeviation * 2));
 
-    setCaretStyle({
+    applyCaretStyle({
       // translate(), not translate3d(): a 3D transform is a compositing
       // trigger on its own, and this element must stay OFF the compositor --
       // see .thockdown-block-caret's own comment in index.css for the black
@@ -1884,7 +1924,7 @@ export function CM6Editor({
       width: caretWidthPx,
       height: caretHeightPx,
     });
-  }, []);
+  }, [applyCaretStyle]);
 
   const scheduleCaretUpdate = useCallback(() => {
     if (caretAnimationFrameRef.current !== null) {
@@ -5833,6 +5873,7 @@ export function CM6Editor({
       ))}
       {hasViewportLines && fontReady && !caretHidden && caretStyle && (
         <div
+          ref={caretElRef}
           className="thockdown-block-caret"
           style={{
             position: 'absolute',

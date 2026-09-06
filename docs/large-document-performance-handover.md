@@ -3044,3 +3044,92 @@ expect `perf:input-lag` burst mode to resolve it.
   bar holding only the new note, with no tab back to the note that was open.
   Observed while building the note-switch check; reproduced identically with
   this round's changes stashed, so it is not from this work. Not investigated.
+
+---
+
+## The caret trailed the typing sound by a frame it did not need to wait for
+
+Reported after the windowed-preview fix above: Enter still felt slightly
+sluggish, with the caret arriving behind the audio confirmation of the
+keystroke, "especially at the beginning".
+
+The typing sound is dispatched inside the keydown handler about 2ms in, so for
+the reader the sound *is* the keystroke and everything after it is lag.
+
+### Measuring it
+
+`scripts/perf/measureCaretLatency.mjs` times two things per keystroke, from
+inside the page: `moved` (keydown to the style mutation that repositions
+`.thockdown-block-caret`) and `painted` (keydown to the frame after that
+mutation was committed — what the eye can see). It reports per document
+position, because "at the beginning" is a claim that a cost varies with where
+the caret is, and that is a different bug from one that does not.
+
+It does not vary with position. On a 400,000-character note, Enter:
+`start` 47.2ms painted, `middle` 46.5ms, `end` 44.0ms. What *is* consistently
+true is that the first keystroke after a pause is the slowest sample in every
+run — worth knowing before chasing a position-dependent cause that isn't there.
+
+Phase instrumentation inside `scheduleCaretUpdate` (temporary, since removed)
+split the 46.5ms:
+
+* the rAF callback waited ~9ms for its frame;
+* **`updateCaret` itself cost 0.1ms** — measuring the rect and computing the
+  position is free;
+* the caret's DOM style did not change until 35.6ms, and did not paint until
+  46.5ms.
+
+So the caret was never slow to compute. It was slow to be allowed out.
+
+### What it was
+
+`updateCaret` runs inside a `requestAnimationFrame`, i.e. before that frame's
+paint, and ended in `setCaretStyle(...)`. **A `setState` from a rAF callback
+does not make that frame**: React schedules the re-render as its own task, so
+the commit — and the paint that shows it — land on the frame *after* the one
+that already had the answer in hand. One whole frame of latency, plus a React
+re-render of a 5,800-line component, to move one absolutely positioned div.
+
+### The fix
+
+`applyCaretStyle` in `CM6Editor.tsx` writes the transform/width/height straight
+onto the caret node (held by a new `caretElRef`) and *also* calls
+`setCaretStyle`. React state stays the source of truth — every subsequent
+render still positions the caret from `caretStyle`, and the imperative write
+carries exactly the values that state is about to hold, so the two cannot
+disagree. If an unrelated render lands first with the old style, React's diff
+compares previous props against next props and never against the DOM, so it
+writes nothing and leaves the newer value in place rather than fighting it.
+
+Only the move case takes this path; hiding the caret (`null`) unmounts the
+element, which nothing can do sooner than React can.
+
+Measured on the same 400,000-character note, keydown to caret painted:
+
+| | before | after |
+| --- | --- | --- |
+| Enter, caret at document start | 47.2ms | 33.7ms |
+| Enter, caret mid-document | 46.5ms | 26.3ms |
+| plain character, mid-document | — | 23.5ms (DOM moved at 13.7ms) |
+
+The caret's DOM position now updates within one frame of the keydown.
+
+Verification: `npm test` (862/862); `tsc` and lint clean on the changed file;
+`verifyProgrammaticSwitchCaret` (which checks placement, not just presence —
+"moved 11px on one keystroke, one cell is 11px"); `measureCaretTravelContinuity`
+(0 caret lurches, 0 drift, a caret element present in all 841 sampled frames);
+`verifyCM6ColdBootCaretFocus`. That last one failed once and passed on two
+immediate re-runs of the identical code, and passes without the change too —
+it reads focus at a fixed moment after a cold boot, and headless loses that
+race occasionally. Worth knowing before treating a single red run of it as a
+regression.
+
+### What still dominates, and is still pre-existing
+
+Of the remaining ~26ms, roughly 22ms is the keydown handler itself — the
+synchronous work React does in response to the edit before the caret's frame
+can even be scheduled. That is the same diffuse per-keystroke cost this
+document has open further up, and it is the ceiling on anything the caret path
+can do: the caret cannot be painted before the keystroke has finished being
+handled. Anyone attacking it should start from `measureTypeLatency.mjs`, whose
+`handler` figure isolates exactly that term.
