@@ -558,14 +558,20 @@ measure; this one is about *what*.
 * **Q6 -- the 1,319 orphaned lines.** Untouched; consumer lists re-verified as
   still accurate. (Session 4 deleted `canonicalizeParagraphSegments` and the
   note-title cache, which were not on that list.)
-* **The preview/render tier, now the largest remaining block.** None of it
-  audited. From a 30-keystroke Enter profile: `CM6Editor.tsx:1890` (172.9ms),
-  `usePreviewMarkdownRendering.tsx:1200` (163.6ms),
-  `invalidatePreviewVirtualizerMeasurementsAfterIndex` (159.7ms),
-  `normalizeForComparison` in `useNoteSnapshots` (147.9ms), `runPassiveSync`
-  (131.1ms). **Check each against a debounce before believing the
-  attribution** -- that is exactly the mistake made with `trackWordCount`, and
-  the harness's 500ms cadence settles every 200ms debounce in the app.
+* **The preview/render tier is NOT a per-keystroke cost.** Recorded here
+  because an earlier revision of this document claimed it was the largest
+  remaining block, on a 500ms-cadence profile. Re-profiled at gap=100 --
+  faster than the app's 200ms debounces, so nothing settles per keystroke --
+  `usePreviewMarkdownRendering.tsx:1200`,
+  `invalidatePreviewVirtualizerMeasurementsAfterIndex` and
+  `normalizeForComparison` all disappear. They are debounced work, and the
+  slow cadence was attributing them to every keypress. Do not re-derive this
+  from another slow-cadence profile.
+
+  What genuinely remains per keystroke, from the same fast-cadence run:
+  `CM6Editor.tsx:1890` (the caret geometry update, ~1.9ms -- DOM measurement,
+  not document-scale) and `runPassiveSync` (~1% of a core, continuous rather
+  than per-keystroke; parked in `docs/pending-review-and-removal.md`).
 * **`applyEditToDocumentLineIndex`'s trailing-offset loop** is O(lines) numeric
   work (37.9ms per 30 keystrokes). Cheap next to what it replaced, and not
   worth a tree until something measures it as a problem.
