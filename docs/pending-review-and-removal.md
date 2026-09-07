@@ -281,35 +281,28 @@ stays hidden at 0/0.
 **Noticed.** Auditing what remains per keystroke after the input-pipeline
 rebuild; it showed up as continuous background cost rather than keystroke cost.
 
-### The table-of-contents regeneration layout effect
+### findOwnTitleLineIndex scans the whole note when there is no title
 
-**What.** The `useLayoutEffect` in `useMarkdownFormattingToolbar.ts` that keeps
-a note's table of contents in sync with its headings. It is keyed on
-`currentEditorText`, so in a note that HAS a table of contents it runs on every
-keystroke and does three full-document passes —
-`removeTableOfContentsAndAnchors`, `buildTableOfContentsInsertion`, and a
-string comparison of the result against the current text — before deciding,
-almost always, to do nothing.
+**What.** `findOwnTitleLineIndex` in `useMarkdownFormattingToolbar.ts` looks
+for the note's own title line -- the first heading at `titleLevel` -- by
+walking every line and running `parseMarkdownHeading` on each. A note whose
+first line is not a level-1 heading has no title, so the search finds nothing
+and scans to the end.
 
-**Why it is suspect.** This is the same shape as everything the input-pipeline
-rebuild removed: work proportional to the whole note, on every keypress, to
-answer a question whose answer changes rarely. It has never appeared in any
-profile from this effort, and that is the point — `measureTypeLatency`'s
-synthetic fixtures contain no table of contents, so the effect returns at its
-`isTableOfContentsActive` guard and the cost is invisible. Every user with a
-table of contents in a large note pays it and no measurement here has ever
-seen it.
+**Why it is suspect.** `noteHasTableOfContents` calls it on every keystroke
+(that call has to stay live -- it decides whether the toolbar button inserts
+or removes), so a titleless note pays a full-document heading scan per
+keypress. Measured at ~1.05ms per keystroke on a 400,000-character note after
+the surrounding work was fixed; it would be roughly 4ms at 1.5M.
 
-**What would have to be true to fix it.** First measure it, with a fixture
-that actually has a table of contents — the number is currently unknown and
-should not be guessed at. Then the likely fix is that the effect needs to run
-when the *headings* changed, not when the text changed: the edit is now
-available (`EditorTextChangeEvent.edit`), so an edit that touches no heading
-line cannot change the table of contents. Debouncing is the tempting
-alternative and is more dangerous than it looks — see the sibling note below
-about `isTableOfContentsActive`, where exactly that was tried and broke the
-button, caught by `verifyChapterTocButtonFix`.
+**What would have to be true to fix it.** `NOTE_HEADLINE_LEVEL_RULE` says only
+the first line may be a level-1 heading, and `useHeadlineLevelGuard` enforces
+that on every edit -- so in a well-formed note the search could stop at the
+first heading of any level: if that one is not the title level, there is no
+title. Confirm that the guard really does hold for every note that reaches
+here (imported notes, chapter families, notes edited before the guard existed)
+before relying on it, because the early exit changes the answer for a note
+shaped `## A ... # B`, where the current code returns the later `# B`.
 
-**Noticed.** While auditing what remains per keystroke after the input-pipeline
-rebuild, after mistakenly debouncing `isTableOfContentsActive` and having the
-live test reject it.
+**Noticed.** Profiling a note with a table of contents, after the regeneration
+effect that dominated it was fixed.

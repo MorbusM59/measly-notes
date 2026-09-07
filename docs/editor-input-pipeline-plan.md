@@ -528,6 +528,27 @@ caller-supplied edit must verify it, not trust it.** Every consumer compares
 the cache's own text against the text the edit was computed against, and falls
 back to the path that existed before when they disagree.
 
+# The fixture gap (session 4, and the lesson worth keeping)
+
+The largest single per-keystroke cost found in this whole effort was invisible
+to every measurement in it, for a reason worth stating plainly: **every
+performance fixture in this repo was a note without a table of contents.**
+
+`useMarkdownFormattingToolbar`'s regeneration layout effect keeps a note's
+table of contents in step with its headings. It is keyed on the note text, so
+in a note that has one it ran on every keystroke and did three full-document
+passes -- strip, rebuild, compare -- before almost always deciding to do
+nothing. Every fixture returned at its `isTableOfContentsActive` guard, so no
+profile ever saw it, while every user who has pressed the toolbar button paid
+it: ~8.9ms per keypress on a 400,000-character note, less than a third the
+size the rest of this work was measured against.
+
+`--shape=realistic-toc` closes that particular gap. The general lesson does
+not close with it: **a profile only shows the code your fixture reaches.**
+Before concluding that a surface is fast, check which of its branches the
+fixture actually enters. The instrument caveats above are all about *how* to
+measure; this one is about *what*.
+
 # Still open
 
 * **Q5 -- the small-note floor.** Still unattributed, and now the most
