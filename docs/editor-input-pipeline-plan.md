@@ -28,16 +28,26 @@ no longer exists is still being carried.
 `node scripts/perf/measureTypeLatency.mjs --chars=1500000 --shape=realistic
 --keystrokes=10 --position=middle --gap=500 --key=<key>`
 
-| key | handler (keydown → end of the synchronous task) |
-| --- | --- |
-| plain character | 31.3ms |
-| **Enter** | **43.8ms** |
-| Backspace | 34.0ms |
+Session 3 shipped the first round of this rebuild. Interleaved A/B against
+the pre-session tree, three rounds each, on one machine (slower than the one
+the original figures came from -- compare within a column, not across):
 
-Enter costs ~12ms more than an ordinary character, every single press. That is
-the target. A small note pays ~14ms for any key, so roughly half the 31.3ms is
-document-scale cost that is also still open, and the other half is fixed
-overhead (CM6's commit, the app's re-render, the caret pass).
+| key | before | after | Enter penalty |
+| --- | --- | --- | --- |
+| plain character | 42.6 / 53.5 / 41.0 | 33.5 / 34.9 / 32.6 | |
+| **Enter** | 61.3 / 68.4 / 60.3 | 44.3 / 43.5 / 41.8 | **18.7ms → 10.0ms** |
+
+Every "after" run sits below every "before" run for both keys, which is the
+bar this codebase asks for. Roughly a fifth off an ordinary keypress, a
+third off Enter, and the Enter-specific penalty -- the thing this document
+set out to remove -- nearly halved.
+
+**Interleave, always.** A single before-run and a single after-run taken
+minutes apart on this hardware differ by up to 40% for reasons that have
+nothing to do with the code. A non-interleaved comparison during this
+session showed a convincing 23% "improvement" from a change whose real
+effect was below the noise floor. Alternate the two trees within one
+command and require no overlap between the groups.
 
 ### Know what each instrument cannot see
 
@@ -68,9 +78,14 @@ This has cost this effort more time than any bug. Read before measuring.
 * **`dev:browser` has no `thockdownExternalFiles` mock at all**, so every
   external-file path is inert there.
 
-## The pipeline as it actually is
+## The pipeline as it was (session 2), and what remains
 
-Verified by reading, this session. Line numbers drift — find by name.
+> **Superseded in part.** Steps 2, 4 and 5 below no longer happen -- see
+> "What shipped" near the end of this document. The description is kept
+> because steps 1, 3 and 6 are unchanged and the reasoning still explains
+> why the contract mattered.
+
+Verified by reading, in session 2. Line numbers drift — find by name.
 
 A keypress reaching `CM6Editor.tsx`'s `keydown` handler is offered to a chain of
 transform callbacks (`EditorContract.ts`'s `EditorBindings`). **All five share
@@ -175,7 +190,11 @@ comments explaining why CM6 differs. Those comments are worth reading before
 changing behaviour and worth deleting once the reasoning no longer refers to a
 live alternative.
 
-## The shape of the fix
+## The shape of the fix (the output half is done)
+
+> The output-contract change described here shipped in session 3. The input
+> half -- giving transforms something smaller than the whole document to read
+> -- has not, and the paragraph on it below is still the plan.
 
 **Give transforms a contract that carries what they know.** Instead of
 `{ text, selection }` out, return the edit:
@@ -414,3 +433,112 @@ four transform bindings in `useEditorSectionMount.ts`, after normalizing at
 ingress instead (Q3). It removes a full-document regex pass from **every
 printable keystroke**, it is a latent correctness fix rather than a tradeoff,
 and it is small enough to A/B cleanly.
+
+---
+
+# What shipped (session 3)
+
+Four changes, each A/B'd, each with the removed work verified as gone from
+the CDP profile rather than inferred from an end-to-end number.
+
+**1. Canonical text is now a document invariant, not a per-keystroke rescan.**
+`CanonicalTextFilter.ts` is a CM6 transaction filter that scans each
+*inserted fragment* and normalizes only when it has to — cost proportional
+to what was typed or dropped, never to the document. Every transform's
+`normalizeInternalText(text)` over the whole note is gone. That call was not
+merely wasted: a transform is handed `selection` in document coordinates, so
+if normalization had ever changed anything before the caret, every offset
+would have been stale against the string the transform then read. It was
+only correct in exactly the case where it was a no-op. (The old
+`EnterTransformPolicy` test "normalizes tabs before applying enter
+continuation semantics" was that bug written down as an expectation.)
+
+**2. The transform contract carries the edit.** `EditorTransformResult` now
+has `edit: {from, to, insert}` alongside `text`, and `buildTransformResult`
+*derives* the text from the edit so the two cannot drift.
+`applyTransformResult` dispatches the range instead of rediscovering it with
+a common-prefix/common-suffix diff of two 1.5M-character strings.
+
+**3. CM6's React→CM6 sync effect reads `previousTextRef`** instead of
+rebuilding the document with `doc.toJSON().join('\n')` every keystroke.
+Bonus: the equality check becomes O(1) on identity, because during typing
+`initialText` *is* the string the updateListener handed to React.
+
+**4. `noteHasTableOfContents` got a necessary-condition guard.** It rescanned
+the whole note on every keystroke to style one toolbar button. Both heading
+forms it recognizes contain the literal `Table of Contents`, so one
+allocation-free substring scan rules out every note without one.
+
+Verified gone from the profile (self-time per 10-keystroke Enter run):
+`normalizeInternalText` 25.1ms, `commonPrefixLen` + `commonSuffixLen`
+73.2ms, `noteHasTableOfContents` 63.2ms.
+
+New tests: `CanonicalTextFilter.test.ts` (22, including a 400-step fuzz that
+the document stays canonical after every edit) and `TransformResult.test.ts`
+(7). The second one guards the *performance* property, which nothing else
+does: a transform reporting `{from: 0, to: length, insert: wholeNewText}`
+would satisfy every text-level assertion in the suite while silently
+restoring the whole-document cost. Both A/B'd by disabling the code under
+test and confirming the tests fail.
+
+# The systemic pattern (this is the next structural step)
+
+The transform contract was one instance of a defect this codebase has in at
+least four places. In each, the app **knows the edit**, throws it away at an
+interface boundary, and then spends O(document) rediscovering it — or never
+had it and pays O(document) for want of it:
+
+| consumer | what it does per keystroke | what it needs |
+| --- | --- | --- |
+| `trackWordCount` (`WordCount.ts`, via `EditorSection.tsx`) | `computeMinimalTextReplacement(oldText, newText)` — a full prefix/suffix diff — then does genuinely O(edit) work | the edit |
+| `deriveNoteTitleIncremental` (`noteTitle.ts`) | `text.split('\n')` on the whole document, then O(edit) work | the edit |
+| `updateInlineStateLineCacheIncremental` (`MarkdownContext.ts`) | `text.split('\n')` plus an O(lines) string-comparison diff, then O(edit) work | the edit |
+| `canonicalizeParagraphSegmentsIncremental` (`TextPolicy.ts`) | per-segment prefix/suffix reuse over the whole segment array | the edit |
+
+Every one of these is *already* labelled "incremental" and has a careful doc
+comment and a fuzz test. The per-line work genuinely was removed. What
+remains is an **O(document) front end whose entire job is to reconstruct the
+edit** — the same thing `applyTransformResult` was doing, for the same
+reason. A past optimization being real is not evidence it went far enough.
+
+Their combined self-time in the current profile is roughly 150ms per
+10-keystroke run, and unlike the Enter penalty it is paid on **every key**.
+
+**The shape of the fix.** These consumers should be fed the edit, not two
+documents to diff. The producer side now exists on the transform path
+(`EditorTransformResult.edit`) and has always existed on the CM6 side
+(`update.changes`, a `ChangeSet`). What is missing is a single edit-carrying
+channel from the editor to app-state consumers — `onTextChange` currently
+hands over `{text, selection}` and nothing about what changed.
+
+The obvious shared primitive underneath is a **line index maintained by
+splicing rather than re-splitting**: `lines: string[]` plus
+`lineStartOffsets`, updated per edit in O(changed lines) plus an O(lines)
+pointer memmove, instead of ~30k fresh substring allocations per keystroke.
+Three of the four consumers above start by splitting the document into
+exactly this, independently, every keystroke.
+
+Design it once, deliberately, with the whole consumer list in view — the
+mistake to avoid is bolting an edit parameter onto each of the four in turn
+and ending up with four private incremental line indexes instead of one.
+
+# Still open
+
+* **The input half of the transform contract.** Enter still calls
+  `resolveMarkdownSelectionContext`, which computes `countLineIndex`
+  (discarded entirely — ~20ms/10 keystrokes) and a full
+  `computeInlineStateAtOffset` scan (~45ms) to extract one boolean,
+  `inFencedCodeBlock`. Q1 and Q2 above say what it actually needs and why
+  wiring it to the existing incremental variant as-is would not help. The
+  fence state is the only genuinely document-wide input any transform has,
+  and it wants the same edit-driven treatment as the table above.
+* **Q5 — the small-note floor.** Still unattributed. Now the more
+  interesting question: with the document-scale costs coming down, what a
+  keystroke costs when there is nothing to be proportional *to* is the next
+  ceiling.
+* **Q6 — the 1,319 orphaned lines.** Untouched; consumer lists re-verified
+  as still accurate.
+* **The remaining tier-2 items** not covered by the table above:
+  `invalidatePreviewVirtualizerMeasurementsAfterIndex` (~50ms),
+  `usePreviewMarkdownRendering.tsx:1200` (~49ms), `runPassiveSync` (~59ms),
+  `normalizeForComparison` in `useNoteSnapshots` (~36ms). None audited yet.

@@ -213,3 +213,30 @@ should mean for a pane whose geometry never stops moving.
 
 **Noticed.** The windowing build; listed as a known-unexamined risk when it
 shipped.
+
+### CM6Editor's same-note branch of the React→CM6 sync effect
+
+**What.** The `else` branch of the note-switch hydration effect in
+`CM6Editor.tsx` — the one that computes a minimal replacement and overwrites
+the *live* document with React's view of it. Its own comment describes it as
+existing for "transient mismatches" between `initialText` and CM6's document.
+
+**Why it is suspect.** It is a correction path that writes over the editor's
+own state, and nobody knows how often it actually fires. During the session
+that made this effect read `previousTextRef` instead of rebuilding the
+document, `computeMinimalTextReplacement` remained in the profile at ~54ms
+per 10-keystroke run — but that function has a second per-keystroke caller
+(`trackWordCount` via `WordCount.ts`), and the two were never separated. So
+the branch may be running on every keystroke, or never. Both are worth
+knowing: if it runs constantly, React and the editor are disagreeing about
+the document on every keypress and the real defect is upstream; if it never
+runs, it is a fallback whose trigger no longer exists.
+
+**What would have to be true to remove it.** Instrument the branch (a counter,
+not a profile attribution) across a real typing session and a note switch. If
+it never fires, the same-note path can early-return and the branch goes. If it
+does fire, find out what makes React's view diverge and fix that instead —
+overwriting the live document is a symptom fix.
+
+**Noticed.** While removing the per-keystroke `doc.toJSON().join('\n')` from
+that same effect.
