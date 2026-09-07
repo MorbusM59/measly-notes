@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Measures the real app's CM6Editor path (src/components/CM6Editor.tsx),
-// not the standalone scripts/perf/cm6-spike/ prototype -- forces the
-// dev-only `thockdown:cm6-editor-spike` localStorage flag on via
-// page.addInitScript before every navigation, then reuses the exact same
-// measurement primitives as `npm run perf:input-lag` for an apples-to-apples
-// comparison against the Lexical numbers already in
+// not the standalone scripts/perf/cm6-spike/ prototype -- reusing the exact
+// same measurement primitives as `npm run perf:input-lag`
+// for an apples-to-apples comparison against the Lexical numbers already in
 // docs/large-document-performance-handover.md.
+//
+// It used to force a `thockdown:cm6-editor-spike` localStorage flag on before
+// every navigation, back when CM6 was one of two editors behind a switch.
+// CM6 is the only editor now, the flag has no reader, and the line is gone.
 //
 //   node scripts/perf/measureCM6RealApp.mjs [flags]
 // Flags: same as measureInputLag.mjs (--mode, --chars, --keystrokes,
@@ -87,7 +89,6 @@ async function main() {
   try {
     browser = await chromium.launch({ headless: !args.headed, executablePath: resolveChromiumExecutablePath() })
     const page = await browser.newPage()
-    await page.addInitScript(() => { window.localStorage.setItem('thockdown:cm6-editor-spike', '1') })
     await page.goto(`http://localhost:${args.port}/`)
 
     console.error(`[cm6-real] generating synthetic document (~${args.chars} chars)...`)

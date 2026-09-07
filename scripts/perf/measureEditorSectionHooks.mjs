@@ -39,7 +39,6 @@ async function main() {
   try {
     browser = await chromium.launch({ headless: true, executablePath: resolveChromiumExecutablePath() })
     const page = await browser.newPage()
-    await page.addInitScript(() => { window.localStorage.setItem('thockdown:cm6-editor-spike', '1') })
     await page.goto(`http://localhost:${port}/`)
 
     console.error(`[hooks] generating synthetic document (~${chars} chars)...`)
