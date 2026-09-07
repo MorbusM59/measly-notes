@@ -12,7 +12,8 @@
 // otherwise would just move the truncation somewhere it cannot be
 // validated.
 
-import { nextIntInclusive, nextRandom, createSeed, toRngState } from './rng'
+import { nextRandom, createSeed, toRngState } from './rng'
+import { resolveCheck } from './rules/checks'
 import { applyEffects, evaluateConditions, type RuleState } from './rules'
 import {
   ADVENTURE_SESSION_VERSION,
@@ -212,10 +213,19 @@ function resolveOutcome(outcome: AdventureOutcome, session: AdventureSession): R
     }
 
     case 'check': {
-      const roll = nextIntInclusive(session.rngState, 1, outcome.dieSides ?? DEFAULT_DIE_SIDES)
-      const total = roll.value + (session.stats[outcome.stat] ?? 0)
-      const leg = total >= outcome.difficulty ? outcome.success : outcome.failure
-      return { sceneId: leg.sceneId, effects: leg.effects ?? [], rngState: roll.state }
+      // Delegated so the game has ONE check rule (rules/checks.ts): the die
+      // is the opposition, and the stat has to match or beat it plus the
+      // Difficulty Rating. This module used to roll its own the other way
+      // round (stat + die vs a target), which reads the same in prose and
+      // is not the same game.
+      const check = resolveCheck(
+        session.stats[outcome.stat] ?? 0,
+        outcome.difficultyRating,
+        session.rngState,
+        outcome.dieSides ?? DEFAULT_DIE_SIDES,
+      )
+      const leg = check.passed ? outcome.success : outcome.failure
+      return { sceneId: leg.sceneId, effects: leg.effects ?? [], rngState: check.rngState }
     }
   }
 }

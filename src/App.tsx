@@ -166,6 +166,7 @@ import { useAdventureEscapeMenu } from './adventure/useAdventureEscapeMenu'
 import { sanitizeAdventureSession } from './adventure/session'
 import type { AdventureSession } from './adventure/types'
 import { ESCAPE_HOLD_MS } from './shared/escapeHold'
+import { planSlotViewOpen, type SlotViewKind, type SlotViewsSnapshot } from './shared/slotViews'
 import { HELP_GUIDE_NOTE_IDS, HELP_GUIDE_ROOT_ID } from './shared/helpGuide'
 import {
   deriveRenderScrollDynamicFromResponsiveness,
@@ -5585,18 +5586,48 @@ ${markdownHtml}
     // persistMenuStateNowRef for the case where they cannot).
   }, [guideView, persistMenuStateNow, undockedNote])
 
+  /**
+   * Applies a slot-view open plan (shared/slotViews.ts): sets all three view
+   * fields to the planned state, persists them in ONE write, and hands back
+   * any slot a displaced view was holding elsewhere. What the newly opened
+   * view then LOADS into the slot is the caller's business -- the guide
+   * loads its note, the adventure empties the slot -- and is the only part
+   * that differs between the two.
+   *
+   * Everything about mutual exclusion lives in the planner, not here. Two
+   * openers agreeing about it by copying each other is what produced the
+   * bug that module documents.
+   */
+  const applySlotViewOpen = useCallback((kind: SlotViewKind): { sectionId: string } | null => {
+    const targetSectionId = activeSectionId
+    if (!targetSectionId) return null
+    const current: SlotViewsSnapshot = { guideView, adventureView, undockedNote }
+    const plan = planSlotViewOpen(kind, targetSectionId, getActiveSection()?.activeNoteId ?? null, current)
+
+    setGuideView(plan.next.guideView)
+    setAdventureView(plan.next.adventureView)
+    setUndockedNote(plan.next.undockedNote)
+    persistMenuStateNow({
+      guideView: plan.next.guideView,
+      adventureView: plan.next.adventureView,
+      undockedNote: plan.next.undockedNote,
+    })
+
+    for (const handback of plan.handbacks) {
+      const handle = sectionRegistryRef.current.get(handback.sectionId)
+      if (!handle) continue
+      if (handback.noteId) void handle.activateNote(handback.noteId).catch(() => undefined)
+      else void handle.clearActiveNote().catch(() => undefined)
+    }
+
+    return { sectionId: targetSectionId }
+  }, [activeSectionId, adventureView, getActiveSection, guideView, persistMenuStateNow, undockedNote])
+
   /** Loads the guide into whichever slot is active, remembering what that slot was showing. */
   const openGuideViewHere = useCallback(async () => {
-    const targetSectionId = activeSectionId
-    if (!targetSectionId) return
-    const previousNoteId = getActiveSection()?.activeNoteId ?? null
-    const nextGuideView = { sectionId: targetSectionId, previousNoteId }
-    setGuideView(nextGuideView)
-    persistMenuStateNow({ guideView: nextGuideView, undockedNote: null })
+    if (!applySlotViewOpen('guide')) return
     await selectNote(HELP_GUIDE_ROOT_ID, { forceReload: true })
-    // No undockedNote here on purpose: opening the guide clears it, so the
-    // override is the literal null and the value is never read.
-  }, [activeSectionId, getActiveSection, persistMenuStateNow, selectNote])
+  }, [applySlotViewOpen, selectNote])
 
   /**
    * Writes a run through the one correct immediate-persist path
@@ -5626,18 +5657,11 @@ ${markdownHtml}
    * straight back to the same step.
    */
   const openAdventureViewHere = useCallback(async () => {
-    const targetSectionId = activeSectionId
-    if (!targetSectionId) return
     const handle = getActiveSection()
-    const previousNoteId = handle?.activeNoteId ?? null
-    const nextAdventureView = { sectionId: targetSectionId, previousNoteId }
-    setGuideView(null)
-    setUndockedNote(null)
-    setAdventureView(nextAdventureView)
-    persistMenuStateNow({ guideView: null, undockedNote: null, adventureView: nextAdventureView })
+    if (!applySlotViewOpen('adventure')) return
     setIsEscapeHoldPanelOpen(true)
     await handle?.clearActiveNote().catch(() => undefined)
-  }, [activeSectionId, getActiveSection, persistMenuStateNow])
+  }, [applySlotViewOpen, getActiveSection])
 
   /**
    * Ends the view and gives the slot back what it held. The RUN is

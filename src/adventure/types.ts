@@ -74,10 +74,15 @@ export type AdventureOutcome =
   | { kind: 'chance'; branches: AdventureChanceBranch[] }
   | {
       kind: 'check'
-      /** Stat added to the roll. Missing stats read as 0. */
+      /** The stat tested. Missing stats read as 0. */
       stat: string
-      /** Roll is 1..`dieSides` (default 6) plus the stat; >= this passes. */
-      difficulty: number
+      /**
+       * Added to a 1..`dieSides` roll to make the number the stat must
+       * match or beat -- see rules/checks.ts, which owns the rule. Note the
+       * direction: a HIGHER rating is harder, and a rating at or above the
+       * die's maximum cannot be passed at all.
+       */
+      difficultyRating: number
       dieSides?: number
       success: AdventureOutcomeLeg
       failure: AdventureOutcomeLeg

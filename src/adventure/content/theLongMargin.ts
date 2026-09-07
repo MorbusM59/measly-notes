@@ -12,6 +12,10 @@
 //   - every scene needs one choice with no requirements, so no run can
 //     arrive somewhere with nothing available.
 //
+// contentVersion 2: the stat-check rule changed under this story (the die
+// is the opposition now -- rules/checks.ts), so its two checks were retuned
+// and a run saved under the old meaning is not resumable into this one.
+//
 // Prompts are one line each: they are read across the tab bar above the
 // editor, in the strip where a note's tabs normally sit (the ring's own
 // centre never shows them -- see escapeMenuContract.ts's EscapeMenuModeStatus
@@ -24,7 +28,7 @@ import type { AdventureDefinition } from '../types'
 export const THE_LONG_MARGIN: AdventureDefinition = {
   id: 'the-long-margin',
   title: 'The Long Margin',
-  contentVersion: 1,
+  contentVersion: 2,
   startSceneId: 'threshold',
 
   stats: [
@@ -96,7 +100,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
           outcome: {
             kind: 'check',
             stat: 'resolve',
-            difficulty: 6,
+            difficultyRating: 1,
             success: { sceneId: 'stacks', effects: [{ kind: 'adjustStat', stat: 'insight', delta: 1 }] },
             failure: { sceneId: 'stacks', effects: [{ kind: 'adjustStat', stat: 'lantern', delta: -1 }] },
           },
@@ -187,7 +191,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
           outcome: {
             kind: 'check',
             stat: 'insight',
-            difficulty: 6,
+            difficultyRating: 1,
             success: { sceneId: 'heart' },
             failure: { sceneId: 'heart', effects: [{ kind: 'adjustStat', stat: 'lantern', delta: -1 }] },
           },
