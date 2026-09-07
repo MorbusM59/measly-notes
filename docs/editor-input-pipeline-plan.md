@@ -223,27 +223,194 @@ properly.
    which is the highest-severity surface in this codebase: a wrong offset does
    not look wrong, it edits the wrong place.
 
-## Questions to answer before writing code
+## Answers to the questions above (session 2, verified by reading + profiling)
 
-None of these are settled. Answer them from the code, not from this document.
+The previous session left six questions. All six are answered below. Read the
+answers before the implementation sections above — two of them change what the
+first implementation step should be.
 
-1. What is the minimum input each of the five transforms needs? (Enter is
-   answered above. Tab, markdown-shortcut, character-insert and caret-click are
-   not.)
-2. Can `inFencedCodeBlock` be answered from an incrementally maintained cache
-   cheaply and *correctly* under arbitrary edits — including edits that open or
-   close a fence far from the caret? This is the same forward-unbounded hazard
-   class that `PreviewBlockSplit` documents; assume it applies until proven
-   otherwise.
-3. Is `normalizeInternalText(event.text)` in the transform policies ever load
-   bearing, or is the document canonical by construction at that point? If
-   canonical, the call is pure waste on every transform. If not, what makes it
-   non-canonical, and should that be fixed at the source instead?
-4. Do `onTabIndentTransform` / `onMarkdownShortcutTransform` operate over
-   selections large enough that a single `{from, to, insert}` range is the wrong
-   shape? (`indentSelectionByStep` suggests multi-line edits — check whether one
-   range still expresses them.)
-5. What is the ~14ms floor a 5,000-character note pays made of? That is now
-   comparable to the document-scale cost and nobody has attributed it.
-6. Which of the 1,319 orphaned lines can simply be deleted, and does anything in
-   them encode knowledge worth keeping as a comment somewhere live?
+### Q1 — What is the minimum input each of the five transforms needs?
+
+Audited all five by reading their bodies. **None of them needs the whole
+document.** Every one is a contiguous single-range edit whose inputs are
+caret-local:
+
+| transform | what it actually reads | whole-document work it currently does |
+| --- | --- | --- |
+| `onEnterTransform` | `inline.inFencedCodeBlock`, `line.lineText`, `line.lineStart`, `line.lineEndExclusive` (4 fields, as established) | `normalizeInternalText`, `countLineIndex`, `computeInlineStateAtOffset`, `nextText` concat, prefix/suffix rediscovery |
+| `onTabIndentTransform` | `.line` only — `headingLevel`, `lineText`, `lineStart`, `lineEndExclusive`. **The whole `inline` object and `lineIndex` are computed and discarded.** `indentSelectionByStep` itself is O(selected block): it slices `[lineStart, lineEndExclusive)`, transforms those lines, and concatenates | same as Enter |
+| `onMarkdownShortcutTransform` | all four builders (`buildTextDecorationTransform`, `…ToggleCurrentLineHeading…`, `…ToggleBulletedList…`, `…ToggleNumberedList…`) locate their own line/word bounds with `lastIndexOf('\n')` / `indexOf('\n')` and operate on `sourceText.slice(lineStart, lineEndExclusive)` | `normalizeInternalText` + `nextText` concat + prefix/suffix rediscovery |
+| `onCharacterInsertTransform` | `charCodeAt` around the caret, then an O(line) prefix regex. Already minimal | `normalizeInternalText` — see Q3, this is the worst one |
+| `onCaretClickTransform` | `charCodeAt(caret±1)`, then `lastIndexOf('\n')` + an O(line) regex. Already minimal | `normalizeInternalText` |
+
+So the plan's claim that `onCharacterInsertTransform` "is already built the way
+this document argues for" is true of the *policy* and false of the *binding*
+that wraps it: `useEditorSectionMount.ts` runs `normalizeInternalText(text)`
+over the full document **before** calling the cheap policy that returns `null`
+in the ordinary case.
+
+### Q2 — Can `inFencedCodeBlock` come from an incremental cache, cheaply and correctly?
+
+Correctly: yes, and the argument is already made and fuzz-tested —
+`updateInlineStateLineCacheIncremental`'s doc comment handles exactly the
+forward-unbounded hazard the question worried about, by scanning forward from
+the edit until a line's entering state matches its pre-edit state, degrading to
+a full recompute when it never restabilizes. `MarkdownContext.test.ts` fuzzes it
+against the O(document) ground truth. That is the standard this codebase asks
+for and it has already been met.
+
+**Cheaply: no — not as currently written, and this matters.** The plan proposed
+simply wiring the Enter path to `resolveMarkdownSelectionContextIncremental`
+because "the fast path was simply never wired to the hot caller". That would
+help less than it looks:
+
+* `updateInlineStateLineCacheIncremental` starts with `text.split('\n')` on the
+  whole document — for the 1.5M-char realistic fixture that is ~30k substring
+  allocations, **every call**.
+* It then runs `computeCommonLinePrefixSuffixLen`, an O(lines) walk doing real
+  string comparisons (the new array's strings are freshly allocated, so
+  identity comparison never short-circuits).
+
+It is asymptotically O(document) too — just with a smaller constant than
+`scanInlineStateFrom`. The profile bears this out: with the toolbar already
+driving it every keystroke, `updateInlineStateLineCacheIncremental` costs
+38.6ms self-time per 10-keystroke run, versus `countLineIndex`'s 28.4ms.
+Wiring Enter to it as-is would trade one O(document) pass for another.
+
+The structurally right answer is that the cache should be fed **the edit**
+(`{from, to, insert}`), not two full document strings to diff — which is the
+same conclusion the output-contract change reaches from the other direction.
+Keep the stabilization argument; replace the line-diff front end.
+
+### Q3 — Is `normalizeInternalText(event.text)` on the transform path load bearing?
+
+**No — and it is worse than waste: where it would do anything, it is a
+correctness bug.**
+
+The argument is structural, not empirical. `event.selection` holds offsets into
+the *CM6 document*. `normalizeInternalText` collapses `\r\n` → `\n` and expands
+`\t` → three spaces. If it changes anything *before* the caret, every offset in
+`event.selection` is stale with respect to `sourceText`, so the transform reads
+the wrong line and returns an edit at the wrong place — and the whole-document
+`nextText` it returns then silently rewrites the note. So the call is only ever
+*correct* in precisely the case where it is a *no-op*.
+
+Ingress is in fact canonical by construction: paste goes through
+`sanitizeDocumentText`/`sanitizeDocumentTextExtended`, whose
+`normalizeLineSeparators` + tab expansion are a superset of
+`normalizeInternalText`; Tab keypresses are intercepted and inserted as spaces;
+ordinary typing cannot produce `\r`. The one ingress worth checking before
+deleting the calls is **CM6's default drop handler** (no `drop:` override exists
+in `CM6Editor.tsx`) and external-file note hydration.
+
+The fix is therefore not "keep normalizing defensively" — that hides the bug
+rather than preventing it. Normalize at *ingress* (drop handler, external-file
+read), then delete the per-keystroke calls.
+
+Cost of the calls today: 25.1ms self-time per 10-keystroke run, on **every
+printable character**, in a path that discards the result.
+
+### Q4 — Do Tab / markdown-shortcut edits need more than one `{from, to, insert}` range?
+
+**No. One range expresses all of them.** Every multi-line case
+(`indentSelectionByStep`, the two list toggles) already computes a single
+contiguous block `[lineStart, lineEndExclusive)`, transforms the lines inside
+it, and joins. The natural range is `{from: lineStart, to: lineEndExclusive,
+insert: nextBlock}` — the block string these functions already build. No
+multi-range shape is needed.
+
+### Q5 — What is the ~14ms floor made of?
+
+Not attributed yet; a small note's cost was not profiled this session. But the
+profile of the *large* note answers the more urgent question, and it is not the
+one the plan expected — see the new section below.
+
+### Q6 — Which orphaned lines can be deleted?
+
+Not yet actioned. Consumer lists re-verified as still accurate.
+
+## What the profile actually shows (new, and it changes the priorities)
+
+Measured this session, `--shape=realistic --chars=1500000 --keystrokes=10
+--position=middle --gap=500`, with `--profile --stacks`. This machine is ~1.7x
+slower than the one the table at the top of this document was measured on, so
+compare *ratios*, not absolutes:
+
+| key | handler median | (prior machine) |
+| --- | --- | --- |
+| plain character | 59.1ms | 31.3ms |
+| **Enter** | **72.8ms** | **43.8ms** |
+| Backspace | 64.1ms | 34.0ms |
+
+The ~13ms Enter penalty reproduces. But the self-time breakdown shows the Enter
+transform pipeline is **not** where most of the per-keystroke document-scale
+cost lives.
+
+**First, discount the instrument.** The profile is taken against `dev:browser`,
+whose mock bridge does work the real Electron app does not do on the keystroke
+thread. Verified by reading, not assumed:
+
+* `persistStore` (148ms), `clone` (101ms), `setItem` (165ms), `deriveTitle`
+  (25ms) — `installBrowserMockBridges.ts` only. The mock re-clones and
+  re-serializes the entire note store to `localStorage`. No real counterpart.
+* `extractChecklistCheckedStates` (99ms) — reached only via
+  `checklistStateChanged`, whose sole real caller is
+  `electron/noteLifecycleService.ts`, i.e. the **main process, on save**. In the
+  real app this is off the renderer's keystroke path entirely.
+
+**What is left is real renderer work, and most of it is not the Enter
+transform.** Self-time per 10-keystroke run:
+
+| function | self | on the transform path? |
+| --- | --- | --- |
+| `noteHasTableOfContents` @ `useMarkdownFormattingToolbar.ts` | 92.1ms | **no** |
+| `computeMinimalTextReplacement` @ `MinimalTextDiff.ts` | 73.5ms | no |
+| `deriveNoteTitleIncremental` @ `noteTitle.ts` | 70.8ms | no |
+| `invalidatePreviewVirtualizerMeasurementsAfterIndex` | 66.7ms | no |
+| `usePreviewMarkdownRendering.tsx:1200` | 63.5ms | no |
+| `scanInlineStateFrom` @ `MarkdownContext.ts` | 62.4ms | partly |
+| `normalizeForComparison` @ `useNoteSnapshots.ts` | 61.0ms | no |
+| `runPassiveSync` @ `CM6Editor.tsx` | 55.7ms | no |
+| `commonSuffixLen` + `commonPrefixLen` @ `CM6Editor.tsx` | 85.4ms | **yes** |
+| `updateInlineStateLineCacheIncremental` | 38.6ms | partly |
+| `countLineIndex` | 28.4ms | **yes** |
+| `normalizeInternalText` | 25.1ms | **yes** |
+
+The single clearest example, and it is not in this document's original scope:
+`isTableOfContentsActive` is a `useMemo` keyed on `currentEditorText`, so on
+**every keystroke** it runs `normalizeInternalText` over the whole document,
+`split('\n')` it, and regex-tests every line — to decide whether one toolbar
+button renders as active. Nobody can observe that boolean change mid-keystroke.
+
+So the pipeline splits into two tiers, and the plan above only names the first:
+
+1. **The Enter/transform pipeline** (~140ms of the sampled window):
+   `commonPrefixLen`/`commonSuffixLen`, `countLineIndex`, `normalizeInternalText`.
+   This is what the output-contract change removes. Real, and it is the Enter
+   penalty specifically.
+2. **Everything else that walks the document on every keystroke** (~480ms of
+   the sampled window): the TOC memo, title derivation, the minimal-diff sync
+   effect, snapshot normalization, preview virtualizer invalidation. These fire
+   for **every key**, not just Enter, and they are what the plain-character
+   floor is made of.
+
+Tier 2 is the larger number and, per-item, the easier work — most of it is a
+`useMemo`/effect keyed on the whole text that should be keyed on the edit, or
+deferred off the keystroke. Tier 1 is the more structural change and is what
+makes Enter cost more than a letter.
+
+**Neither supersedes the other, and the ordering is a real choice.** Tier 1 is
+this document's thesis and fixes the contract that makes the cost recur; tier 2
+is where the milliseconds currently are. The honest sequencing argument is that
+tier 1 first is still right — the transform contract is the thing that will
+otherwise keep regenerating these costs — but tier 2 should not be left
+undocumented as it was, because a session that only does tier 1 will measure a
+disappointing total and may wrongly conclude the thesis was wrong.
+
+### The cheapest correct first move
+
+Independent of that ordering: delete `normalizeInternalText(text)` from the
+four transform bindings in `useEditorSectionMount.ts`, after normalizing at
+ingress instead (Q3). It removes a full-document regex pass from **every
+printable keystroke**, it is a latent correctness fix rather than a tradeoff,
+and it is small enough to A/B cleanly.
