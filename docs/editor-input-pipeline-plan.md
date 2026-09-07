@@ -75,6 +75,13 @@ This has cost this effort more time than any bug. Read before measuring.
   nothing else — kept only to show what a pathological document does. An
   earlier round of this work reported a "~1 second per keystroke" figure that
   was entirely an artifact of that fixture.
+* **Every number here comes from a browser-mode build, and until session 4
+  from the DEV server specifically.** `measureTypeLatency --prod` now serves a
+  production renderer bundle instead (`startPreviewServer`). It was added to
+  test whether React's development build was inflating the small-note floor;
+  it was not (18.1ms prod vs 18.4ms dev). Use it for absolute numbers anyway,
+  and note that it removes React's dev overhead but NOT the browser mock's --
+  the mode selects the mock, not the dev server.
 * **`dev:browser` has no `thockdownExternalFiles` mock at all**, so every
   external-file path is inert there.
 
@@ -551,13 +558,46 @@ measure; this one is about *what*.
 
 # Still open
 
-* **Q5 -- the small-note floor.** Still unattributed, and now the most
-  interesting question: with the document-scale costs largely gone, what a
-  keystroke costs when there is nothing to be proportional *to* is the next
-  ceiling.
-* **Q6 -- the 1,319 orphaned lines.** Untouched; consumer lists re-verified as
-  still accurate. (Session 4 deleted `canonicalizeParagraphSegments` and the
-  note-title cache, which were not on that list.)
+* **Q5 -- the small-note floor: ANSWERED, and it is not what it looked like.**
+  Measured on this machine, `--shape=realistic`, 40 keystrokes at gap=100,
+  production renderer build:
+
+  | note size | median handler |
+  | --- | --- |
+  | 3,000 chars | 18.1ms |
+  | 400,000 chars | 22.5ms |
+  | 1,500,000 chars | 28.5ms |
+
+  So ~18ms is fixed cost and ~10ms is what remains of document-scale cost
+  across a 500x size range. (For comparison, at the start of this rebuild
+  1.5M cost 51.8ms against the same ~18ms floor -- the document-scale term
+  was ~33ms and is now ~10ms.)
+
+  **The floor is not React's development build.** That was the hypothesis --
+  a profile of the 3,000-character note put `jsxDEV` and `validateProperty$1`
+  among its largest named entries, and neither exists in production. So
+  `--prod` was added to measure a real production bundle, and the answer came
+  back 18.1ms against the dev server's 18.4ms. A clean negative result: every
+  absolute number this effort has published was already sound. Recorded so
+  nobody re-runs the experiment.
+
+  What the floor actually consists of, from the same profile: a full React
+  re-render of the app tree per keystroke (`ReactElement`, `renderWithHooks`,
+  `diffProperties`, `prepareUpdate`), `runPassiveSync`'s 60Hz poll (~1.1ms
+  per keystroke -- the largest single named entry, and parked in
+  `docs/pending-review-and-removal.md`), caret geometry
+  (`getBoundingClientRect`), `formatCreatedDate` running during render
+  (~0.4ms), the mouse-cursor overlay's `draw`, and a large unattributed
+  `(program)` bucket that is V8 internals, layout and GC.
+
+  None of that is editor work, and none of it is proportional to the
+  document. Whoever takes the floor on next is optimizing **app render cost**,
+  which is a different problem from the one this document was written about.
+
+* **Q6 -- the 1,319 orphaned lines: DONE.** All nine files deleted, consumer
+  lists re-verified first rather than taken from the write-up. The comments in
+  live files that named them are kept, with the dangling filenames removed --
+  what they encode is why CM6 differs from Lexical, and that still reads.
 * **The preview/render tier is NOT a per-keystroke cost.** Recorded here
   because an earlier revision of this document claimed it was the largest
   remaining block, on a 500ms-cadence profile. Re-profiled at gap=100 --

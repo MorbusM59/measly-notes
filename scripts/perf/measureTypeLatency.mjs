@@ -32,6 +32,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import {
   startDevServer,
+  startPreviewServer,
   generateSyntheticDocument,
   seedLargeNoteAndReload,
   ensurePreviewMode,
@@ -43,11 +44,12 @@ import {
 function parseArgs(argv) {
   const args = {
     chars: 400000, keystrokes: 25, position: 'middle', port: 5191,
-    headed: false, json: false, key: 'x', throttle: 1, gap: 250, view: 'edit', profile: false, stacks: false, lagLog: false, external: false, defer: false, shape: 'prose',
+    headed: false, json: false, key: 'x', throttle: 1, gap: 250, view: 'edit', profile: false, stacks: false, lagLog: false, external: false, defer: false, shape: 'prose', prod: false,
   }
   for (const raw of argv) {
     const [key, value] = raw.replace(/^--/, '').split('=')
     if (key === 'headed') args.headed = true
+    else if (key === 'prod') args.prod = true
     else if (key === 'profile') args.profile = true
     else if (key === 'stacks') args.stacks = true
     else if (key === 'lagLog') args.lagLog = true
@@ -160,7 +162,11 @@ function attributeToAppCaller(profile) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
-  const server = await startDevServer(args.port)
+  // --prod serves a production renderer build instead of the dev server.
+  // Use it for ABSOLUTE numbers (the small-note floor above all); the dev
+  // server's React development build inflates those. A/B comparisons are
+  // valid either way, as long as both sides use the same one.
+  const server = args.prod ? await startPreviewServer(args.port) : await startDevServer(args.port)
   const browser = await chromium.launch({ headless: !args.headed, executablePath: resolveChromiumExecutable() })
   try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })

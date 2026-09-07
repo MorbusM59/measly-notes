@@ -101,6 +101,83 @@ export async function startDevServer(port) {
   }
 }
 
+/**
+ * Serves a PRODUCTION renderer build instead of the dev server.
+ *
+ * Every measurement in this repo's performance work has been taken against
+ * `npm run dev:browser`, which means against React's development build. That
+ * is fine for A/B comparisons -- both sides carry the same overhead -- but it
+ * silently inflates any ABSOLUTE number, and the small-note floor is exactly
+ * an absolute number. Profiling a 3,000-character note showed `jsxDEV` and
+ * `validateProperty$1` among its largest named entries; neither exists in a
+ * production bundle at all.
+ *
+ * Builds first so what is served always matches the working tree -- a stale
+ * `dist/` measured as if it were the current code is a worse failure than the
+ * ~11 seconds this costs.
+ *
+ * Note that browser mode's mock bridges (`src/dev/installBrowserMockBridges.ts`)
+ * are still present here: the mode is what selects them, not the dev server.
+ * So this removes React's dev overhead, not the mock's.
+ */
+export async function startPreviewServer(port) {
+  const isWindows = process.platform === 'win32'
+
+  await new Promise((resolve, reject) => {
+    const build = spawn(isWindows ? 'npx.cmd' : 'npx', ['vite', 'build', '--mode', 'browser'], {
+      cwd: REPO_ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: isWindows,
+    })
+    let buildOutput = ''
+    build.stdout.on('data', (chunk) => { buildOutput += chunk.toString() })
+    build.stderr.on('data', (chunk) => { buildOutput += chunk.toString() })
+    build.once('exit', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`vite build --mode browser failed (code ${code}). Output:\n${buildOutput}`))
+    })
+  })
+
+  const proc = spawn(isWindows ? 'npx.cmd' : 'npx', ['vite', 'preview', '--mode', 'browser', '--port', String(port), '--strictPort'], {
+    cwd: REPO_ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: !isWindows,
+    shell: isWindows,
+  })
+
+  let output = ''
+  proc.stdout.on('data', (chunk) => { output += chunk.toString() })
+  proc.stderr.on('data', (chunk) => { output += chunk.toString() })
+
+  const exitedEarly = new Promise((_resolve, reject) => {
+    proc.once('exit', (code) => {
+      if (code !== null && code !== 0) {
+        reject(new Error(`vite preview exited early (code ${code}). Output:\n${output}`))
+      }
+    })
+  })
+
+  await Promise.race([
+    waitForServer(`http://localhost:${port}/`, 30000),
+    exitedEarly,
+  ])
+
+  return {
+    port,
+    stop() {
+      if (isWindows) {
+        spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' })
+        return
+      }
+      try {
+        process.kill(-proc.pid, 'SIGTERM')
+      } catch {
+        proc.kill('SIGTERM')
+      }
+    },
+  }
+}
+
 /** Generates synthetic markdown text of roughly `targetChars` characters, mixing plain paragraphs with occasional headings/lists so markdown-aware code paths (list detection, heading detection, inline emphasis) see realistic content instead of one giant plain block. */
 export function generateSyntheticDocument(targetChars) {
   const lines = []

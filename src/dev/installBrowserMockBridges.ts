@@ -2003,7 +2003,23 @@ function buildSectionsBridge(storeRef: { current: BrowserMockStore }): EditorSec
 }
 
 export function installBrowserMockBridges(): void {
-  if (!import.meta.env.DEV) return
+  // Dev, or an explicit `--mode browser` build.
+  //
+  // The mode clause exists so the performance harness can measure a
+  // PRODUCTION renderer bundle (`startPreviewServer` in
+  // scripts/perf/perfHarness.mjs). Every number this repo's performance work
+  // has produced came from the dev server, i.e. React's development build --
+  // fine for A/B comparisons, but it inflates absolute figures like the
+  // small-note keystroke floor, where `jsxDEV` and `validateProperty$1` were
+  // among the largest named entries and neither exists in production.
+  //
+  // It cannot leak into a shipped build: releases go through `npm run build`,
+  // which uses the default mode and packages Electron, where MODE is
+  // 'production' and never 'browser'. The real-bridges check immediately
+  // below is the second, independent guard -- in a genuine Electron renderer
+  // preload has already provided them, so this returns without installing
+  // anything regardless of mode.
+  if (!import.meta.env.DEV && import.meta.env.MODE !== 'browser') return
 
   const scopedWindow = window as BrowserMockWindow
   if (scopedWindow.__thockdownBrowserMockInstalled) return
