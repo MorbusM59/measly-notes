@@ -1422,7 +1422,12 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
   }, [markdownEditRef, markdownInlineCacheRef])
 
   const commitTransformResult = useCallback((next: EditorTransformResult): EditorTransformResult => {
-    advanceMarkdownInlineCache(next.text, latestEditorTextRef.current, next.edit)
+    // The inline-state cache is deliberately NOT advanced here. A transform's
+    // result is dispatched to the editor by applyTransformResult after this
+    // returns, which produces a docChanged transaction and therefore an
+    // onTextChange carrying the same edit -- so onTextChange is the cache's
+    // single writer, and advancing it here as well would only mean two
+    // places to keep in step.
     latestEditorTextRef.current = next.text
     setActiveNoteText(next.text)
     setEditorTextVersion((previous) => previous + 1)
@@ -1432,7 +1437,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     latestEditorSelectionRef.current = next.selection
     setEditorSelection(next.selection)
     return next
-  }, [advanceMarkdownInlineCache, latestEditorTextRef, latestEditorSelectionRef, queueSave, setActiveNoteText, setEditorSelection, setEditorTextVersion, updateActiveNoteTitlePreview])
+  }, [latestEditorTextRef, latestEditorSelectionRef, queueSave, setActiveNoteText, setEditorSelection, setEditorTextVersion, updateActiveNoteTitlePreview])
 
   const bindings = useMemo<EditorBindings>(() => ({
     onLifecycle: (event) => {
