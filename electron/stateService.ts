@@ -542,6 +542,9 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     // decided in the renderer, where the content lives -- see
     // src/adventure/session.ts's module comment.
     adventure: sanitizeAdventureSession(input?.adventure),
+    // Same shape as guideView (a section id plus what it was showing), so
+    // the same sanitizer -- see PersistedMenuState.adventureView.
+    adventureView: sanitizeGuideView(input?.adventureView),
     guideView: sanitizeGuideView(input?.guideView),
     undockedNote: sanitizeUndockedNote(input?.undockedNote),
     // Was missing entirely until this line -- sanitizeMenu (routed through

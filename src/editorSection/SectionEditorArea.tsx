@@ -17,6 +17,7 @@ import { isSealedNoteId } from '../shared/helpGuide'
 import type { ChapterPillSplitArm } from '../chapters/useChapterPillActions'
 import { EscapeHoldPanel } from './EscapeHoldPanel'
 import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
+import { EscapeMenuStatusBar } from '../escapeMenu/EscapeMenuStatusBar'
 
 export interface SectionEditorAreaProps {
   sectionId: string
@@ -308,7 +309,13 @@ export function SectionEditorArea({
   // chapter now, so the bar needs to be reachable before chapters.length
   // ever goes positive, not just after. No user-facing show/hide control
   // exists; it simply tracks whether there's a note to show chapters of.
-  const isChapterPanelOpen = Boolean(activeNoteId)
+  // A mode that owns this slot (escapeMenuContract.ts) has no note and so
+  // no chapters and no tags -- but it does have running state, and this bar
+  // is where the editor already shows "what is the state of the thing you
+  // are looking at". So the panel opens for a mode too, and shows the
+  // mode's readouts in place of the chapter/tag bar.
+  const modeStatus = escapeMenu?.activeMode?.status ?? null
+  const isChapterPanelOpen = Boolean(activeNoteId) || Boolean(modeStatus)
 
   // isViewingAutoTocChapter/isViewingAutoOpenItemsChapter (props -- see
   // their own doc comment) each make the editor read-only below, for
@@ -471,7 +478,9 @@ export function SectionEditorArea({
         </div>
       </aside>
       <div className={`chapter-panel${isChapterPanelOpen ? ' is-open' : ''}`} aria-hidden={!isChapterPanelOpen}>
-        {activeNoteId && menuIdentityNoteId ? (
+        {modeStatus ? (
+          <EscapeMenuStatusBar status={modeStatus} />
+        ) : activeNoteId && menuIdentityNoteId ? (
           <ChapterBar
             parentNoteId={menuIdentityNoteId}
             chapters={chapters}

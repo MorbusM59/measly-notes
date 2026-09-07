@@ -93,6 +93,10 @@ export interface EditorSectionProps extends Omit<SectionEditorAreaProps,
   onCloseGuideView: () => void
   /** Reports that this slot has moved on to something else, so the guide is no longer open anywhere -- distinct from closing it, which also restores. */
   onGuideNoLongerShown: () => void
+  /** True while THIS slot is the one given over to the adventure (App.tsx's `adventureView`) -- which means it holds no note at all. */
+  isShowingAdventureSlot: boolean
+  /** Reports that a note has arrived in this slot, so the adventure view is over. Same distinction as onGuideNoLongerShown: no restore, the reader has already picked what they want here. */
+  onAdventureNoLongerShown: () => void
   markSectionActive: (sectionId: string) => void
   isSidebarVisible: boolean
   toggleSidebarVisible: () => void
@@ -175,6 +179,8 @@ export function EditorSection({
   sectionId,
   undockedNoteId,
   isShowingGuideSlot,
+  isShowingAdventureSlot,
+  onAdventureNoLongerShown,
   onCloseGuideView,
   onGuideNoLongerShown,
   onDockUndockedNote,
@@ -1946,6 +1952,29 @@ export function EditorSection({
     onGuideNoLongerShown()
   }, [isShowingGuideSlot, isShowingGuide, activeNoteId, onGuideNoLongerShown])
 
+  /**
+   * The adventure holds an EMPTY slot, so any note arriving in it means the
+   * reader has moved on -- exactly the guide's case above, and gated the
+   * same way for the same reason. Opening the view is two steps (the slot is
+   * marked, then emptied), and in the gap between them the slot still shows
+   * the previous note; without waiting to have actually seen it empty, this
+   * fires in that gap and cancels the open before it lands.
+   */
+  const hasSeenAdventureEmptyRef = useRef(false)
+  useEffect(() => {
+    if (!isShowingAdventureSlot) {
+      hasSeenAdventureEmptyRef.current = false
+      return
+    }
+    if (activeNoteId === null) {
+      hasSeenAdventureEmptyRef.current = true
+      return
+    }
+    if (!hasSeenAdventureEmptyRef.current) return
+    hasSeenAdventureEmptyRef.current = false
+    onAdventureNoLongerShown()
+  }, [isShowingAdventureSlot, activeNoteId, onAdventureNoLongerShown])
+
   const handleIdentityClick = useCallback(() => {
     // The guide belongs to no collection and cannot be filed into one, so
     // there is nothing for the picker to offer: the button is a label here,
@@ -2099,6 +2128,7 @@ export function EditorSection({
       onKeyDownCapture={() => markSectionActive(sectionId)}
     >
       <SectionTabBar
+        modeStatus={escapeMenu?.activeMode?.status ?? null}
         tabbarGridRef={tabbarGridRef}
         tabs={sectionTabsBundle}
         isShowingUndockedNote={isShowingUndockedNote}

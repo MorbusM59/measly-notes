@@ -50,38 +50,79 @@ export interface EscapeMenuCell {
   onSelect: () => void | Promise<void>
 }
 
+export interface EscapeMenuReadout {
+  /** Stable identity for React keys. */
+  key: string
+  /** Short name, e.g. a stat's abbreviation. */
+  label: string
+  /** Its current value, already formatted. */
+  value: string
+}
+
+/**
+ * What a mode needs to show that will NOT fit in the ring. The ring's own
+ * centre is a small circle whose entire job is naming the cell you are
+ * about to activate -- it says what one press does, and nothing else. A
+ * mode that tries to narrate through it makes the one label a player
+ * actually needs harder to read, so a mode does not get to: it hands its
+ * standing state here instead, and the host renders it in the space the
+ * editor already has for exactly this -- the tab bar above and the
+ * chapter/tag bar below, which are wide, already legible, and already the
+ * place a reader looks for "what am I looking at" and "what is its state".
+ *
+ * Present whenever the mode is, INCLUDING while the menu is down: a mode
+ * that owns an editor slot keeps describing itself there whether or not
+ * the ring happens to be raised over it.
+ */
+export interface EscapeMenuModeStatus {
+  /**
+   * What KIND of thing this slot is showing, for the tab bar's identity
+   * pill, where a collection's name would otherwise be ("User Guide" is the
+   * existing precedent). That pill is a fixed 120px and clips, so this is a
+   * short label -- roughly twelve characters -- not a name.
+   */
+  title: string
+  /** The one line that says where you are -- shown across the tab strip. */
+  headline: string
+  /**
+   * WHICH one, when the mode has instances worth naming: a story's title, a
+   * document's name. Shown as the leading label of the status bar below,
+   * where there is room for it. Omit when the mode is a single thing and
+   * `title` has already said everything.
+   */
+  subject?: string
+  /** Running state, as pills on the chapter/tag bar. Keep it to a handful. */
+  readouts: EscapeMenuReadout[]
+}
+
 export interface EscapeMenuMode {
   /** Identifies the feature holding the ring; distinct modes never merge. */
   id: string
   /**
    * Changes exactly when the ring now represents a NEW decision -- a new
-   * step, a new prompt, a new set of cells. The panel resets its dial to
-   * the top and cancels any in-flight rotation when this changes, so each
-   * step starts from a predictable position instead of wherever the
-   * previous step's dial happened to be left. Holding it steady across a
-   * re-render that did not change the decision (a stat ticking, a label
-   * being recomputed) leaves the dial alone, which is what makes it safe to
-   * rebuild the mode object on every render.
+   * step, a new set of cells. The panel resets its dial to the top and
+   * cancels any in-flight rotation when this changes, so each step starts
+   * from a predictable position instead of wherever the previous step's
+   * dial happened to be left. Holding it steady across a re-render that did
+   * not change the decision leaves the dial alone, which is what makes it
+   * safe to rebuild the mode object on every render.
    */
   stepKey: string
-  /**
-   * The standing text in the ring's centre -- the question being asked.
-   * Kept short: the centre is a small circle, and a cell's own label is
-   * shown alongside it when one is focused or hovered.
-   */
-  prompt: string
-  /**
-   * A secondary status line under the prompt -- a mode's running state (a
-   * score, a resource, a step counter), not a second sentence. Optional,
-   * and rendered smaller and dimmer than the prompt, because the centre is
-   * a small circle and the prompt is what has to stay readable in it.
-   */
-  detail?: string
   /** The only cells shown while this mode is up. */
   cells: EscapeMenuCell[]
+  /** Everything that does not belong in the ring -- see above. */
+  status?: EscapeMenuModeStatus
 }
 
 export interface EscapeMenuContribution {
+  /**
+   * Cells added to the ordinary quick-actions ring. Nothing supplies these
+   * today -- the one mode that exists is reached from a window control
+   * instead -- but they are the other half of the seam and cost one line in
+   * the panel: a feature that is LAUNCHED from the ring rather than living
+   * inside it belongs here, and would otherwise have to be special-cased
+   * into the panel's own cell list the way the built-in actions are.
+   */
   entryCells: EscapeMenuCell[]
   activeMode: EscapeMenuMode | null
 }

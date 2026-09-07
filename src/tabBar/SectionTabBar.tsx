@@ -4,6 +4,7 @@ import { isArchivedNote, isDeletedNote } from '../shared/noteLifecycle'
 import { resolveIdentityLabel } from '../shared/tabLabels'
 import { InlinePillOrInput } from '../shared/InlinePillOrInput'
 import { TEMP_TAB_PIN_HOLD_MS, type UseSectionTabsResult } from './useSectionTabs'
+import type { EscapeMenuModeStatus } from '../escapeMenu/escapeMenuContract'
 
 export interface SectionTabBarProps {
   tabs: UseSectionTabsResult
@@ -59,6 +60,15 @@ export interface SectionTabBarProps {
    * a manual with no way out is the wrong kind of surprise.
    */
   isShowingGuide: boolean
+  /**
+   * Set while a mode owns this slot (escapeMenuContract.ts) -- there is no
+   * note, so the identity pill says what the slot IS holding instead of a
+   * collection name, and the tab strip carries the mode's one standing line
+   * in place of tabs it has none of. Same treatment the guide already gets,
+   * for the same reason: a slot showing something other than a note still
+   * has to say what it is showing.
+   */
+  modeStatus?: EscapeMenuModeStatus | null
   /** Files the undocked note into the section this slot already holds — offered as the picker's first candidate, since "where I just was" is the likeliest home for it. */
   onDockUndockedNoteHere: () => void
   /** Left-click: opens (or closes) the section picker. Right-click: rename this section. Tab-bar mode only -- the identity tab doesn't render in tag-bar mode (note renaming happens by right-clicking the note's own tab now, and the suggested-tags-expand toggle moved to the tag input). */
@@ -110,6 +120,7 @@ export function SectionTabBar({
   onCancelSectionRename,
   isShowingUndockedNote,
   isShowingGuide,
+  modeStatus,
   onDockUndockedNoteHere,
   onIdentityClick,
   onIdentityContextMenu,
@@ -205,17 +216,19 @@ export function SectionTabBar({
             <button
               type="button"
               className={`tag-pill section-identity-tab${isSectionPickerOpen ? ' is-active' : ''}`}
-              onClick={onIdentityClick}
-              onContextMenu={onIdentityContextMenu}
+              onClick={modeStatus ? undefined : onIdentityClick}
+              onContextMenu={modeStatus ? undefined : onIdentityContextMenu}
               data-tooltip={
-                isShowingGuide
+                modeStatus
+                  ? undefined
+                  : isShowingGuide
                   ? 'Right click: Close the User Guide.'
                   : isShowingUndockedNote
                   ? `Left click: Pick a collection for this note.\nRight click: Return to ${sectionName ?? '···'}.`
                   : 'Left click: Pick a collection for this slot.\nRight click: Rename this collection.'
               }
             >
-              <span className="tag-pill-label">{isShowingGuide ? 'User Guide' : (isShowingUndockedNote ? '' : (sectionName ?? '···'))}</span>
+              <span className="tag-pill-label">{modeStatus ? modeStatus.title : isShowingGuide ? 'User Guide' : (isShowingUndockedNote ? '' : (sectionName ?? '···'))}</span>
             </button>
           )}
       </div>
@@ -236,7 +249,9 @@ export function SectionTabBar({
                   over it normally, which is how the note gets filed. The guide
                   spends that same empty space on the one thing its reader
                   needs to know, since it can never be filed anywhere. */}
-              {isShowingGuide ? (
+              {modeStatus ? (
+                <span className="tabbar-tag-hint tabbar-mode-headline">{modeStatus.headline}</span>
+              ) : isShowingGuide ? (
                 <span className="tabbar-tag-hint tabbar-guide-hint">Right click the button to the left to close this guide.</span>
               ) : isShowingUndockedNote && !isSectionPickerOpen ? null : isSectionPickerOpen ? (
                 <div className="tabbar-section-picker" aria-live="polite">

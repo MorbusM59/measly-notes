@@ -226,6 +226,13 @@ export interface PersistedMenuState {
    * restore, since the browser-mode mock never calls sanitizeMenu at all.
    */
   adventure?: AdventureSession | null;
+  /**
+   * Which slot the adventure is currently given over to, and what that slot
+   * was showing before -- the same shape and lifecycle as `guideView`, for
+   * the same reason: a slot temporarily holding something that is not one
+   * of the reader's notes. Restored on launch, with the slot left empty.
+   */
+  adventureView?: PersistedGuideView | null;
 }
 
 // Persisted boundary/scroll position as integer line counts. See

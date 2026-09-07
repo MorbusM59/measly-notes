@@ -12,8 +12,12 @@
 //   - every scene needs one choice with no requirements, so no run can
 //     arrive somewhere with nothing available.
 //
-// Prompts are written short on purpose: they are read inside a small circle
-// at the centre of the ring, not on a page.
+// Prompts are one line each: they are read across the tab bar above the
+// editor, in the strip where a note's tabs normally sit (the ring's own
+// centre never shows them -- see escapeMenuContract.ts's EscapeMenuModeStatus
+// for why). Changing this prose does not invalidate a saved run and so does
+// not need a contentVersion bump; only a change to the SHAPE of the story
+// -- a scene removed, a choice's meaning altered -- does.
 
 import type { AdventureDefinition } from '../types'
 
@@ -48,7 +52,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
   scenes: [
     {
       id: 'threshold',
-      prompt: 'The margin opens. It goes down.',
+      prompt: 'The margin opens, and it goes down a long way.',
       choices: [
         { id: 'descend', label: 'Take the stairs', icon: 'fa-solid fa-stairs', outcome: { kind: 'goto', sceneId: 'stairs' } },
         {
@@ -63,7 +67,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'wall',
-      prompt: 'Someone wrote here, then stopped.',
+      prompt: 'Someone wrote on this wall before you, and stopped mid-word.',
       onEnter: [{ kind: 'adjustStat', stat: 'insight', delta: 1 }],
       choices: [
         {
@@ -83,7 +87,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'stairs',
-      prompt: 'A draught wants your flame.',
+      prompt: 'A draught comes up the stairwell, and it wants your flame.',
       choices: [
         {
           id: 'shield-the-flame',
@@ -112,7 +116,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'stacks',
-      prompt: 'Notes nobody came back for.',
+      prompt: 'Shelves and shelves of notes nobody ever came back for.',
       choices: [
         {
           id: 'search-the-shelves',
@@ -144,7 +148,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'lost-note',
-      prompt: 'A page in your own hand.',
+      prompt: 'A page in your own handwriting. You do not remember writing it.',
       onEnter: [
         { kind: 'adjustStat', stat: 'insight', delta: 1 },
         { kind: 'setFlag', flag: 'carries-the-page', present: true },
@@ -166,7 +170,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'dust',
-      prompt: 'Only dust, and your attention.',
+      prompt: 'Only dust, and the sound of your own attention.',
       choices: [
         { id: 'back-to-the-stacks', label: 'Back to the stacks', icon: 'fa-solid fa-arrow-up', outcome: { kind: 'goto', sceneId: 'stacks' } },
       ],
@@ -174,7 +178,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'well',
-      prompt: 'A stairwell deeper than the house.',
+      prompt: 'A stairwell that goes down further than the building is tall.',
       choices: [
         {
           id: 'go-down',
@@ -194,7 +198,7 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'heart',
-      prompt: 'A desk. A chair. One unfinished line.',
+      prompt: 'At the bottom: a desk, a chair, and one unfinished line.',
       choices: [
         {
           id: 'finish-the-line',
@@ -217,27 +221,27 @@ export const THE_LONG_MARGIN: AdventureDefinition = {
 
     {
       id: 'finished-line',
-      prompt: 'You finish the line. The margin closes.',
+      prompt: 'You finish the line. The margin closes behind you, satisfied.',
       ending: { id: 'finished-line', tone: 'triumph' },
     },
     {
       id: 'quiet-desk',
-      prompt: 'You sit, and leave it for the next one.',
+      prompt: 'You sit with it a while, and leave it for whoever comes next.',
       ending: { id: 'quiet-desk', tone: 'quiet' },
     },
     {
       id: 'surfaced',
-      prompt: 'You surface with what you brought down.',
+      prompt: 'You surface with exactly what you carried down, and nothing else.',
       ending: { id: 'surfaced', tone: 'quiet' },
     },
     {
       id: 'the-dark',
-      prompt: 'The flame gutters. The rest is dark.',
+      prompt: 'The flame gutters out. The rest of it is dark, and long.',
       ending: { id: 'the-dark', tone: 'defeat' },
     },
     {
       id: 'gave-out',
-      prompt: 'You stop. Not decided, just stopped.',
+      prompt: 'You stop. Not decided against it -- just stopped.',
       ending: { id: 'gave-out', tone: 'defeat' },
     },
   ],

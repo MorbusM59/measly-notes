@@ -2139,13 +2139,22 @@ function App() {
   /** Which slot is currently showing the User Guide and what it was showing before. */
   const [guideView, setGuideView] = useState<{ sectionId: string; previousNoteId: string | null } | null>(null)
   /**
-   * The saved adventure run, if any (src/adventure) -- the game reachable
-   * from the escape-hold menu while the User Guide is open. Lives here
-   * rather than inside the game module because it is persisted app state
-   * like everything else around it, and a run has exactly one home; see
+   * The saved adventure run, if any (src/adventure). Lives here rather than
+   * inside the game module because it is persisted app state like
+   * everything else around it, and a run has exactly one home; see
    * useAdventureEscapeMenu.ts's module comment.
    */
   const [adventureSession, setAdventureSession] = useState<AdventureSession | null>(null)
+  /**
+   * Which slot is currently GIVEN OVER to the adventure, and what it was
+   * showing first -- the same shape, and the same lifecycle, as guideView
+   * above, because it is the same kind of thing: a slot temporarily showing
+   * something that is not one of the reader's notes. The slot is emptied
+   * while this is set, so the game plays over a blank editor rather than
+   * over whatever the reader had open; the escape-hold ring, raised there,
+   * is its interface (see useAdventureEscapeMenu.ts).
+   */
+  const [adventureView, setAdventureView] = useState<{ sectionId: string; previousNoteId: string | null } | null>(null)
   /** The note currently shown as an undocked overlay in a section slot. */
   const [undockedNote, setUndockedNote] = useState<{
     noteId: string
@@ -4105,6 +4114,7 @@ function App() {
     reviewGutterVisibleBySection?: Record<string, boolean>
     reviewFlagsVisibleBySection?: Record<string, boolean>
     adventure?: AdventureSession | null
+    adventureView?: { sectionId: string; previousNoteId: string | null } | null
   }): PersistedMenuState => {
     const effectiveViewStateByMode = overrides?.sidebarViewStateByMode ?? sidebarViewStateByMode
 
@@ -4214,17 +4224,24 @@ function App() {
       spellCheckEnabled,
       chapterBarMode: chapterBarModeRef.current,
       isSidebarVisible: overrides?.isSidebarVisible ?? isSidebarVisible,
-      guideView: overrides?.guideView ?? guideView,
-      undockedNote: overrides?.undockedNote ?? undockedNote,
+      // These three are presence-checked (`'x' in overrides`) rather than
+      // `??`-defaulted, and it matters: null is a MEANINGFUL override for
+      // each of them -- "the guide is closed", "nothing is undocked", "the
+      // run was dismissed" -- and `??` treats it as "no override given" and
+      // falls back to the state value this closure captured. Every caller
+      // that passes null does so from a handler that has just called the
+      // corresponding setState, which has not re-rendered yet, so the
+      // captured value is precisely the stale one being cleared: closing
+      // the User Guide persisted it as still open, and the next launch
+      // reopened it. See TODO.md's entry, and buildMenuStateSnapshot's own
+      // note on why an override exists at all.
+      guideView: overrides && 'guideView' in overrides ? overrides.guideView ?? null : guideView,
+      undockedNote: overrides && 'undockedNote' in overrides ? overrides.undockedNote ?? null : undockedNote,
       isDoubleSizeMode: overrides?.isDoubleSizeMode ?? isDoubleSizeMode,
       reviewGutterVisibleBySection: overrides?.reviewGutterVisibleBySection ?? reviewGutterVisibleBySection,
       reviewFlagsVisibleBySection: overrides?.reviewFlagsVisibleBySection ?? reviewFlagsVisibleBySection,
-      // Presence-checked rather than `overrides?.adventure ?? adventureSession`:
-      // null is a MEANINGFUL override here (dismissing a finished run), and
-      // `??` would quietly discard it in favour of the state value this
-      // closure captured -- which, on the very call that clears a run, is
-      // still the run being cleared.
       adventure: overrides && 'adventure' in overrides ? overrides.adventure ?? null : adventureSession,
+      adventureView: overrides && 'adventureView' in overrides ? overrides.adventureView ?? null : adventureView,
       // Machine-level performance prefs, deliberately NOT part of
       // UiLayoutLoadout -- these must survive switching between layouts
       // rather than being reset to whatever each layout last had stored.
@@ -4307,6 +4324,7 @@ function App() {
     guideView,
     undockedNote,
     adventureSession,
+    adventureView,
   ])
 
   /**
@@ -5581,32 +5599,6 @@ ${markdownHtml}
   }, [activeSectionId, getActiveSection, persistMenuStateNow, selectNote])
 
   /**
-   * The window control is a TOGGLE, and a toggle that is lit always goes out
-   * when pressed -- wherever the guide happens to be open. Making it depend on
-   * which slot is focused (closing here, moving it there) would mean the same
-   * button did two different things depending on state the user isn't looking
-   * at, which is not what a toggle promises.
-   */
-  const handleHelpGuideToggle = useCallback(async () => {
-    if (guideView) {
-      await closeGuideView()
-      return
-    }
-    await openGuideViewHere()
-  }, [guideView, closeGuideView, openGuideViewHere])
-
-  /**
-   * The quick-actions menu is an OPEN, not a toggle: it says "User Guide", and
-   * it is invoked from inside a particular slot. So it brings the guide HERE,
-   * closing it wherever it was -- there is only ever one.
-   */
-  const handleHelpModeOpen = useCallback(async () => {
-    if (guideView?.sectionId === activeSectionId) return
-    if (guideView) await closeGuideView()
-    await openGuideViewHere()
-  }, [guideView, activeSectionId, closeGuideView, openGuideViewHere])
-
-  /**
    * Writes a run through the one correct immediate-persist path
    * (persistMenuStateNow, per CLAUDE.md) as well as into React state. Every
    * committed choice comes through here, so a run is on disk before the
@@ -5620,19 +5612,139 @@ ${markdownHtml}
   }, [persistMenuStateNow])
 
   /**
-   * The escape-hold ring's contributed cells and (while one is playing)
-   * its takeover by the adventure game -- see
-   * src/escapeMenu/escapeMenuContract.ts. App.tsx supplies the two facts
-   * the game cannot know for itself (is the menu up, and does it currently
-   * belong to the User Guide) plus the saved run; everything else is the
-   * module's own.
+   * Gives the active slot over to the adventure, remembering what it was
+   * showing, and EMPTIES it -- the game plays over a blank editor, not on
+   * top of somebody's note. Mirrors openGuideViewHere in every respect
+   * except the last step: the guide loads a note into the slot, this one
+   * clears it.
+   *
+   * Raises the escape-hold ring on the way in, because the ring IS the
+   * game's interface: arriving at a blank editor and having to discover a
+   * hold gesture would be a puzzle the game never intended to pose. Lowering
+   * it afterwards (Escape, or a click outside) leaves the view up -- the
+   * slot still says what it is holding, and holding Escape brings the ring
+   * straight back to the same step.
    */
+  const openAdventureViewHere = useCallback(async () => {
+    const targetSectionId = activeSectionId
+    if (!targetSectionId) return
+    const handle = getActiveSection()
+    const previousNoteId = handle?.activeNoteId ?? null
+    const nextAdventureView = { sectionId: targetSectionId, previousNoteId }
+    setGuideView(null)
+    setUndockedNote(null)
+    setAdventureView(nextAdventureView)
+    persistMenuStateNow({ guideView: null, undockedNote: null, adventureView: nextAdventureView })
+    setIsEscapeHoldPanelOpen(true)
+    await handle?.clearActiveNote().catch(() => undefined)
+  }, [activeSectionId, getActiveSection, persistMenuStateNow])
+
+  /**
+   * Ends the view and gives the slot back what it held. The RUN is
+   * untouched: leaving is not losing, and the same gesture that opened this
+   * drops straight back into the same step. Only "Close the book" on a
+   * finished run clears the session itself (useAdventureEscapeMenu.ts).
+   */
+  const closeAdventureView = useCallback(async (options?: { clearRun?: boolean }) => {
+    const pending = adventureView
+    if (!pending) return
+    setAdventureView(null)
+    setIsEscapeHoldPanelOpen(false)
+    if (options?.clearRun) setAdventureSession(null)
+    // ONE persist carrying BOTH changes, not a commit followed by a close.
+    // Two immediate persists in the same synchronous handler is the hazard
+    // persistMenuStateOnce's extraOverrides exists for (CLAUDE.md), and it
+    // bit here exactly as documented: dismissing a finished run wrote
+    // `adventure: null`, and the close that followed it in the same tick
+    // rebuilt its snapshot from state React had not re-rendered yet and put
+    // the finished run straight back. Found live -- "Close the book" left
+    // the run on disk, so the next launch had an ended run to resume.
+    persistMenuStateNow(options?.clearRun ? { adventureView: null, adventure: null } : { adventureView: null })
+    const handle = sectionRegistryRef.current.get(pending.sectionId)
+    if (!handle) return
+    if (pending.previousNoteId) {
+      await handle.activateNote(pending.previousNoteId).catch(() => undefined)
+      return
+    }
+    await handle.clearActiveNote().catch(() => undefined)
+  }, [adventureView, persistMenuStateNow])
+
+  /**
+   * The User Guide window control's other half. Left click is the guide
+   * (handleHelpGuideToggle); right click is the adventure, opening it over
+   * an empty slot or -- since a lit toggle always goes out when pressed,
+   * whichever button press lit it -- closing it again.
+   *
+   * Deliberately hung off that button rather than given one of its own: the
+   * game is a thing you find, and the guide's button is where somebody
+   * poking at an unfamiliar app pokes. It reports itself honestly once
+   * found (the button lights and turns into a flame), so it is a secret
+   * exactly once.
+   */
+  const handleHelpGuideContextMenu = useCallback(async () => {
+    if (adventureView) {
+      await closeAdventureView()
+      return
+    }
+    await openAdventureViewHere()
+  }, [adventureView, closeAdventureView, openAdventureViewHere])
+
+  /**
+   * The escape-hold ring's takeover by the adventure game, plus the status
+   * the tab bar and chapter bar show around the empty editor -- see
+   * src/escapeMenu/escapeMenuContract.ts. App.tsx supplies the saved run and
+   * the two acts the game cannot perform for itself (persisting a run,
+   * handing the slot back); everything else is the module's own.
+   */
+  // Stable identity, not an inline arrow: this callback is a dependency of
+  // the mode the hook memoizes, and a fresh function every render would
+  // rebuild that mode every render -- re-rendering both editor sections for
+  // nothing on every unrelated state change in this very large component.
+  const handleAdventureLeave = useCallback((options?: { clearRun?: boolean }) => {
+    void closeAdventureView(options)
+  }, [closeAdventureView])
+
   const escapeMenuContribution = useAdventureEscapeMenu({
-    isGuideActive: guideView !== null && guideView.sectionId === activeSectionId,
-    isMenuOpen: isEscapeHoldPanelOpen,
+    isAdventureViewActive: adventureView !== null,
     session: adventureSession,
     onCommitSession: commitAdventureSession,
+    onLeave: handleAdventureLeave,
   })
+
+  /**
+   * The window control is a TOGGLE, and a toggle that is lit always goes out
+   * when pressed -- wherever the guide happens to be open. Making it depend on
+   * which slot is focused (closing here, moving it there) would mean the same
+   * button did two different things depending on state the user isn't looking
+   * at, which is not what a toggle promises.
+   */
+  const handleHelpGuideToggle = useCallback(async () => {
+    // A lit toggle goes out when pressed, and the adventure lights this same
+    // button -- so a left click on a lit flame ends the adventure rather
+    // than opening the guide behind it. Anything else would mean the button
+    // sometimes stays lit after being pressed, which is the one thing a
+    // toggle promises never to do.
+    if (adventureView) {
+      await closeAdventureView()
+      return
+    }
+    if (guideView) {
+      await closeGuideView()
+      return
+    }
+    await openGuideViewHere()
+  }, [adventureView, closeAdventureView, guideView, closeGuideView, openGuideViewHere])
+
+  /**
+   * The quick-actions menu is an OPEN, not a toggle: it says "User Guide", and
+   * it is invoked from inside a particular slot. So it brings the guide HERE,
+   * closing it wherever it was -- there is only ever one.
+   */
+  const handleHelpModeOpen = useCallback(async () => {
+    if (guideView?.sectionId === activeSectionId) return
+    if (guideView) await closeGuideView()
+    await openGuideViewHere()
+  }, [guideView, activeSectionId, closeGuideView, openGuideViewHere])
 
   const isAllowedNonEditorFocusTarget = useCallback((target: EventTarget | null): boolean => {
     if (!(target instanceof HTMLElement)) return false
@@ -6110,6 +6222,7 @@ ${markdownHtml}
           const appState = window.thockdownState ? await window.thockdownState.loadAppState() : { selectedNoteId: null }
           if (disposed) return
 
+          let restoredAdventureView: { sectionId: string; previousNoteId: string | null } | null = null
           let restoredGuideView: { sectionId: string; previousNoteId: string | null } | null = null
           let restoredUndockedNote: { noteId: string; sectionId: string; previousNoteId: string | null } | null = null
 
@@ -6128,7 +6241,16 @@ ${markdownHtml}
             // so this is the only structural check a dev:browser session
             // ever gets -- and a malformed run must degrade to "no saved
             // adventure", not to a crash on launch.
-            setAdventureSession(sanitizeAdventureSession(appState.menu.adventure))
+            const restoredSession = sanitizeAdventureSession(appState.menu.adventure)
+            setAdventureSession(restoredSession)
+            // The view is only restored alongside a run to play in it. A
+            // saved view with no run left (a corrupt session, or one cleared
+            // by a build that no longer ships the game) would come back as a
+            // blank slot the reader has no way to interpret -- so it comes
+            // back as their previous note instead, which is where the view
+            // would have put them on the way out anyway.
+            restoredAdventureView = restoredSession ? appState.menu.adventureView ?? null : null
+            setAdventureView(restoredAdventureView)
             restoredGuideView = appState.menu.guideView ?? null
             restoredUndockedNote = appState.menu.undockedNote ?? null
             setGuideView(restoredGuideView)
@@ -6412,6 +6534,10 @@ ${markdownHtml}
           // option) has lastActiveNoteId: null too, but must stay empty
           // rather than being silently refilled on every restart.
           resolvedSections.forEach((entry, index) => {
+            // The adventure's slot comes back EMPTY, the way it was left --
+            // restoring its remembered note here would put a note under the
+            // game, which is precisely what the view exists to avoid.
+            if (entry.id === restoredAdventureView?.sectionId) return
             const persistedNoteId = (
               entry.lastActiveNoteId && listed.some((note) => note.id === entry.lastActiveNoteId)
             ) ? entry.lastActiveNoteId : null
@@ -6425,7 +6551,7 @@ ${markdownHtml}
           })
           setEditorSections(resolvedSections)
           setActiveSectionId((previous) => {
-            const preferredSectionId = restoredGuideView?.sectionId ?? restoredUndockedNote?.sectionId ?? previous
+            const preferredSectionId = restoredAdventureView?.sectionId ?? restoredGuideView?.sectionId ?? restoredUndockedNote?.sectionId ?? previous
             return resolvedSections.some((entry) => entry.id === preferredSectionId)
               ? preferredSectionId
               : (resolvedSections.some((entry) => entry.id === previous) ? previous : resolvedSections[0].id)
@@ -6510,6 +6636,20 @@ ${markdownHtml}
   useEffect(() => {
     if (!persistenceReady) return
 
+    // Emptying, not loading: this is the same effect the guide and the
+    // undocked note use to make a restored view's slot show the right
+    // thing, and for the adventure the right thing is nothing at all.
+    const pendingAdventureView = adventureView
+    if (pendingAdventureView) {
+      const handle = getActiveSectionHandle(sectionRegistryRef, pendingAdventureView.sectionId)
+      if (!handle) return
+      markSectionActive(pendingAdventureView.sectionId)
+      if (handle.activeNoteId !== null) {
+        void handle.clearActiveNote()
+      }
+      return
+    }
+
     const pendingGuideView = guideView
     if (pendingGuideView) {
       const handle = getActiveSectionHandle(sectionRegistryRef, pendingGuideView.sectionId)
@@ -6529,7 +6669,7 @@ ${markdownHtml}
     if (handle.activeNoteId !== pendingUndockedNote.noteId) {
       void handle.activateNote(pendingUndockedNote.noteId)
     }
-  }, [editorSections, guideView, markSectionActive, persistenceReady, undockedNote])
+  }, [adventureView, editorSections, guideView, markSectionActive, persistenceReady, undockedNote])
 
   // Same drain pattern as above, for pendingChapterBarModeBySectionIdRef.
   useEffect(() => {
@@ -9724,13 +9864,34 @@ ${markdownHtml}
                       split button; maximize/restore moved down to the bottom arm. */}
                   <button
                     type="button"
-                    className={`window-control-btn btn-icon window-maximize-split-btn help-guide${guideView ? ' is-active' : ''}`}
-                    data-tooltip={guideView ? 'Close the User Guide' : 'User Guide'}
-                    aria-label={guideView ? 'Close the User Guide' : 'Open the User Guide'}
-                    aria-pressed={guideView !== null}
+                    className={`window-control-btn btn-icon window-maximize-split-btn help-guide${guideView || adventureView ? ' is-active' : ''}`}
+                    data-tooltip={
+                      adventureView
+                        ? 'Leave the adventure'
+                        : guideView
+                        ? 'Close the User Guide\nRight click: an adventure'
+                        : 'User Guide\nRight click: an adventure'
+                    }
+                    aria-label={
+                      adventureView
+                        ? 'Leave the adventure'
+                        : guideView
+                        ? 'Close the User Guide'
+                        : 'Open the User Guide'
+                    }
+                    aria-pressed={guideView !== null || adventureView !== null}
                     onClick={() => void handleHelpGuideToggle()}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      void handleHelpGuideContextMenu()
+                    }}
                   >
-                    <span className="fa-solid fa-graduation-cap" aria-hidden="true" />
+                    {/* The one control, two things: lit and a mortarboard for
+                        the guide, lit and a flame for the adventure. Same
+                        button, because they are the same promise -- a lit
+                        toggle goes out when pressed, whichever press lit
+                        it. */}
+                    <span className={adventureView ? 'fa-solid fa-fire' : 'fa-solid fa-graduation-cap'} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -9840,6 +10001,15 @@ ${markdownHtml}
                   activeSectionId={activeSectionId}
                   undockedNoteId={undockedNote?.sectionId === entry.id ? undockedNote.noteId : null}
                   isShowingGuideSlot={guideView?.sectionId === entry.id}
+                  isShowingAdventureSlot={adventureView?.sectionId === entry.id}
+                  onAdventureNoLongerShown={() => {
+                    // The slot has moved on to a real note (a sidebar click,
+                    // a tab, a link) -- which ends the adventure view just as
+                    // much as leaving it does, minus the restore, since the
+                    // reader has already chosen what they want here instead.
+                    setAdventureView(null)
+                    persistMenuStateNow({ adventureView: null })
+                  }}
                   onCloseGuideView={() => void closeGuideView()}
                   onGuideNoLongerShown={() => {
                     setGuideView(null)
@@ -9892,7 +10062,7 @@ ${markdownHtml}
                   onEscapeHoldExportPdf={handleExportPdf}
                   onEscapeHoldExportMd={handleExportMd}
                   onEscapeHoldOpenHelp={() => void handleHelpModeOpen()}
-                  escapeMenu={escapeMenuContribution}
+                  escapeMenu={adventureView?.sectionId === entry.id ? escapeMenuContribution : null}
                   isExportingPdf={isExportingPdf}
                   isExportingMd={isExportingMd}
                   borderRadiusRegularPx={borderRadiusRegularPx}

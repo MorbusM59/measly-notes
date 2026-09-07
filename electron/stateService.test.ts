@@ -176,6 +176,24 @@ describe('StateService app-state field round-trip', () => {
 
     const corruptReader = new StateService(dataRoot)
     expect((await corruptReader.loadAppState()).menu?.adventure).toBeNull()
+
+    // The view is a separate field from the run and is dropped just as
+    // silently if sanitizeMenu never learns about it -- which would restart
+    // the app with the run intact but the game nowhere on screen.
+    const viewWriter = new StateService(dataRoot)
+    await viewWriter.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date',
+        selectedMonths: [],
+        selectedYears: [],
+        searchQuery: '',
+        adventure: run,
+        adventureView: { sectionId: 'default', previousNoteId: 'note-1' },
+      },
+    })
+    const viewReader = new StateService(dataRoot)
+    expect((await viewReader.loadAppState()).menu?.adventureView).toEqual({ sectionId: 'default', previousNoteId: 'note-1' })
   })
 
   it('persists the unified global spellcheck toggle across a save -> fresh-instance load', async () => {

@@ -201,11 +201,14 @@ interface PanelCell {
  *
  * The ring is no longer exclusively its own: the `escapeMenu` prop lets a
  * feature contribute extra cells to it, or take it over entirely for a
- * while (escapeMenuContract.ts). A takeover -- a "mode" -- supplies the
- * cells, the centre's prompt and status line, and a `stepKey` that says
- * when the ring has moved on to a new decision; everything else here is
- * unchanged, because a mode is meant to be cheap to write and must not
- * have to reimplement the dial. Two consequences worth knowing: a cell can
+ * while (escapeMenuContract.ts). A takeover -- a "mode" -- supplies only
+ * the cells and a `stepKey` saying when the ring has moved on to a new
+ * decision. Everything else here is unchanged, deliberately and
+ * permanently: the panel a mode is showing in IS the quick-actions panel,
+ * same geometry, same dial, same centre label naming the one cell you are
+ * about to activate and nothing else. A mode with more to say hands it to
+ * the host through `status` (escapeMenuContract.ts) for the tab bar and
+ * chapter bar to render; it does not get to narrate through the dial. Two consequences worth knowing: a cell can
  * opt out of closing the menu (`keepsMenuOpen`), which is what lets a mode
  * take input repeatedly, and `ringResetKey` folds "a mode advanced a step"
  * into the same reset/focus path as "the panel opened" -- see its own doc
@@ -803,24 +806,7 @@ export function EscapeHoldPanel({
           --circle-diameter/--spacing-large/--btn-square-larger-size tokens
           the ring geometry itself is built from, so it never needs to be
           kept in sync by hand). */}
-      <div className={`editor-escape-hold-label${activeMode ? ' is-mode' : ''}`}>
-        <div className={`editor-escape-hold-label-box${activeMode ? ' is-mode' : ''}`}>
-          {activeMode ? (
-            <>
-              {/* The mode's standing question, the cell currently under
-                  focus/hover, and the mode's own running state -- three
-                  distinct things, so they are three elements rather than
-                  one concatenated string, and editor.css can size each for
-                  the very small circle they share. */}
-              <span className="editor-escape-hold-label-prompt">{activeMode.prompt}</span>
-              <span className="editor-escape-hold-label-choice">{displayedLabel}</span>
-              {activeMode.detail ? (
-                <span className="editor-escape-hold-label-detail">{activeMode.detail}</span>
-              ) : null}
-            </>
-          ) : displayedLabel}
-        </div>
-      </div>
+      <div className="editor-escape-hold-label"><div className="editor-escape-hold-label-box">{displayedLabel}</div></div>
       {cells.map((cell, index) => {
         // This cell's position around the ring relative to the current top
         // ("slot 0"), not its fixed array index -- rotating the dial is
