@@ -153,6 +153,13 @@ export interface PreviewWindowApi {
 
 export interface UsePreviewWindowOptions {
   enabled: boolean
+  /**
+   * Whether the pane is actually on screen.
+   *
+   * A hidden pane still needs a window (so showing it is instant), but it does
+   * not need to keep re-measuring itself while the reader types in the editor.
+   * See the edit-triggered tail-probe effect for what that cost. */
+  isPaneVisible: boolean
   previewScrollRef: MutableRefObject<HTMLDivElement | null>
   previewBlocks: readonly PreviewBlock[]
   blockCharOffsetsRef: MutableRefObject<Float64Array | null>
@@ -200,6 +207,7 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
 } {
   const {
     enabled,
+    isPaneVisible,
     previewScrollRef,
     previewBlocks,
     blockCharOffsetsRef,
@@ -519,10 +527,21 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
   // single probe instead of one per character, which is where most of the
   // saving is.
   useEffect(() => {
-    if (!enabled) return undefined
+    // Not while the pane is hidden. The probe renders the document's LAST
+    // blocks into a hidden host and measures them, and on list-structured
+    // markdown that can mean rendering an enormous block: measured at ~680ms
+    // per Enter on a 300,000-character document of list items, deferred off
+    // the keystroke but still blocking the main thread, which is audible as
+    // an irregular gap in the typing sound at every line break.
+    //
+    // What it answers -- how many characters the last screen holds -- sizes
+    // the RENDER VIEW's scrollbar span. Nobody can see that while editing, so
+    // it is recomputed when the pane becomes visible instead (this effect
+    // re-runs on isPaneVisible, and restartTailProbe is what it does then).
+    if (!enabled || !isPaneVisible) return undefined
     const handle = window.setTimeout(restartTailProbe, PREVIEW_TAIL_PROBE_SETTLE_MS)
     return () => window.clearTimeout(handle)
-  }, [enabled, previewBlocks, renderedDisplayText, restartTailProbe])
+  }, [enabled, isPaneVisible, previewBlocks, renderedDisplayText, restartTailProbe])
 
   // A change of typography or pane width is the subtle one, and it was missed
   // on the first pass: the answer is a count of characters in one SCREEN, so it

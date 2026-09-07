@@ -43,7 +43,7 @@ import {
 function parseArgs(argv) {
   const args = {
     chars: 400000, keystrokes: 25, position: 'middle', port: 5191,
-    headed: false, json: false, key: 'x', throttle: 1, gap: 250, view: 'edit', profile: false, stacks: false, lagLog: false, external: false, defer: false,
+    headed: false, json: false, key: 'x', throttle: 1, gap: 250, view: 'edit', profile: false, stacks: false, lagLog: false, external: false, defer: false, shape: 'prose',
   }
   for (const raw of argv) {
     const [key, value] = raw.replace(/^--/, '').split('=')
@@ -53,6 +53,7 @@ function parseArgs(argv) {
     else if (key === 'lagLog') args.lagLog = true
     else if (key === 'external') args.external = true
     else if (key === 'defer') args.defer = true
+    else if (key === 'shape') args.shape = value
     else if (key === 'json') args.json = true
     else if (key === 'key') args.key = value
     else if (key === 'view') args.view = value
@@ -186,7 +187,52 @@ async function main() {
         })
       })
     }
-    await seedLargeNoteAndReload(page, generateSyntheticDocument(args.chars))
+    // `indented` is a document of list items, which is what makes Enter and
+    // Backspace take the markdown TRANSFORM path (auto-indent continuation)
+    // rather than CM6's native insert -- the difference the reporter can hear
+    // as an irregular gap in the typing sound at every line break.
+    // `indented-spaced` is the same list items with a blank line between them,
+    // which makes each one its OWN markdown block instead of all of them being
+    // a single list node. Same characters, same indentation -- the only thing
+    // that changes is block granularity, which is exactly the variable under
+    // test.
+    // `realistic` is what a real note looks like: headings, prose paragraphs,
+    // and SHORT lists of a handful of items -- not thousands of list rows with
+    // nothing else. The two `indented*` shapes below are deliberate extremes
+    // and should be read as such.
+    const buildRealistic = (targetChars) => {
+      const parts = []
+      let i = 0
+      // Length tracked incrementally: joining the whole array every iteration
+      // makes seeding itself quadratic, which is a silly way to spend a minute.
+      let length = 0
+      while (length < targetChars) {
+        parts.push('## Section ' + i)
+        parts.push('The quick brown fox jumps over the lazy dog, and keeps going for a sentence or two so that this paragraph wraps the way real prose does.')
+        parts.push('Another paragraph of ordinary text, because notes are mostly prose and only occasionally something else.')
+        for (let item = 0; item < 6; item += 1) {
+          parts.push('  - item ' + item + ' in section ' + i)
+        }
+        i += 1
+        length = parts.reduce((sum, part) => sum + part.length + 2, 0)
+      }
+      return parts.join('\n\n')
+    }
+
+    const seedText = args.shape === 'realistic'
+      ? buildRealistic(args.chars)
+      : args.shape === 'indented-spaced'
+      ? Array.from(
+          { length: Math.max(1, Math.round(args.chars / 62)) },
+          (_, i) => '  - item ' + i + ' the quick brown fox jumps over the lazy dog',
+        ).join('\n\n')
+      : args.shape === 'indented'
+      ? Array.from(
+          { length: Math.max(1, Math.round(args.chars / 60)) },
+          (_, i) => '  - item ' + i + ' the quick brown fox jumps over the lazy dog',
+        ).join('\n')
+      : generateSyntheticDocument(args.chars)
+    await seedLargeNoteAndReload(page, seedText)
     // Tagging the note `external` is the whole of what makes it external to
     // the renderer, and it is the only way to ask whether the external
     // per-keystroke wiring costs anything measurable against an identical

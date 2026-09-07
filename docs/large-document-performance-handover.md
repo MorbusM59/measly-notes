@@ -3700,3 +3700,131 @@ The long-task count at 6x rises after this change (40 vs 3) precisely because
 the split now lands in its own deferred task instead of inside the keydown --
 better for the keystroke, and the next thing to look at for sustained fast
 typing on a slow machine.
+
+### The line-break hitch on indented content: a hidden pane measuring itself
+
+Reported by ear, which turned out to be the best instrument available: holding
+Backspace through indented lines produced an irregular gap in the typing sound
+every time the caret crossed a line break, while plain character deletions were
+smooth, and holding Enter felt uneven.
+
+The report was exactly right, and it was not the Enter transform.
+
+**Where it went.** On a 300,000-character document of list items, every Enter
+produced roughly a full SECOND of main-thread work. Two sources, both of them
+the hidden preview pane doing work for a reader who cannot see it:
+
+* the **block split** (`parseStructuralRanges`) -- pathologically slow on
+  list-structured markdown, ~950-1000ms per edit. Notably this did NOT depend
+  on block granularity: a document whose items formed one list node and one
+  whose items were separated into thousands of individual blocks measured the
+  same. Prose five times the size produces no such task at all.
+* the **tail probe** (`usePreviewWindow`), which renders the document's last
+  blocks into a hidden host to measure how many characters its final screen
+  holds -- ~680ms per edit on the same document, because on list content the
+  trailing "block" it must render can be enormous.
+
+**Why the first fix was not enough, recorded because the reasoning was sound.**
+The split had already been moved off the keystroke onto a 180ms settle, on the
+argument that the incremental split is only cheap when each call diffs against
+the previous one, so letting it fall far behind would trade a per-keystroke cost
+for one big parse at the toggle. That argument is correct for prose and
+irrelevant here: on list content the parse is a full second *whatever* the
+delta, so the settle bought nothing and merely moved a second from the
+keystroke's own task to the next idle moment -- where it still blocked the main
+thread, and where it is precisely what the reporter could hear. The `handler`
+metric looked fine throughout; only the long-task count showed it. **When work
+is deferred rather than removed, per-keystroke timing stops being the
+measurement that matters.**
+
+**The fix, for both.** Neither runs while the pane is hidden. The split
+recomputes when render view is entered (in the same render the mode flips, so
+the toggle never shows a stale pane); the tail probe restarts on the same
+signal. Nothing on screen in edit mode derives from either.
+
+**Result**, 300,000-character list document, keydown to end of the synchronous
+task, and the long tasks that the ear actually notices:
+
+| | before | after |
+| --- | --- | --- |
+| Enter, handler | 69.1ms (at 1.5M) | -- |
+| Enter, long tasks over 8 presses | 16 (eight of them 670-1000ms) | 7, all at mount |
+| Backspace | -- | 17.7ms |
+| plain character | -- | 17.4ms |
+
+Backspace and an ordinary character now cost the same to within noise, which is
+the property the report was really about: crossing a line break must not cost
+more than typing a letter.
+
+Verified: `npm test` 870/870, tsc and lint unchanged, and the full preview suite
+(`verifyPreviewWindow`, `verifyPreviewCharThumb`, `verifyPreviewTrackLanding`,
+`verifyPreviewRestStability`, `verifyModeToggleRoundTrip`) -- the thumb check
+matters most here, since the tail probe is what sizes the render view's
+scrollbar span and gating it is exactly the kind of change that would break it.
+
+**Still open, and now the clearest target in this file:** the block split takes
+~1 second on a 300,000-character list document and is insensitive to how much
+changed. Deferring it to the toggle means the reader pays that second when
+switching to render view on such a note. That is a bounded, expected moment
+rather than something between keystrokes, but it is not acceptable either, and
+it is a property of the split itself rather than of where it is called from.
+`measureTypeLatency.mjs --shape=indented|indented-spaced` reproduces it in one
+command.
+
+#### Correction: the list fixture above is pathological, and the real cost is the Enter transform
+
+The section above measures a document of 5,000 list rows and nothing else. Two
+fair objections, both correct:
+
+* a 300,000-character note renders WINDOWED anyway, so only a run of blocks is
+  ever mounted -- true, but windowing governs RENDERING, not SPLITTING: the
+  split parses the whole document to find block boundaries regardless, so that
+  cost was real. This part of the finding stands.
+* **there is no reason to have a continuous block of 300,000 characters** --
+  also true, and it invalidates the headline number. Re-measured on a
+  `realistic` shape (headings, prose paragraphs, and SHORT six-item lists,
+  which is what a note actually looks like): **3 long tasks, all at mount, and
+  no per-Enter second at all.** The ~1s figure describes an extreme nobody
+  will type into.
+
+The gating changes are still right -- a hidden pane should not re-split and
+re-measure itself while the reader types, and on prose at 1.5M characters that
+was worth 28.3ms -> 18.1ms of handler time. But they are not what the reported
+line-break hitch was.
+
+**What the hitch actually is.** Same `realistic` shape at 1.5M characters,
+keydown to end of the synchronous task:
+
+| key | handler |
+| --- | --- |
+| plain character | 31.3ms |
+| **Enter** | **43.8ms** |
+| Backspace | 34.0ms |
+
+Enter costs ~12ms more than an ordinary character, every time, and that is what
+is audible as an irregular gap at each line break. It is the markdown transform
+path, and it does full-document work for a local edit:
+
+1. `resolveMarkdownEnterTransform` calls `normalizeInternalText(event.text)` --
+   regex passes over the whole document, on text that is already canonical.
+2. `applyMarkdownEnter` returns a WHOLE NEW DOCUMENT STRING, built by slicing
+   and concatenating around the caret.
+3. `applyTransformResult` then recovers the edit range from that string with
+   `commonPrefixLen`/`commonSuffixLen` -- two scans that between them walk the
+   entire document to rediscover a position the transform already knew.
+
+A plain character insert does none of this: CM6 applies it natively.
+
+**The fix is to stop laundering a local edit through a whole document.** The
+transforms know exactly what they changed and where; the contract
+(`{ text, selection }`) is what throws that away and forces step 3 to find it
+again. Returning `{ from, to, insert, selection }` instead removes steps 2 and
+3 outright. That touches `EnterTransformPolicy`, the several return sites in
+`MarkdownContext`, the Tab / character-insert / markdown-shortcut transforms
+that share the shape, and `applyTransformResult` -- a real refactor with real
+tests behind it (`EnterTransformPolicy.test.ts`, `MarkdownContext.test.ts`),
+not a tweak. It is the next thing to do and has not been done.
+
+`measureTypeLatency.mjs --shape=realistic` is the shape to measure against.
+Prefer it to `--shape=indented`, which exists now only to show what the extreme
+looks like.
