@@ -44,9 +44,9 @@ import type { EditorTextEdit } from './EditorContract'
  */
 export interface DocumentLineIndex {
   readonly text: string
-  readonly lines: readonly string[]
+  readonly lines: string[]
   /** lineStartOffsets[i] = character offset where line i begins. Always starts with 0. */
-  readonly lineStartOffsets: readonly number[]
+  readonly lineStartOffsets: number[]
 }
 
 export function buildDocumentLineIndex(text: string): DocumentLineIndex {
@@ -115,7 +115,7 @@ export function applyEditToDocumentLineIndex(
 
   const replacedLineCount = lastLine - firstLine + 1
   const lineDelta = replacementLines.length - replacedLineCount
-  const lines = previous.lines.slice() as string[]
+  const lines = previous.lines.slice()
   lines.splice(firstLine, replacedLineCount, ...replacementLines)
 
   const lineStartOffsets = new Array<number>(lines.length)

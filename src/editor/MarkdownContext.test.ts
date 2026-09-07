@@ -558,3 +558,177 @@ describe('applyMarkdownEnter', () => {
     expect(result?.selection.focus).toBe(0)
   })
 })
+
+/**
+ * The edit-fed path has the same forward-unbounded hazard as the text-diff
+ * one -- an edit that opens or closes a fence changes the state entering
+ * every following line -- and it additionally trusts a caller-supplied
+ * range. Both are fuzzed here against the same O(document) ground truth the
+ * text-diff path is held to, with CHARACTER-level edits (the text-diff fuzz
+ * above splices whole lines, which never produces the partial-line and
+ * line-splitting ranges a real keystroke does).
+ */
+describe('resolveMarkdownSelectionContextIncremental with a known edit', () => {
+  function makeRng(seed: number) {
+    let state = seed
+    return () => {
+      state = (state * 1103515245 + 12345) & 0x7fffffff
+      return state / 0x7fffffff
+    }
+  }
+
+  const FRAGMENTS = ['a', 'word ', '\n', '\n\n', '`', '``', '```', '~~~', '*', '**', '~~', '# ', '- ', '', '`code`', '\n```\n']
+
+  function runEditFuzz(seed: number, steps: number) {
+    const rng = makeRng(seed)
+    let text = [
+      '# Title',
+      'Some *italic* and **bold** prose.',
+      '```',
+      'fenced code',
+      '```',
+      '- list item with `inline code`',
+      '> quoted ~~struck~~ line',
+      '',
+      'trailing paragraph',
+    ].join('\n')
+    let cache: InlineStateLineCache | null = null
+
+    for (let step = 0; step < steps; step += 1) {
+      const from = Math.floor(rng() * (text.length + 1))
+      const to = Math.min(text.length, from + Math.floor(rng() * 5))
+      const insert = FRAGMENTS[Math.floor(rng() * FRAGMENTS.length)]
+      const previousText = text
+      const nextText = text.slice(0, from) + insert + text.slice(to)
+
+      const offsets = new Set<number>([0, nextText.length, Math.floor(nextText.length / 2)])
+      for (let i = 0; i < 3; i += 1) offsets.add(Math.floor(rng() * (nextText.length + 1)))
+
+      let first = true
+      for (const offset of offsets) {
+        const result = resolveMarkdownSelectionContextIncremental(
+          nextText,
+          collapsedSelection(offset),
+          cache,
+          // Only the first call of a step carries the edit -- the later ones
+          // are already caught up, which is exactly what happens live when a
+          // render re-reads the same text at a new caret position.
+          first ? { previousText, edit: { from, to, insert } } : null,
+        )
+        first = false
+        cache = result.cache
+        expect(
+          result.context,
+          `seed ${seed}: mismatch after edit step ${step} at offset ${offset} on text:\n${JSON.stringify(nextText)}`,
+        ).toEqual(resolveMarkdownSelectionContext(nextText, collapsedSelection(offset)))
+      }
+
+      text = nextText
+    }
+  }
+
+  it.each([20260907, 1, 424242])('matches a full scan after every character-level edit (seed %i)', (seed) => {
+    runEditFuzz(seed, 250)
+  })
+
+  it('falls back safely when the edit does not match the cached text', () => {
+    const text = 'alpha\n```\nbeta\n```\ngamma'
+    const first = resolveMarkdownSelectionContextIncremental(text, collapsedSelection(0), null)
+    const nextText = `${text}\ndelta`
+
+    // A deliberately wrong previousText: the cache must ignore the edit and
+    // fall back rather than splice against a document it was not built from.
+    const result = resolveMarkdownSelectionContextIncremental(
+      nextText,
+      collapsedSelection(nextText.length),
+      first.cache,
+      { previousText: 'something else entirely', edit: { from: 0, to: 0, insert: 'x' } },
+    )
+
+    expect(result.context).toEqual(resolveMarkdownSelectionContext(nextText, collapsedSelection(nextText.length)))
+  })
+})
+
+describe('applyMarkdownEnter with an inline-state cache', () => {
+  function makeRng(seed: number) {
+    let state = seed
+    return () => {
+      state = (state * 1103515245 + 12345) & 0x7fffffff
+      return state / 0x7fffffff
+    }
+  }
+
+  const CORPUS = [
+    '# Title',
+    'Prose with *italic* and `inline code`.',
+    '```',
+    'inside a fence',
+    '- not really a list item',
+    '```',
+    '- real list item',
+    '  - nested item',
+    '> quoted line',
+    '~~~',
+    'tilde fence body',
+    '~~~',
+    '1. ordered item',
+    'closing paragraph',
+  ].join('\n')
+
+  /**
+   * The cache is an optimization, so the only thing that matters is that it
+   * never changes the answer -- including at the offsets where it could:
+   * inside both fence styles, on the fence lines themselves, and inside
+   * inline-code runs.
+   */
+  it('produces byte-identical results to the uncached path at every offset', () => {
+    const cache = resolveMarkdownSelectionContextIncremental(CORPUS, collapsedSelection(0), null).cache
+
+    for (let offset = 0; offset <= CORPUS.length; offset += 1) {
+      const selection = collapsedSelection(offset)
+      expect(
+        applyMarkdownEnter(CORPUS, selection, cache),
+        `mismatch at offset ${offset}`,
+      ).toEqual(applyMarkdownEnter(CORPUS, selection))
+    }
+  })
+
+  it('ignores a cache built from different text rather than trusting it', () => {
+    const staleCache = resolveMarkdownSelectionContextIncremental('completely different\ntext', collapsedSelection(0), null).cache
+    const selection = collapsedSelection(CORPUS.indexOf('inside a fence') + 3)
+
+    expect(applyMarkdownEnter(CORPUS, selection, staleCache)).toEqual(applyMarkdownEnter(CORPUS, selection))
+    // And that answer is "no transform" -- the caret is inside a fence.
+    expect(applyMarkdownEnter(CORPUS, selection)).toBeNull()
+  })
+
+  it('agrees with the uncached path across a randomized edit sequence', () => {
+    const rng = makeRng(20260907)
+    const fragments = ['a', '```\n', '`', '\n', '- item', '~~~\n', 'text ', '']
+    let text = CORPUS
+    let cache = resolveMarkdownSelectionContextIncremental(text, collapsedSelection(0), null).cache
+
+    for (let step = 0; step < 300; step += 1) {
+      const from = Math.floor(rng() * (text.length + 1))
+      const to = Math.min(text.length, from + Math.floor(rng() * 4))
+      const insert = fragments[Math.floor(rng() * fragments.length)]
+      const previousText = text
+      text = text.slice(0, from) + insert + text.slice(to)
+
+      cache = resolveMarkdownSelectionContextIncremental(
+        text,
+        collapsedSelection(Math.min(from, text.length)),
+        cache,
+        { previousText, edit: { from, to, insert } },
+      ).cache
+
+      for (let i = 0; i < 3; i += 1) {
+        const selection = collapsedSelection(Math.floor(rng() * (text.length + 1)))
+        expect(
+          applyMarkdownEnter(text, selection, cache),
+          `step ${step} offset ${selection.focus} on ${JSON.stringify(text)}`,
+        ).toEqual(applyMarkdownEnter(text, selection))
+      }
+    }
+  })
+})

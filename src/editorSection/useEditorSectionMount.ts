@@ -8,6 +8,7 @@ import type {
   EditorSelectionChangeEvent,
   EditorSelectionState,
   EditorTextChangeEvent,
+  EditorTextEdit,
   EditorTransformResult,
   EditorViewportChangeEvent,
   EditorViewportState,
@@ -41,6 +42,8 @@ import { selectPreviewAnchorCandidate } from '../editor/PreviewAnchorSelection'
 import {
   indentSelectionByStep,
   resolveMarkdownSelectionContext,
+  resolveMarkdownSelectionContextIncremental,
+  type InlineStateLineCache,
 } from '../editor/MarkdownContext'
 import { resolveMarkdownEnterTransform } from '../editor/EnterTransformPolicy'
 import { resolveMarkdownChecklistTypeoverTransform } from '../editor/ChecklistTypingTransformPolicy'
@@ -128,6 +131,9 @@ export interface UseEditorSectionMountOptions {
    * of restructuring declaration order across a much wider swath of the
    * file just to satisfy this one call site.
    */
+  /** See EditorSection.tsx, which owns these -- one inline-state cache per section, plus the edit that produced the current text so the cache can advance in O(edit). This hook is the writer; the toolbar and the Enter transform are the readers. */
+  markdownInlineCacheRef: MutableRefObject<InlineStateLineCache | null>
+  markdownEditRef: MutableRefObject<{ previousText: string; edit: EditorTextEdit } | null>
   buildTextDecorationTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState, format: 'bold' | 'italic' | 'strikethrough') => EditorTransformResult | null>
   buildToggleCurrentLineHeadingTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
   buildToggleBulletedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
@@ -297,6 +303,8 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     queueAppStateSave,
     updateActiveNoteTitlePreview,
     buildTextDecorationTransformRef,
+    markdownInlineCacheRef,
+    markdownEditRef,
     buildToggleCurrentLineHeadingTransformRef,
     buildToggleBulletedListTransformRef,
     buildToggleNumberedListTransformRef,
@@ -1394,7 +1402,27 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
    * rather than rediscovering the changed range by diffing two whole
    * documents (see EditorTransformResult's doc comment).
    */
+  /**
+   * Advances the section's shared markdown inline-state cache to `text`.
+   *
+   * Called on every text change with the edit that produced it, so the cache
+   * costs O(edit) to keep current instead of the O(document) line-diff it
+   * would otherwise do on each read. The selection passed here is irrelevant
+   * to the cache itself (only the returned context uses it), so the caret
+   * offset is not worth threading -- 0 is as good as any.
+   */
+  const advanceMarkdownInlineCache = useCallback((text: string, previousText: string, edit: EditorTextEdit | null) => {
+    markdownEditRef.current = edit ? { previousText, edit } : null
+    markdownInlineCacheRef.current = resolveMarkdownSelectionContextIncremental(
+      text,
+      { anchor: 0, focus: 0, start: 0, end: 0, isCollapsed: true },
+      markdownInlineCacheRef.current,
+      markdownEditRef.current,
+    ).cache
+  }, [markdownEditRef, markdownInlineCacheRef])
+
   const commitTransformResult = useCallback((next: EditorTransformResult): EditorTransformResult => {
+    advanceMarkdownInlineCache(next.text, latestEditorTextRef.current, next.edit)
     latestEditorTextRef.current = next.text
     setActiveNoteText(next.text)
     setEditorTextVersion((previous) => previous + 1)
@@ -1404,7 +1432,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     latestEditorSelectionRef.current = next.selection
     setEditorSelection(next.selection)
     return next
-  }, [latestEditorTextRef, latestEditorSelectionRef, queueSave, setActiveNoteText, setEditorSelection, setEditorTextVersion, updateActiveNoteTitlePreview])
+  }, [advanceMarkdownInlineCache, latestEditorTextRef, latestEditorSelectionRef, queueSave, setActiveNoteText, setEditorSelection, setEditorTextVersion, updateActiveNoteTitlePreview])
 
   const bindings = useMemo<EditorBindings>(() => ({
     onLifecycle: (event) => {
@@ -1461,6 +1489,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       // producers already canonicalize it) -- re-normalizing here is a
       // redundant O(document length) pass on already-canonical text.
       const canonicalText = event.text
+      advanceMarkdownInlineCache(canonicalText, event.previousText, event.edit)
 
       if (previewedSnapshotId !== null) {
         // While previewing history, the editor is showing something other than
@@ -1712,7 +1741,11 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       if (!activeNoteId || activeNoteHasDebugTagRef.current) return null
       suppressNextPlainTypingSoundOnce()
       void typingSoundManager.playRandomClick({ detune: -500 })
-      const next = resolveMarkdownEnterTransform(event)
+      // The section's shared inline-state cache turns Enter's fenced-code
+      // check from a scan of everything before the caret into a scan of the
+      // caret's own line. Verified against the text inside applyMarkdownEnter,
+      // so a cache that has fallen behind costs correctness nothing.
+      const next = resolveMarkdownEnterTransform(event, markdownInlineCacheRef.current)
       if (!next) {
         return null
       }
@@ -1821,7 +1854,9 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     },
   }), [
     activeNoteId,
+    advanceMarkdownInlineCache,
     commitTransformResult,
+    markdownInlineCacheRef,
     isPreviewMode,
     persistenceReady,
     previewedSnapshotId,

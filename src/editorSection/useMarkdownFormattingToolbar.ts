@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import { resolveMarkdownSelectionContext, resolveMarkdownSelectionContextIncremental, type InlineStateLineCache } from '../editor/MarkdownContext'
 import { normalizeInternalText } from '../editor/TextPolicy'
-import type { EditorSelectionState, EditorTransformResult } from '../editor/EditorContract'
+import type { EditorSelectionState, EditorTextEdit, EditorTransformResult } from '../editor/EditorContract'
 import { buildTransformResult, collapsedSelectionAt } from '../editor/TransformResult'
 import { parseMarkdownHeading, slugifyAnchorId, stripMarkdownInlineFormatting } from '../shared/tableOfContentsText'
 import { NOTE_HEADLINE_LEVEL_RULE, type HeadlineLevelRule } from '../shared/markdownHeadings'
@@ -272,6 +272,9 @@ export interface UseMarkdownFormattingToolbarOptions {
   latestEditorSelectionRef: MutableRefObject<EditorSelectionState>
   applyProgrammaticEditorText: (nextText: string, selectionStart?: number, selectionEnd?: number) => void
   /** Consumed by useEditorSectionMount, which is called earlier than these builders are defined -- see the handover doc's Gotcha #2. This hook keeps the refs current via a plain assignment, same as before the relocation. */
+  /** The section's shared markdown inline-state cache and the edit that produced the current text -- see EditorSection.tsx, which owns them, and useEditorSectionMount, which writes them. */
+  markdownInlineCacheRef: MutableRefObject<InlineStateLineCache | null>
+  markdownEditRef: MutableRefObject<{ previousText: string; edit: EditorTextEdit } | null>
   buildTextDecorationTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState, format: TextDecorationFormat) => EditorTransformResult | null>
   buildToggleCurrentLineHeadingTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
   buildToggleBulletedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
@@ -340,6 +343,8 @@ export function useMarkdownFormattingToolbar({
   latestEditorTextRef,
   latestEditorSelectionRef,
   applyProgrammaticEditorText,
+  markdownInlineCacheRef,
+  markdownEditRef,
   buildTextDecorationTransformRef,
   buildToggleCurrentLineHeadingTransformRef,
   buildToggleBulletedListTransformRef,
@@ -375,14 +380,24 @@ export function useMarkdownFormattingToolbar({
   // during a render React might discard (Strict Mode's double-invoke),
   // matching usePreviewMarkdownRendering.tsx's identical pattern for its
   // own incremental cache.
-  const selectionContextCacheRef = useRef<InlineStateLineCache | null>(null)
   const selectionContextResult = useMemo(
-    () => resolveMarkdownSelectionContextIncremental(currentEditorText, editorSelection, selectionContextCacheRef.current),
+    () => resolveMarkdownSelectionContextIncremental(
+      currentEditorText,
+      editorSelection,
+      markdownInlineCacheRef.current,
+      markdownEditRef.current,
+    ),
+    // markdownInlineCacheRef/markdownEditRef are refs on purpose: they are
+    // caches, not inputs. Their contents never change what this computes,
+    // only how fast it gets there, so re-running on their identity would be
+    // noise. The cache is verified against `currentEditorText` inside the
+    // resolver and falls back when it does not match.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [currentEditorText, editorSelection],
   )
   useLayoutEffect(() => {
-    selectionContextCacheRef.current = selectionContextResult.cache
-  }, [selectionContextResult])
+    markdownInlineCacheRef.current = selectionContextResult.cache
+  }, [markdownInlineCacheRef, selectionContextResult])
   const markdownSelectionContext = selectionContextResult.context
 
   const activeDecorationFormats = useMemo(() => {

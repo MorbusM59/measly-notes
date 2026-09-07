@@ -1,4 +1,5 @@
-import type { EditorSelectionState, EditorTransformResult } from './EditorContract'
+import type { EditorSelectionState, EditorTextEdit, EditorTransformResult } from './EditorContract'
+import { applyEditToDocumentLineIndex, buildDocumentLineIndex, lineIndexAtOffset, type DocumentLineIndex } from './DocumentLineIndex'
 import { buildTransformResult, collapsedSelectionAt } from './TransformResult'
 
 export type MarkdownListKind = 'ordered' | 'unordered' | null
@@ -308,10 +309,8 @@ function computeInlineStateAtOffset(text: string, offset: number): MarkdownInlin
 }
 
 export interface InlineStateLineCache {
-  text: string
-  lines: string[]
-  /** lineStartOffsets[i] = character offset where line i begins. */
-  lineStartOffsets: number[]
+  /** The document as lines. Shared representation so the edit-fed and text-diff paths agree, and so a caller holding one index can serve several caches. */
+  index: DocumentLineIndex
   /** lineStartStates[i] = scan state entering line i, i.e. after fully processing lines[0..i-1]. */
   lineStartStates: InlineScanState[]
   /** Scan state after fully processing the very last line -- not one of lineStartStates (those are entering states), needed to resume when an edit purely appends new lines after every old one. */
@@ -319,19 +318,15 @@ export interface InlineStateLineCache {
 }
 
 function buildInlineStateLineCache(text: string): InlineStateLineCache {
-  const lines = text.split('\n')
-  const lineStartOffsets: number[] = new Array(lines.length)
-  const lineStartStates: InlineScanState[] = new Array(lines.length)
-  let offset = 0
+  const index = buildDocumentLineIndex(text)
+  const lineStartStates: InlineScanState[] = new Array(index.lines.length)
   let state = INITIAL_SCAN_STATE
-  for (let i = 0; i < lines.length; i += 1) {
-    lineStartOffsets[i] = offset
+  for (let i = 0; i < index.lines.length; i += 1) {
     lineStartStates[i] = state
-    const lineEnd = offset + lines[i].length
-    state = scanInlineStateFrom(text, offset, state, lineEnd)
-    offset = lineEnd + 1
+    const lineStart = index.lineStartOffsets[i]
+    state = scanInlineStateFrom(text, lineStart, state, lineStart + index.lines[i].length)
   }
-  return { text, lines, lineStartOffsets, lineStartStates, endState: state }
+  return { index, lineStartStates, endState: state }
 }
 
 function computeCommonLinePrefixSuffixLen(oldLines: string[], newLines: string[]): { prefixLen: number; suffixLen: number } {
@@ -396,11 +391,11 @@ export function updateInlineStateLineCacheIncremental(
   if (previous === null) {
     return buildInlineStateLineCache(text)
   }
-  if (text === previous.text) {
+  if (text === previous.index.text) {
     return previous
   }
 
-  const oldLines = previous.lines
+  const oldLines = previous.index.lines
   const newLines = text.split('\n')
   const { prefixLen, suffixLen } = computeCommonLinePrefixSuffixLen(oldLines, newLines)
 
@@ -408,12 +403,12 @@ export function updateInlineStateLineCacheIncremental(
   const lineStartStates: InlineScanState[] = new Array(newLines.length)
 
   for (let i = 0; i < prefixLen; i += 1) {
-    lineStartOffsets[i] = previous.lineStartOffsets[i]
+    lineStartOffsets[i] = previous.index.lineStartOffsets[i]
     lineStartStates[i] = previous.lineStartStates[i]
   }
 
   let state = prefixLen < oldLines.length ? previous.lineStartStates[prefixLen] : previous.endState
-  let offset = prefixLen < oldLines.length ? previous.lineStartOffsets[prefixLen] : previous.text.length + 1
+  let offset = prefixLen < oldLines.length ? previous.index.lineStartOffsets[prefixLen] : previous.index.text.length + 1
 
   const shift = newLines.length - oldLines.length
   const suffixStartNew = newLines.length - suffixLen
@@ -422,13 +417,13 @@ export function updateInlineStateLineCacheIncremental(
     if (i >= suffixStartNew) {
       const oldIndex = i - shift
       if (scanStatesEqual(state, previous.lineStartStates[oldIndex])) {
-        const charDelta = text.length - previous.text.length
+        const charDelta = text.length - previous.index.text.length
         for (let j = i; j < newLines.length; j += 1) {
           const oj = j - shift
-          lineStartOffsets[j] = previous.lineStartOffsets[oj] + charDelta
+          lineStartOffsets[j] = previous.index.lineStartOffsets[oj] + charDelta
           lineStartStates[j] = previous.lineStartStates[oj]
         }
-        return { text, lines: newLines, lineStartOffsets, lineStartStates, endState: previous.endState }
+        return { index: { text, lines: newLines, lineStartOffsets }, lineStartStates, endState: previous.endState }
       }
     }
 
@@ -439,25 +434,87 @@ export function updateInlineStateLineCacheIncremental(
     offset = lineEnd + 1
   }
 
-  return { text, lines: newLines, lineStartOffsets, lineStartStates, endState: state }
+  return { index: { text, lines: newLines, lineStartOffsets }, lineStartStates, endState: state }
+}
+
+/**
+ * The same incremental update, but told exactly what changed instead of
+ * having to work it out.
+ *
+ * `updateInlineStateLineCacheIncremental` has to reconstruct the edit from
+ * two whole documents: it splits the new text into lines (~30,000 substring
+ * allocations on a 1.5M-character note) and then walks both arrays comparing
+ * strings, all to find the handful of lines that actually moved. That front
+ * end costs more than the scan it is a prelude to.
+ *
+ * When the caller knows the edit -- and since the transform contract carries
+ * it and CM6 hands it over, callers on the typing path now do -- neither step
+ * is needed: DocumentLineIndex splices the lines in O(edit), and the changed
+ * line range falls out of the edit directly.
+ *
+ * The stabilization argument is unchanged, and it is the load-bearing part:
+ * an edit that opens or closes a fence or an inline-code run changes the
+ * state entering every following line, however far away the next terminator
+ * is. Scan forward from the edit and stop only once a line inside the
+ * untouched trailing span produces the same entering state it had before --
+ * from there the rest of the cached states are provably identical, by this
+ * scan's own determinism. If state never restabilizes this degrades to a
+ * full recompute: correct, just not fast for that edit.
+ *
+ * `previousText` is the text `edit` was computed against. It is compared
+ * against the cache's own text rather than trusted, so a caller that hands
+ * over a stale or mismatched edit gets the safe path instead of a corrupted
+ * cache. In practice the two are the same string instance, so `===` settles
+ * it on identity without walking either one.
+ */
+export function updateInlineStateLineCacheForEdit(
+  text: string,
+  previous: InlineStateLineCache | null,
+  previousText: string,
+  edit: EditorTextEdit,
+): InlineStateLineCache {
+  if (previous === null || previous.index.text !== previousText) {
+    return updateInlineStateLineCacheIncremental(text, previous)
+  }
+  if (text === previous.index.text) return previous
+
+  const firstLine = lineIndexAtOffset(previous.index, edit.from)
+  const lastLineBefore = lineIndexAtOffset(previous.index, edit.to)
+  const index = applyEditToDocumentLineIndex(previous.index, text, edit)
+  const lineDelta = index.lines.length - previous.index.lines.length
+  // The new lines the edit produced occupy [firstLine, replacedEnd). Only
+  // past that point is a line's own content guaranteed unchanged, which is
+  // the precondition the stabilization probe below relies on.
+  const replacedEnd = firstLine + (lastLineBefore - firstLine + 1) + lineDelta
+
+  const lineStartStates: InlineScanState[] = new Array(index.lines.length)
+  for (let i = 0; i < firstLine; i += 1) {
+    lineStartStates[i] = previous.lineStartStates[i]
+  }
+
+  let state = previous.lineStartStates[firstLine]
+  for (let i = firstLine; i < index.lines.length; i += 1) {
+    if (i >= replacedEnd) {
+      const oldIndex = i - lineDelta
+      if (scanStatesEqual(state, previous.lineStartStates[oldIndex])) {
+        for (let j = i; j < index.lines.length; j += 1) {
+          lineStartStates[j] = previous.lineStartStates[j - lineDelta]
+        }
+        return { index, lineStartStates, endState: previous.endState }
+      }
+    }
+
+    lineStartStates[i] = state
+    const lineStart = index.lineStartOffsets[i]
+    state = scanInlineStateFrom(text, lineStart, state, lineStart + index.lines[i].length)
+  }
+
+  return { index, lineStartStates, endState: state }
 }
 
 /** Largest index i such that cache.lineStartOffsets[i] <= offset. Always well-defined (lineStartOffsets is never empty and its first entry is always 0). Equivalent to countLineIndex(cache.text, offset) whenever offset lands exactly on a line start, per updateInlineStateLineCacheIncremental's doc comment -- verified by fuzz test, not just asserted. */
 function findLineIndexForOffset(cache: InlineStateLineCache, offset: number): number {
-  const offsets = cache.lineStartOffsets
-  let lo = 0
-  let hi = offsets.length - 1
-  let result = 0
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    if (offsets[mid] <= offset) {
-      result = mid
-      lo = mid + 1
-    } else {
-      hi = mid - 1
-    }
-  }
-  return result
+  return lineIndexAtOffset(cache.index, offset)
 }
 
 /**
@@ -478,6 +535,14 @@ export function resolveMarkdownSelectionContextIncremental(
   text: string,
   selection: EditorSelectionState,
   previousCache: InlineStateLineCache | null,
+  /**
+   * The edit that produced `text`, and the text it was computed against.
+   * Optional: when a caller knows it, the cache is updated in O(edit)
+   * instead of by diffing two whole documents. Passing null (or a stale
+   * pair) is always safe -- it falls back to the diff, which is what every
+   * caller did unconditionally before.
+   */
+  change?: { previousText: string; edit: EditorTextEdit } | null,
 ): { context: MarkdownSelectionContext; cache: InlineStateLineCache } {
   const safeText = text ?? ''
   const caretOffset = clamp(selection.focus, 0, safeText.length)
@@ -487,7 +552,9 @@ export function resolveMarkdownSelectionContextIncremental(
   const headingLevel = resolveHeadingLevel(lineText)
   const listMeta = resolveListMeta(lineText)
 
-  const cache = updateInlineStateLineCacheIncremental(safeText, previousCache)
+  const cache = change
+    ? updateInlineStateLineCacheForEdit(safeText, previousCache, change.previousText, change.edit)
+    : updateInlineStateLineCacheIncremental(safeText, previousCache)
   const lineIndex = findLineIndexForOffset(cache, lineStart)
   const enteringState = cache.lineStartStates[lineIndex]
   const inline = toMarkdownInlineState(scanInlineStateFrom(safeText, lineStart, enteringState, caretOffset))
@@ -736,17 +803,63 @@ function parseLineStructure(lineText: string): ParsedLineStructure {
   }
 }
 
+/**
+ * Whether `caretOffset` sits inside a fenced code block.
+ *
+ * With a cache current for `text`, this costs one binary search plus a scan
+ * of the caret's own line. Without one it falls back to the O(document)
+ * ground truth. Both produce the same answer -- the cached path is the same
+ * scan, resumed from a state the cache already proved correct (see
+ * updateInlineStateLineCacheIncremental's stabilization argument and its
+ * fuzz tests).
+ */
+function resolveInFencedCodeBlock(
+  text: string,
+  caretOffset: number,
+  lineStart: number,
+  inlineCache: InlineStateLineCache | null | undefined,
+): boolean {
+  if (!inlineCache || inlineCache.index.text !== text) {
+    return computeInlineStateAtOffset(text, caretOffset).inFencedCodeBlock
+  }
+  const lineIndex = lineIndexAtOffset(inlineCache.index, lineStart)
+  const entering = inlineCache.lineStartStates[lineIndex]
+  return toMarkdownInlineState(scanInlineStateFrom(text, lineStart, entering, caretOffset)).inFencedCodeBlock
+}
+
 export function applyMarkdownEnter(
   text: string,
   selection: EditorSelectionState,
+  /**
+   * Optional, and the difference between O(line) and O(document) per press.
+   *
+   * Of everything resolveMarkdownSelectionContext used to compute for this
+   * function, exactly four fields were read: `inFencedCodeBlock` and the
+   * caret line's bounds and text. The line bounds are O(line) already. The
+   * fence flag was the only genuinely document-wide input -- and it arrived
+   * via computeInlineStateAtOffset, a character-by-character scan from
+   * offset 0 to the caret, tracking bold, italic, strikethrough and
+   * inline-code runs, of which one boolean survived. `countLineIndex`, also
+   * O(document), was computed and discarded entirely.
+   *
+   * When a caller holds a current inline-state cache, the fence flag comes
+   * from the caret line's cached entering state plus a scan of that one
+   * line. The cache is verified against `text` rather than trusted; a stale
+   * or absent one falls back to the full scan, which is what every call did
+   * unconditionally before.
+   */
+  inlineCache?: InlineStateLineCache | null,
 ): EnterKeyTransformResult | null {
   if (!selection.isCollapsed) return null
 
   const sourceText = text ?? ''
   const caretOffset = clamp(selection.focus, 0, sourceText.length)
-  const context = resolveMarkdownSelectionContext(sourceText, selection)
+  const { lineStart, lineEndExclusive } = resolveLineBounds(sourceText, caretOffset, caretOffset)
+  const context = {
+    line: { lineStart, lineEndExclusive, lineText: sourceText.slice(lineStart, lineEndExclusive) },
+  }
 
-  if (context.inline.inFencedCodeBlock) {
+  if (resolveInFencedCodeBlock(sourceText, caretOffset, lineStart, inlineCache)) {
     return null
   }
 

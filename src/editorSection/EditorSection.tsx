@@ -9,6 +9,8 @@ import { CHAPTER_HEADLINE_LEVEL_RULE, NOTE_HEADLINE_LEVEL_RULE } from '../shared
 import { countWords, trackWordCount } from '../editor/WordCount'
 import { buildEditRestoreSnapshotFromUiState } from '../editor/EditRestoreMath'
 import type { EditorRuntimeMetrics } from '../editor/EditorTypography'
+import type { EditorTextEdit } from '../editor/EditorContract'
+import type { InlineStateLineCache } from '../editor/MarkdownContext'
 import type { UseSectionTabsResult } from '../tabBar/useSectionTabs'
 import type { NoteTabEntry } from '../shared/tabs'
 import { isAutoAssignedId } from '../shared/assignedIds'
@@ -406,6 +408,23 @@ export function EditorSection({
     onSaveCompleted: handleSaveCompleted,
   })
 
+  /**
+   * One markdown inline-state cache per section, shared by everything in the
+   * section that needs to know what formatting the caret sits inside.
+   *
+   * Owned here rather than by either consumer because there are two of them
+   * -- the formatting toolbar's active-state highlighting and the Enter
+   * transform's fenced-code check -- and they ask the same question about the
+   * same document a few milliseconds apart. Two private caches would each
+   * maintain a full copy of the note's lines and each pay to catch up.
+   *
+   * `markdownEditRef` carries the edit that produced the current text, so the
+   * cache can be advanced in O(edit) instead of by diffing two whole
+   * documents. Written by useEditorSectionMount, which is where edits arrive.
+   * Stale or missing is safe: both readers verify it and fall back.
+   */
+  const markdownInlineCacheRef = useRef<InlineStateLineCache | null>(null)
+  const markdownEditRef = useRef<{ previousText: string; edit: EditorTextEdit } | null>(null)
   const buildTextDecorationTransformRef = useRef<(text: string, selection: import('../editor/EditorContract').EditorSelectionState, format: 'bold' | 'italic' | 'strikethrough') => import('../editor/EditorContract').EditorTransformResult | null>(() => null)
   const buildToggleCurrentLineHeadingTransformRef = useRef<(text: string, selection: import('../editor/EditorContract').EditorSelectionState) => import('../editor/EditorContract').EditorTransformResult | null>(() => null)
   const buildToggleBulletedListTransformRef = useRef<(text: string, selection: import('../editor/EditorContract').EditorSelectionState) => import('../editor/EditorContract').EditorTransformResult | null>(() => null)
@@ -466,6 +485,8 @@ export function EditorSection({
     previewedSnapshotContentRef,
     previewBlockSplitCacheRef,
     previewBlocksCacheRef,
+    markdownInlineCacheRef,
+    markdownEditRef,
   })
 
   /**
@@ -1571,6 +1592,8 @@ export function EditorSection({
     activeNoteId,
     currentEditorText,
     editorSelection,
+    markdownInlineCacheRef,
+    markdownEditRef,
     latestEditorTextRef,
     latestEditorSelectionRef,
     applyProgrammaticEditorText,
