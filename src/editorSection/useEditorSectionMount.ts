@@ -1536,7 +1536,12 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       }
       if (!activeNoteId || activeNoteHasDebugTagRef.current) return null
 
-      const sourceText = normalizeInternalText(text)
+      // Canonical by construction -- CM6Editor.tsx's canonicalTextFilter is
+      // the document's ingress invariant. Re-normalizing here would cost the
+      // whole document on every keypress, and (see that filter's doc comment)
+      // would be unsound in exactly the case where it did anything, since
+      // `selection` indexes the un-normalized document.
+      const sourceText = text
       const lineContext = resolveMarkdownSelectionContext(sourceText, selection).line
 
       if (lineContext.headingLevel > 0) {
@@ -1617,7 +1622,12 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       }
       if (!activeNoteId || activeNoteHasDebugTagRef.current) return null
 
-      const sourceText = normalizeInternalText(text)
+      // Canonical by construction -- CM6Editor.tsx's canonicalTextFilter is
+      // the document's ingress invariant. Re-normalizing here would cost the
+      // whole document on every keypress, and (see that filter's doc comment)
+      // would be unsound in exactly the case where it did anything, since
+      // `selection` indexes the un-normalized document.
+      const sourceText = text
       let next: { text: string; selection: EditorSelectionState } | null = null
 
       if (shortcut === 'bold' || shortcut === 'italic' || shortcut === 'strikethrough') {
@@ -1647,7 +1657,12 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       }
       if (!activeNoteId || activeNoteHasDebugTagRef.current) return null
 
-      const sourceText = normalizeInternalText(text)
+      // Canonical by construction -- CM6Editor.tsx's canonicalTextFilter is
+      // the document's ingress invariant. Re-normalizing here would cost the
+      // whole document on every keypress, and (see that filter's doc comment)
+      // would be unsound in exactly the case where it did anything, since
+      // `selection` indexes the un-normalized document.
+      const sourceText = text
       const next = resolveMarkdownChecklistTypeoverTransform({
         char,
         text: sourceText,
@@ -1672,7 +1687,12 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       }
       if (!activeNoteId || activeNoteHasDebugTagRef.current) return null
 
-      const sourceText = normalizeInternalText(text)
+      // Canonical by construction -- CM6Editor.tsx's canonicalTextFilter is
+      // the document's ingress invariant. Re-normalizing here would cost the
+      // whole document on every keypress, and (see that filter's doc comment)
+      // would be unsound in exactly the case where it did anything, since
+      // `selection` indexes the un-normalized document.
+      const sourceText = text
       const next = resolveMarkdownChecklistCaretClickToggleTransform({
         text: sourceText,
         selection,

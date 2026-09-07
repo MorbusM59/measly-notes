@@ -44,6 +44,7 @@ import type { ScrollJourneyTiming } from '../editor/scrollJourney';
 import { sanitizeDocumentText, sanitizeDocumentTextExtended } from '../shared/textSanitization';
 import { resolveScopeRange, isSameRange, type SelectionScope } from '../editor/ContractBridgeRangeUtils';
 import { computeMinimalTextReplacement } from '../editor/MinimalTextDiff';
+import { createCanonicalTextFilter } from '../editor/CanonicalTextFilter';
 import { ScrollTransitionController } from '../editor/ScrollTransitionController';
 import type { ReviewFlagEntry, ReviewFlagRemap, ReviewFlagSeverity } from '../shared/reviewFlags';
 import { hashLineText, reviewFlagSeverityRank } from '../shared/reviewFlags';
@@ -3293,6 +3294,7 @@ export function CM6Editor({
     };
 
     const extensions: Extension[] = [
+      createCanonicalTextFilter(ProgrammaticHydrationAnnotation),
       history(),
       keymap.of([...CM6_DEFAULT_KEYMAP_WITHOUT_ALT_ARROW, ...historyKeymap]),
       lineTokenPlugin,

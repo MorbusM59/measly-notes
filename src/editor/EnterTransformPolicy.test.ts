@@ -141,14 +141,20 @@ describe('resolveMarkdownEnterTransform', () => {
     expect(result?.selection.focus).toBe(0)
   })
 
-  it('normalizes tabs before applying enter continuation semantics', () => {
-    const raw = '\t  - item'
-    const normalized = normalizeInternalText(raw)
-    const selection = collapsedSelection(normalized.length)
+  // Replaces an older case that fed this policy RAW text containing a tab
+  // alongside a selection offset measured against the NORMALIZED string. It
+  // passed only because the mismatched offset clamped to the end of the
+  // line; any tab further from the caret would have made the policy edit the
+  // wrong place. Canonicalization is now an ingress invariant of the
+  // document (CanonicalTextFilter.ts), so the policy is entitled to assume
+  // canonical input and its offsets always mean what they say.
+  it('applies enter continuation semantics to an indented list line', () => {
+    const text = normalizeInternalText('\t  - item')
+    const selection = collapsedSelection(text.length)
 
-    const result = resolveMarkdownEnterTransform(buildEvent(raw, selection))
+    const result = resolveMarkdownEnterTransform(buildEvent(text, selection))
 
-    expect(normalized).toBe('     - item')
+    expect(text).toBe('     - item')
     expect(result).not.toBeNull()
     expect(result?.text).toBe('     - item\n     - ')
   })
