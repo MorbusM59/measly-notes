@@ -219,7 +219,20 @@ async function main() {
       return parts.join('\n\n')
     }
 
-    const seedText = args.shape === 'realistic'
+    // `realistic-toc` is `realistic` with a table of contents at the top.
+    // It exists because a whole class of per-keystroke cost is invisible
+    // without one: useMarkdownFormattingToolbar's regeneration layout effect
+    // only runs when the note HAS a table of contents, so every fixture here
+    // returned at its guard and no profile from this effort ever saw it,
+    // while every user who has pressed the toolbar button pays it.
+    const buildRealisticWithToc = (targetChars) => {
+      const body = buildRealistic(targetChars)
+      return `## Table of Contents\n\n${body}`
+    }
+
+    const seedText = args.shape === 'realistic-toc'
+      ? buildRealisticWithToc(args.chars)
+      : args.shape === 'realistic'
       ? buildRealistic(args.chars)
       : args.shape === 'indented-spaced'
       ? Array.from(

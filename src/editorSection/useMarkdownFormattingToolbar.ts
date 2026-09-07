@@ -5,6 +5,7 @@ import { normalizeInternalText } from '../editor/TextPolicy'
 import type { EditorSelectionState, EditorTextEdit, EditorTransformResult } from '../editor/EditorContract'
 import { buildTransformResult, collapsedSelectionAt } from '../editor/TransformResult'
 import { parseMarkdownHeading, slugifyAnchorId, stripMarkdownInlineFormatting } from '../shared/tableOfContentsText'
+import { editCouldChangeTableOfContents } from '../shared/tableOfContentsEditGuard'
 import { NOTE_HEADLINE_LEVEL_RULE, type HeadlineLevelRule } from '../shared/markdownHeadings'
 
 export type TextDecorationFormat = 'bold' | 'italic' | 'strikethrough'
@@ -23,7 +24,7 @@ export type TextDecorationFormat = 'bold' | 'italic' | 'strikethrough'
 // to the pre-chapters behavior: the first heading of ANY level, since an
 // external file's own structure isn't something this app enforces or can
 // assume.
-function findOwnTitleLineIndex(lines: string[], titleLevel: number | null): number {
+function findOwnTitleLineIndex(lines: readonly string[], titleLevel: number | null): number {
   let inFence = false
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
@@ -68,7 +69,19 @@ function isTableOfContentsHeadingLine(line: string, tocLevel: number): boolean {
  */
 const TABLE_OF_CONTENTS_LABEL = 'Table of Contents'
 
-function noteHasTableOfContents(sourceText: string, titleLevel: number | null, tocLevel: number): boolean {
+function noteHasTableOfContents(
+  sourceText: string,
+  titleLevel: number | null,
+  tocLevel: number,
+  /**
+   * The document already split into lines, when the caller has it. The
+   * section's shared inline-state cache maintains exactly this array in
+   * O(edit) (DocumentLineIndex), so a note that DOES have a table of contents
+   * -- where the cheap substring guard below cannot short-circuit -- no longer
+   * splits the whole document again to answer this on every keystroke.
+   */
+  cachedLines?: readonly string[] | null,
+): boolean {
   // isTableOfContentsActive re-runs this on EVERY keystroke to decide
   // whether one toolbar button draws as active. Splitting the whole
   // document to answer that cost ~30k substring allocations per keypress on
@@ -78,7 +91,7 @@ function noteHasTableOfContents(sourceText: string, titleLevel: number | null, t
 
   // Canonical by construction (CanonicalTextFilter.ts's document invariant),
   // so no normalization pass over the document is needed here either.
-  const lines = sourceText.split('\n')
+  const lines = cachedLines ?? sourceText.split('\n')
   const titleIndex = findOwnTitleLineIndex(lines, titleLevel)
   let inFence = false
 
@@ -1049,8 +1062,18 @@ export function useMarkdownFormattingToolbar({
   // noteHasTableOfContents: a note with no table of contents at all -- almost
   // all of them -- is ruled out by one allocation-free substring scan.
   const isTableOfContentsActive = useMemo(
-    () => noteHasTableOfContents(currentEditorText, tocTitleLevel, tocLevel),
-    [currentEditorText, tocTitleLevel, tocLevel],
+    () => noteHasTableOfContents(
+      currentEditorText,
+      tocTitleLevel,
+      tocLevel,
+      // selectionContextResult was computed from currentEditorText in this
+      // same render, so its line array is current -- unlike the ref, which
+      // is only committed in a layout effect afterwards.
+      selectionContextResult.cache.index.text === currentEditorText
+        ? selectionContextResult.cache.index.lines
+        : null,
+    ),
+    [currentEditorText, selectionContextResult, tocTitleLevel, tocLevel],
   )
 
   const toggleTableOfContents = useCallback(() => {
@@ -1080,17 +1103,48 @@ export function useMarkdownFormattingToolbar({
     applyProgrammaticEditorText(next.text, next.selection.anchor, next.selection.focus)
   }, [activeNoteId, applyProgrammaticEditorText, currentEditorText, isTableOfContentsActive, latestEditorSelectionRef, toggleTableOfContents, tocTitleLevel, tocLevel])
 
+  /**
+   * The text this effect last brought the table of contents in line with.
+   *
+   * Held so the skip below can be *verified* rather than assumed: the edit is
+   * only trusted to describe the change when it starts from exactly the text
+   * this effect last saw. Anything else -- a note switch, a programmatic
+   * rewrite, a multi-range edit, a render this effect did not run for -- falls
+   * through to the full regeneration, which is what ran unconditionally
+   * before.
+   */
+  const lastTocSyncedTextRef = useRef<string | null>(null)
+
   useLayoutEffect(() => {
-    if (!activeNoteId || !isTableOfContentsActive) return
+    if (!activeNoteId || !isTableOfContentsActive) {
+      lastTocSyncedTextRef.current = null
+      return
+    }
+
+    // Three full-document passes follow (strip, rebuild, compare), and on a
+    // note with a table of contents this effect runs on every keystroke.
+    // Almost every keystroke edits prose, and prose cannot change a table of
+    // contents -- so establish that first, from the edit, in O(edited lines).
+    const change = markdownEditRef.current
+    if (
+      change !== null
+      && lastTocSyncedTextRef.current === change.previousText
+      && !editCouldChangeTableOfContents(change.previousText, currentEditorText, change.edit)
+    ) {
+      lastTocSyncedTextRef.current = currentEditorText
+      return
+    }
 
     const stripped = removeTableOfContentsAndAnchors(currentEditorText, tocLevel)
     const canonical = buildTableOfContentsInsertion(stripped, latestEditorSelectionRef.current, tocTitleLevel, tocLevel)
     const nextText = canonical.text
 
+    lastTocSyncedTextRef.current = nextText
+
     if (nextText !== currentEditorText) {
       applyProgrammaticEditorText(nextText, latestEditorSelectionRef.current.anchor, latestEditorSelectionRef.current.focus)
     }
-  }, [activeNoteId, applyProgrammaticEditorText, currentEditorText, isTableOfContentsActive, latestEditorSelectionRef, tocTitleLevel, tocLevel])
+  }, [activeNoteId, applyProgrammaticEditorText, currentEditorText, isTableOfContentsActive, latestEditorSelectionRef, markdownEditRef, tocTitleLevel, tocLevel])
 
   return {
     activeDecorationFormats,
