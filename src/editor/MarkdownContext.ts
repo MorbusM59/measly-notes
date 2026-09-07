@@ -1,4 +1,5 @@
-import type { EditorSelectionState } from './EditorContract'
+import type { EditorSelectionState, EditorTransformResult } from './EditorContract'
+import { buildTransformResult, collapsedSelectionAt } from './TransformResult'
 
 export type MarkdownListKind = 'ordered' | 'unordered' | null
 
@@ -33,15 +34,9 @@ export type MarkdownSelectionContext = {
 
 export type IndentDirection = 'indent' | 'outdent'
 
-export type IndentationTransformResult = {
-  text: string
-  selection: EditorSelectionState
-}
+export type IndentationTransformResult = EditorTransformResult
 
-export type EnterKeyTransformResult = {
-  text: string
-  selection: EditorSelectionState
-}
+export type EnterKeyTransformResult = EditorTransformResult
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
@@ -642,16 +637,19 @@ export function indentSelectionByStep(
   const nextAnchor = clamp(mapGlobalOffset(safeAnchor), 0, nextText.length)
   const nextFocus = clamp(mapGlobalOffset(safeFocus), 0, nextText.length)
 
-  return {
-    text: nextText,
-    selection: {
+  // The edit is exactly the selected line block -- this function never
+  // touches a character outside [lineStart, lineEndExclusive).
+  return buildTransformResult(
+    sourceText,
+    { from: lineStart, to: lineEndExclusive, insert: nextBlock },
+    {
       anchor: nextAnchor,
       focus: nextFocus,
       start: Math.min(nextAnchor, nextFocus),
       end: Math.max(nextAnchor, nextFocus),
       isCollapsed: nextAnchor === nextFocus,
     },
-  }
+  )
 }
 
 type ParsedLineStructure = {
@@ -761,18 +759,11 @@ export function applyMarkdownEnter(
     lineStructure.contentAfterPrefixes.trim().length === 0
 
   if (isEmptyListItem) {
-    const nextText = `${sourceText.slice(0, context.line.lineStart)}${sourceText.slice(context.line.lineEndExclusive)}`
-    const nextCaret = context.line.lineStart
-    return {
-      text: nextText,
-      selection: {
-        anchor: nextCaret,
-        focus: nextCaret,
-        start: nextCaret,
-        end: nextCaret,
-        isCollapsed: true,
-      },
-    }
+    return buildTransformResult(
+      sourceText,
+      { from: context.line.lineStart, to: context.line.lineEndExclusive, insert: '' },
+      collapsedSelectionAt(context.line.lineStart),
+    )
   }
 
   let inserted = '\n'
@@ -813,17 +804,13 @@ export function applyMarkdownEnter(
   const restOfLine = sourceText.slice(caretOffset, context.line.lineEndExclusive)
   const sanitizedRestOfLine = isListContinuation ? stripListContinuationArtifacts(restOfLine) : restOfLine
 
-  const nextText = `${sourceText.slice(0, caretOffset)}${inserted}${sanitizedRestOfLine}${sourceText.slice(context.line.lineEndExclusive)}`
-  const nextCaret = caretOffset + inserted.length
-
-  return {
-    text: nextText,
-    selection: {
-      anchor: nextCaret,
-      focus: nextCaret,
-      start: nextCaret,
-      end: nextCaret,
-      isCollapsed: true,
+  return buildTransformResult(
+    sourceText,
+    {
+      from: caretOffset,
+      to: context.line.lineEndExclusive,
+      insert: `${inserted}${sanitizedRestOfLine}`,
     },
-  }
+    collapsedSelectionAt(caretOffset + inserted.length),
+  )
 }

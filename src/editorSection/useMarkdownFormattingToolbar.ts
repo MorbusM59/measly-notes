@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import { resolveMarkdownSelectionContext, resolveMarkdownSelectionContextIncremental, type InlineStateLineCache } from '../editor/MarkdownContext'
 import { normalizeInternalText } from '../editor/TextPolicy'
-import type { EditorSelectionState } from '../editor/EditorContract'
+import type { EditorSelectionState, EditorTransformResult } from '../editor/EditorContract'
+import { buildTransformResult, collapsedSelectionAt } from '../editor/TransformResult'
 import { parseMarkdownHeading, slugifyAnchorId, stripMarkdownInlineFormatting } from '../shared/tableOfContentsText'
 import { NOTE_HEADLINE_LEVEL_RULE, type HeadlineLevelRule } from '../shared/markdownHeadings'
 
@@ -253,10 +254,10 @@ export interface UseMarkdownFormattingToolbarOptions {
   latestEditorSelectionRef: MutableRefObject<EditorSelectionState>
   applyProgrammaticEditorText: (nextText: string, selectionStart?: number, selectionEnd?: number) => void
   /** Consumed by useEditorSectionMount, which is called earlier than these builders are defined -- see the handover doc's Gotcha #2. This hook keeps the refs current via a plain assignment, same as before the relocation. */
-  buildTextDecorationTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState, format: TextDecorationFormat) => { text: string; selection: EditorSelectionState } | null>
-  buildToggleCurrentLineHeadingTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => { text: string; selection: EditorSelectionState } | null>
-  buildToggleBulletedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => { text: string; selection: EditorSelectionState } | null>
-  buildToggleNumberedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => { text: string; selection: EditorSelectionState } | null>
+  buildTextDecorationTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState, format: TextDecorationFormat) => EditorTransformResult | null>
+  buildToggleCurrentLineHeadingTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
+  buildToggleBulletedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
+  buildToggleNumberedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
   /** Builds "Insert Link"'s prefilled target, read fresh on every call -- see App.tsx's `getLinkTargetPrefill` doc comment. Optional so this hook stays usable without it (falls back to the old literal `url` placeholder). */
   getLinkTargetPrefill?: () => string
   /** Fired with the freshly-generated anchor id whenever applyAnchor sets one, so the caller can remember where it lives for later link prefills. */
@@ -400,7 +401,7 @@ export function useMarkdownFormattingToolbar({
     sourceText: string,
     baseSelection: EditorSelectionState,
     format: TextDecorationFormat,
-  ): { text: string; selection: EditorSelectionState } | null => {
+  ): EditorTransformResult | null => {
     const marker = TEXT_DECORATION_MARKERS[format]
     const selectionStart = Math.max(0, Math.min(baseSelection.start, sourceText.length))
     const selectionEnd = Math.max(selectionStart, Math.min(baseSelection.end, sourceText.length))
@@ -442,49 +443,46 @@ export function useMarkdownFormattingToolbar({
     )
     const hasWrapping = isSelectionWrappedBy(sourceText, selectionForOperation, marker.open, marker.close)
 
+    // Both branches rewrite one contiguous span around the operated
+    // selection -- the markers plus the text between them -- so each is a
+    // single edit range rather than a new document to diff.
     if (isFormatActive && hasWrapping) {
-      const unwrapped = `${sourceText.slice(0, start - marker.open.length)}${sourceText.slice(start, end)}${sourceText.slice(end + marker.close.length)}`
-      const nextStart = start - marker.open.length
-      const nextEnd = nextStart + (end - start)
-      return {
-        text: unwrapped,
-        selection: {
-          anchor: nextStart,
+      const editFrom = start - marker.open.length
+      const editTo = end + marker.close.length
+      const nextEnd = editFrom + (end - start)
+      return buildTransformResult(
+        sourceText,
+        { from: editFrom, to: editTo, insert: sourceText.slice(start, end) },
+        {
+          anchor: editFrom,
           focus: nextEnd,
-          start: nextStart,
+          start: editFrom,
           end: nextEnd,
-          isCollapsed: nextStart === nextEnd,
+          isCollapsed: editFrom === nextEnd,
         },
-      }
+      )
     }
 
-    const nextText = `${sourceText.slice(0, start)}${marker.open}${sourceText.slice(start, end)}${marker.close}${sourceText.slice(end)}`
+    const edit = {
+      from: start,
+      to: end,
+      insert: `${marker.open}${sourceText.slice(start, end)}${marker.close}`,
+    }
+
     if (selectionForOperation.isCollapsed) {
       const cursor = start + marker.open.length
-      return {
-        text: nextText,
-        selection: {
-          anchor: cursor,
-          focus: cursor,
-          start: cursor,
-          end: cursor,
-          isCollapsed: true,
-        },
-      }
+      return buildTransformResult(sourceText, edit, collapsedSelectionAt(cursor))
     }
 
     const nextStart = start + marker.open.length
     const nextEnd = nextStart + (end - start)
-    return {
-      text: nextText,
-      selection: {
-        anchor: nextStart,
-        focus: nextEnd,
-        start: nextStart,
-        end: nextEnd,
-        isCollapsed: false,
-      },
-    }
+    return buildTransformResult(sourceText, edit, {
+      anchor: nextStart,
+      focus: nextEnd,
+      start: nextStart,
+      end: nextEnd,
+      isCollapsed: false,
+    })
   }, [isSelectionWrappedBy])
   buildTextDecorationTransformRef.current = buildTextDecorationTransform
 
@@ -560,7 +558,7 @@ export function useMarkdownFormattingToolbar({
       newLine: string
       localOffsetInLine: number
     }) => number,
-  ): { text: string; selection: EditorSelectionState } => {
+  ): EditorTransformResult => {
     const start = Math.max(0, Math.min(baseSelection.start, sourceText.length))
     const end = Math.max(start, Math.min(baseSelection.end, sourceText.length))
     const { lineStart, lineEndExclusive } = resolveLineRange(sourceText, start, end)
@@ -568,7 +566,6 @@ export function useMarkdownFormattingToolbar({
     const lines = selectedBlock.split('\n')
     const nextLines = lines.map((line, index) => transform(line, index))
     const nextBlock = nextLines.join('\n')
-    const nextText = `${sourceText.slice(0, lineStart)}${nextBlock}${sourceText.slice(lineEndExclusive)}`
 
     const lengthDelta = nextBlock.length - selectedBlock.length
     const remapOffset = (offset: number) => {
@@ -624,18 +621,23 @@ export function useMarkdownFormattingToolbar({
       return lineStart + nextBlock.length
     }
 
-    const nextAnchor = Math.max(0, Math.min(nextText.length, remapOffset(baseSelection.anchor)))
-    const nextFocus = Math.max(0, Math.min(nextText.length, remapOffset(baseSelection.focus)))
-    return {
-      text: nextText,
-      selection: {
+    // Every line this rewrites lies inside [lineStart, lineEndExclusive), so
+    // the transformed block IS the edit -- no whole-document diff needed to
+    // find out where it landed.
+    const nextLength = sourceText.length + lengthDelta
+    const nextAnchor = Math.max(0, Math.min(nextLength, remapOffset(baseSelection.anchor)))
+    const nextFocus = Math.max(0, Math.min(nextLength, remapOffset(baseSelection.focus)))
+    return buildTransformResult(
+      sourceText,
+      { from: lineStart, to: lineEndExclusive, insert: nextBlock },
+      {
         anchor: nextAnchor,
         focus: nextFocus,
         start: Math.min(nextAnchor, nextFocus),
         end: Math.max(nextAnchor, nextFocus),
         isCollapsed: nextAnchor === nextFocus,
       },
-    }
+    )
   }, [resolveLineRange])
 
   const transformSelectedLines = useCallback((transform: (line: string, index: number) => string) => {
@@ -666,7 +668,7 @@ export function useMarkdownFormattingToolbar({
   const buildToggleCurrentLineHeadingTransform = useCallback((
     sourceText: string,
     baseSelection: EditorSelectionState,
-  ): { text: string; selection: EditorSelectionState } | null => {
+  ): EditorTransformResult | null => {
     const clampOffset = (offset: number) => Math.max(0, Math.min(offset, sourceText.length))
     const caret = clampOffset(baseSelection.focus)
     const lineStart = sourceText.lastIndexOf('\n', Math.max(0, caret - 1)) + 1
@@ -679,7 +681,6 @@ export function useMarkdownFormattingToolbar({
       const removedPrefix = currentHeadingPrefixMatch[1]
       const removedLength = removedPrefix.length
       const nextLineText = lineText.slice(removedLength)
-      const nextText = `${sourceText.slice(0, lineStart)}${nextLineText}${sourceText.slice(lineEndExclusive)}`
 
       const remapOffset = (offset: number) => {
         const safeOffset = clampOffset(offset)
@@ -688,18 +689,20 @@ export function useMarkdownFormattingToolbar({
         return safeOffset - removedLength
       }
 
-      const nextAnchor = Math.max(0, Math.min(nextText.length, remapOffset(baseSelection.anchor)))
-      const nextFocus = Math.max(0, Math.min(nextText.length, remapOffset(baseSelection.focus)))
-      return {
-        text: nextText,
-        selection: {
+      const nextLength = sourceText.length - removedLength
+      const nextAnchor = Math.max(0, Math.min(nextLength, remapOffset(baseSelection.anchor)))
+      const nextFocus = Math.max(0, Math.min(nextLength, remapOffset(baseSelection.focus)))
+      return buildTransformResult(
+        sourceText,
+        { from: lineStart, to: lineEndExclusive, insert: nextLineText },
+        {
           anchor: nextAnchor,
           focus: nextFocus,
           start: Math.min(nextAnchor, nextFocus),
           end: Math.max(nextAnchor, nextFocus),
           isCollapsed: nextAnchor === nextFocus,
         },
-      }
+      )
     }
 
     let searchLineEnd = lineStart > 0 ? lineStart - 1 : -1
@@ -726,7 +729,6 @@ export function useMarkdownFormattingToolbar({
 
     const addedLength = inheritedPrefix.length
     const nextLineText = `${inheritedPrefix}${lineText}`
-    const nextText = `${sourceText.slice(0, lineStart)}${nextLineText}${sourceText.slice(lineEndExclusive)}`
 
     const remapOffset = (offset: number) => {
       const safeOffset = clampOffset(offset)
@@ -734,18 +736,20 @@ export function useMarkdownFormattingToolbar({
       return safeOffset + addedLength
     }
 
-    const nextAnchor = Math.max(0, Math.min(nextText.length, remapOffset(baseSelection.anchor)))
-    const nextFocus = Math.max(0, Math.min(nextText.length, remapOffset(baseSelection.focus)))
-    return {
-      text: nextText,
-      selection: {
+    const nextLength = sourceText.length + addedLength
+    const nextAnchor = Math.max(0, Math.min(nextLength, remapOffset(baseSelection.anchor)))
+    const nextFocus = Math.max(0, Math.min(nextLength, remapOffset(baseSelection.focus)))
+    return buildTransformResult(
+      sourceText,
+      { from: lineStart, to: lineEndExclusive, insert: nextLineText },
+      {
         anchor: nextAnchor,
         focus: nextFocus,
         start: Math.min(nextAnchor, nextFocus),
         end: Math.max(nextAnchor, nextFocus),
         isCollapsed: nextAnchor === nextFocus,
       },
-    }
+    )
   }, [])
   buildToggleCurrentLineHeadingTransformRef.current = buildToggleCurrentLineHeadingTransform
 
@@ -768,7 +772,7 @@ export function useMarkdownFormattingToolbar({
   const buildToggleBulletedListTransform = useCallback((
     sourceText: string,
     baseSelection: EditorSelectionState,
-  ): { text: string; selection: EditorSelectionState } => {
+  ): EditorTransformResult => {
     const bulletPattern = /^(\s*(?:>\s*)*)([-*+])\s+/
     const numberedPattern = /^(\s*(?:>\s*)*)(\d+[.)])\s+/
 
@@ -822,7 +826,7 @@ export function useMarkdownFormattingToolbar({
   const buildToggleNumberedListTransform = useCallback((
     sourceText: string,
     baseSelection: EditorSelectionState,
-  ): { text: string; selection: EditorSelectionState } => {
+  ): EditorTransformResult => {
     const numberedPattern = /^(\s*(?:>\s*)*)(\d+[.)])\s+/
     const bulletPattern = /^(\s*(?:>\s*)*)([-*+])\s+/
 
@@ -886,7 +890,7 @@ export function useMarkdownFormattingToolbar({
   const buildToggleChecklistListTransform = useCallback((
     sourceText: string,
     baseSelection: EditorSelectionState,
-  ): { text: string; selection: EditorSelectionState } => {
+  ): EditorTransformResult => {
     const checklistPattern = /^(\s*(?:>\s*)*)(?:[-*+])\s+\[[ xX]\]\s+/;
     const splitListPrefix = (line: string) => {
       const quotePrefixMatch = line.match(/^(\s*(?:>\s*)*)/)

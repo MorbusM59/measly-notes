@@ -15,6 +15,50 @@ export interface EditorSelectionState {
   isCollapsed: boolean;
 }
 
+/**
+ * A single contiguous document edit, in start-state coordinates:
+ * `text.slice(0, from) + insert + text.slice(to)` is the resulting document.
+ *
+ * One range is enough for every transform this editor has. Verified rather
+ * than assumed: the multi-line cases (indentSelectionByStep, the bulleted and
+ * numbered list toggles) each already compute one contiguous block
+ * `[lineStart, lineEndExclusive)`, rewrite the lines inside it and join --
+ * so the block they build IS the insert, and no multi-range shape is needed.
+ */
+export interface EditorTextEdit {
+  from: number;
+  to: number;
+  insert: string;
+}
+
+/**
+ * What a transform returns.
+ *
+ * `edit` is authoritative and `text` is derived from it: the invariant is
+ * `text === previousText.slice(0, edit.from) + edit.insert +
+ * previousText.slice(edit.to)`, asserted in development by
+ * assertTransformResultConsistency.
+ *
+ * Both are carried deliberately. A transform knows exactly what it changed;
+ * before `edit` existed the contract discarded that and the editor had to
+ * rediscover the position by walking two whole documents with a
+ * common-prefix/common-suffix diff -- O(document) work, on every Enter and
+ * every Tab, to recover a number the transform had already computed.
+ *
+ * `text` stays because the app's state model genuinely needs the whole
+ * document (the note text in React state, the save queue, the title
+ * preview), and because building it is cheap in a way the scan was not:
+ * V8 represents `a.slice(0, i) + b + a.slice(j)` as sliced and cons strings,
+ * so the concatenation is O(1) pointers rather than O(document) copying.
+ * The scan was what forced a flatten. Making the whole-document string
+ * itself unnecessary is a separate, larger change to how app state is held.
+ */
+export interface EditorTransformResult {
+  text: string;
+  selection: EditorSelectionState;
+  edit: EditorTextEdit;
+}
+
 export type EditorViewportChangeOrigin = 'viewport-drag' | 'scroll' | 'programmatic';
 
 export interface EditorViewportState {
@@ -204,26 +248,17 @@ export interface EditorBindings {
     shiftKey: boolean;
     text: string;
     selection: EditorSelectionState;
-  }) => {
-    text: string;
-    selection: EditorSelectionState;
-  } | null;
+  }) => EditorTransformResult | null;
   onMarkdownShortcutTransform?: (event: {
     shortcut: 'bold' | 'italic' | 'strikethrough' | 'heading-toggle' | 'unordered-list' | 'ordered-list';
     text: string;
     selection: EditorSelectionState;
-  }) => {
-    text: string;
-    selection: EditorSelectionState;
-  } | null;
+  }) => EditorTransformResult | null;
   onCharacterInsertTransform?: (event: {
     char: string;
     text: string;
     selection: EditorSelectionState;
-  }) => {
-    text: string;
-    selection: EditorSelectionState;
-  } | null;
+  }) => EditorTransformResult | null;
   onEnterTransform?: (event: {
     shiftKey: boolean;
     altKey: boolean;
@@ -231,15 +266,9 @@ export interface EditorBindings {
     metaKey: boolean;
     text: string;
     selection: EditorSelectionState;
-  }) => {
-    text: string;
-    selection: EditorSelectionState;
-  } | null;
+  }) => EditorTransformResult | null;
   onCaretClickTransform?: (event: {
     text: string;
     selection: EditorSelectionState;
-  }) => {
-    text: string;
-    selection: EditorSelectionState;
-  } | null;
+  }) => EditorTransformResult | null;
 }

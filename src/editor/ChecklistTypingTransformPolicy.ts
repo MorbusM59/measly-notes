@@ -1,4 +1,5 @@
-import type { EditorSelectionState } from './EditorContract'
+import type { EditorSelectionState, EditorTransformResult } from './EditorContract'
+import { buildTransformResult, collapsedSelectionAt } from './TransformResult'
 
 export interface ChecklistTypingTransformEvent {
   char: string
@@ -12,7 +13,7 @@ function clamp(value: number, min: number, max: number): number {
 
 export function resolveMarkdownChecklistTypeoverTransform(
   event: ChecklistTypingTransformEvent,
-): { text: string; selection: EditorSelectionState } | null {
+): EditorTransformResult | null {
   if (!event.selection.isCollapsed) {
     return null
   }
@@ -45,17 +46,9 @@ export function resolveMarkdownChecklistTypeoverTransform(
     return null
   }
 
-  const nextText = `${sourceText.slice(0, caretOffset)}${event.char}${sourceText.slice(caretOffset + 1)}`
-  const nextCaret = caretOffset + 1
-
-  return {
-    text: nextText,
-    selection: {
-      anchor: nextCaret,
-      focus: nextCaret,
-      start: nextCaret,
-      end: nextCaret,
-      isCollapsed: true,
-    },
-  }
+  return buildTransformResult(
+    sourceText,
+    { from: caretOffset, to: caretOffset + 1, insert: event.char },
+    collapsedSelectionAt(caretOffset + 1),
+  )
 }

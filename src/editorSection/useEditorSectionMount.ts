@@ -8,6 +8,7 @@ import type {
   EditorSelectionChangeEvent,
   EditorSelectionState,
   EditorTextChangeEvent,
+  EditorTransformResult,
   EditorViewportChangeEvent,
   EditorViewportState,
 } from '../editor/EditorContract'
@@ -26,6 +27,7 @@ import {
   ZERO_PERSISTED_VIEWPORT,
 } from '../editor/EditRestoreMath'
 import { normalizeInternalText } from '../editor/TextPolicy'
+import { buildTransformResult } from '../editor/TransformResult'
 import { hashNormalizedText } from '../shared/hashText'
 import {
   splitMarkdownIntoPreviewBlocks,
@@ -126,10 +128,10 @@ export interface UseEditorSectionMountOptions {
    * of restructuring declaration order across a much wider swath of the
    * file just to satisfy this one call site.
    */
-  buildTextDecorationTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState, format: 'bold' | 'italic' | 'strikethrough') => { text: string; selection: EditorSelectionState } | null>
-  buildToggleCurrentLineHeadingTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => { text: string; selection: EditorSelectionState } | null>
-  buildToggleBulletedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => { text: string; selection: EditorSelectionState } | null>
-  buildToggleNumberedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => { text: string; selection: EditorSelectionState } | null>
+  buildTextDecorationTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState, format: 'bold' | 'italic' | 'strikethrough') => EditorTransformResult | null>
+  buildToggleCurrentLineHeadingTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
+  buildToggleBulletedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
+  buildToggleNumberedListTransformRef: MutableRefObject<(text: string, selection: EditorSelectionState) => EditorTransformResult | null>
   /** Scopes the editor/scrollbar DOM lookups below to this section's own stage -- other sections render the same class names, so an unscoped document.querySelector would grab whichever section's stage happens to be first in the DOM. */
   sectionContainerRef: MutableRefObject<HTMLDivElement | null>
   /**
@@ -1379,6 +1381,31 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     return ratio * 2 - 1
   }, [])
 
+  /**
+   * The app-state half of applying a transform, shared by all five of them.
+   *
+   * Every transform binding below did these same seven writes inline; they
+   * are one operation ("this transform's result is now the document"), not
+   * five independently maintained copies of it, and keeping them apart is
+   * how one of them ends up missing a write.
+   *
+   * Returns the result so a binding can `return commitTransformResult(next)`
+   * -- the editor receives the same object, and applies `next.edit` directly
+   * rather than rediscovering the changed range by diffing two whole
+   * documents (see EditorTransformResult's doc comment).
+   */
+  const commitTransformResult = useCallback((next: EditorTransformResult): EditorTransformResult => {
+    latestEditorTextRef.current = next.text
+    setActiveNoteText(next.text)
+    setEditorTextVersion((previous) => previous + 1)
+    updateActiveNoteTitlePreview(next.text)
+    queueSave(next.text, next.selection.end)
+
+    latestEditorSelectionRef.current = next.selection
+    setEditorSelection(next.selection)
+    return next
+  }, [latestEditorTextRef, latestEditorSelectionRef, queueSave, setActiveNoteText, setEditorSelection, setEditorTextVersion, updateActiveNoteTitlePreview])
+
   const bindings = useMemo<EditorBindings>(() => ({
     onLifecycle: (event) => {
       if (event.phase !== 'ready') return
@@ -1556,7 +1583,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
           )
 
           if (nextLineText !== lineContext.lineText) {
-            const nextText = `${sourceText.slice(0, lineContext.lineStart)}${nextLineText}${sourceText.slice(lineContext.lineEndExclusive)}`
             const markerMatch = lineContext.lineText.match(/^(\s*(?:>\s*)*)#{1,6}/)
             const markerStart = lineContext.lineStart + (markerMatch ? markerMatch[1].length : 0)
             const oldMarkerEnd = markerStart + lineContext.headingLevel
@@ -1571,25 +1597,23 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
               return offset + headingDelta
             }
 
-            const nextAnchor = Math.max(0, Math.min(nextText.length, remapSelectionOffset(selection.anchor)))
-            const nextFocus = Math.max(0, Math.min(nextText.length, remapSelectionOffset(selection.focus)))
-            const nextSelection: EditorSelectionState = {
-              anchor: nextAnchor,
-              focus: nextFocus,
-              start: Math.min(nextAnchor, nextFocus),
-              end: Math.max(nextAnchor, nextFocus),
-              isCollapsed: nextAnchor === nextFocus,
-            }
+            // The edit is the heading line and nothing else, so its length
+            // delta is the whole difference the remap has to account for.
+            const nextLength = sourceText.length + (nextLineText.length - lineContext.lineText.length)
+            const nextAnchor = Math.max(0, Math.min(nextLength, remapSelectionOffset(selection.anchor)))
+            const nextFocus = Math.max(0, Math.min(nextLength, remapSelectionOffset(selection.focus)))
 
-            latestEditorTextRef.current = nextText
-            setActiveNoteText(nextText)
-            setEditorTextVersion((previous) => previous + 1)
-            updateActiveNoteTitlePreview(nextText)
-            queueSave(nextText, nextSelection.end)
-
-            latestEditorSelectionRef.current = nextSelection
-            setEditorSelection(nextSelection)
-            return { text: nextText, selection: nextSelection }
+            return commitTransformResult(buildTransformResult(
+              sourceText,
+              { from: lineContext.lineStart, to: lineContext.lineEndExclusive, insert: nextLineText },
+              {
+                anchor: nextAnchor,
+                focus: nextFocus,
+                start: Math.min(nextAnchor, nextFocus),
+                end: Math.max(nextAnchor, nextFocus),
+                isCollapsed: nextAnchor === nextFocus,
+              },
+            ))
           }
         }
       }
@@ -1606,15 +1630,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         return null
       }
 
-      latestEditorTextRef.current = next.text
-      setActiveNoteText(next.text)
-      setEditorTextVersion((previous) => previous + 1)
-      updateActiveNoteTitlePreview(next.text)
-      queueSave(next.text, next.selection.end)
-
-      latestEditorSelectionRef.current = next.selection
-      setEditorSelection(next.selection)
-      return { text: next.text, selection: next.selection }
+      return commitTransformResult(next)
     },
     onMarkdownShortcutTransform: ({ shortcut, text, selection }) => {
       if (previewedSnapshotId !== null) {
@@ -1628,7 +1644,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       // would be unsound in exactly the case where it did anything, since
       // `selection` indexes the un-normalized document.
       const sourceText = text
-      let next: { text: string; selection: EditorSelectionState } | null = null
+      let next: EditorTransformResult | null = null
 
       if (shortcut === 'bold' || shortcut === 'italic' || shortcut === 'strikethrough') {
         next = buildTextDecorationTransformRef.current(sourceText, selection, shortcut)
@@ -1642,14 +1658,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
 
       if (!next) return null
 
-      latestEditorTextRef.current = next.text
-      setActiveNoteText(next.text)
-      setEditorTextVersion((previous) => previous + 1)
-      updateActiveNoteTitlePreview(next.text)
-      queueSave(next.text, next.selection.end)
-      latestEditorSelectionRef.current = next.selection
-      setEditorSelection(next.selection)
-      return next
+      return commitTransformResult(next)
     },
     onCharacterInsertTransform: ({ char, text, selection }) => {
       if (previewedSnapshotId !== null) {
@@ -1672,14 +1681,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         return null
       }
 
-      latestEditorTextRef.current = next.text
-      setActiveNoteText(next.text)
-      setEditorTextVersion((previous) => previous + 1)
-      updateActiveNoteTitlePreview(next.text)
-      queueSave(next.text, next.selection.end)
-      latestEditorSelectionRef.current = next.selection
-      setEditorSelection(next.selection)
-      return next
+      return commitTransformResult(next)
     },
     onCaretClickTransform: ({ text, selection }) => {
       if (previewedSnapshotId !== null) {
@@ -1701,14 +1703,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         return null
       }
 
-      latestEditorTextRef.current = next.text
-      setActiveNoteText(next.text)
-      setEditorTextVersion((previous) => previous + 1)
-      updateActiveNoteTitlePreview(next.text)
-      queueSave(next.text, next.selection.end)
-      latestEditorSelectionRef.current = next.selection
-      setEditorSelection(next.selection)
-      return next
+      return commitTransformResult(next)
     },
     onEnterTransform: (event) => {
       if (previewedSnapshotId !== null) {
@@ -1722,19 +1717,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         return null
       }
 
-      latestEditorTextRef.current = next.text
-      setActiveNoteText(next.text)
-      setEditorTextVersion((previous) => previous + 1)
-      updateActiveNoteTitlePreview(next.text)
-      queueSave(next.text, next.selection.end)
-
-      latestEditorSelectionRef.current = next.selection
-      setEditorSelection(next.selection)
-
-      return {
-        text: next.text,
-        selection: next.selection,
-      }
+      return commitTransformResult(next)
     },
     onViewportChange: (event: EditorViewportChangeEvent) => {
       if (ignoreNextUserViewportChangeRef.current && event.source === 'user-input') {
@@ -1838,6 +1821,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     },
   }), [
     activeNoteId,
+    commitTransformResult,
     isPreviewMode,
     persistenceReady,
     previewedSnapshotId,

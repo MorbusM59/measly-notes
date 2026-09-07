@@ -1,4 +1,5 @@
-import type { EditorSelectionState } from './EditorContract'
+import type { EditorSelectionState, EditorTransformResult } from './EditorContract'
+import { buildTransformResult, collapsedSelectionAt } from './TransformResult'
 
 export interface ChecklistCaretClickToggleEvent {
   text: string
@@ -20,7 +21,7 @@ function clamp(value: number, min: number, max: number): number {
  */
 export function resolveMarkdownChecklistCaretClickToggleTransform(
   event: ChecklistCaretClickToggleEvent,
-): { text: string; selection: EditorSelectionState } | null {
+): EditorTransformResult | null {
   if (!event.selection.isCollapsed) {
     return null
   }
@@ -52,18 +53,11 @@ export function resolveMarkdownChecklistCaretClickToggleTransform(
   const stateChar = sourceText[caretOffset]
   const nextChar = stateChar === ' ' ? 'X' : ' '
 
-  const nextText = `${sourceText.slice(0, caretOffset)}${nextChar}${sourceText.slice(caretOffset + 1)}`
-
-  return {
-    text: nextText,
-    selection: {
-      anchor: caretOffset,
-      focus: caretOffset,
-      start: caretOffset,
-      end: caretOffset,
-      isCollapsed: true,
-    },
-  }
+  return buildTransformResult(
+    sourceText,
+    { from: caretOffset, to: caretOffset + 1, insert: nextChar },
+    collapsedSelectionAt(caretOffset),
+  )
 }
 
 /**
@@ -80,7 +74,7 @@ export function resolveMarkdownChecklistCaretClickToggleTransform(
 export function resolveMarkdownChecklistLineToggleTransform(
   text: string,
   sourceLine: number,
-): { text: string; selection: EditorSelectionState } | null {
+): EditorTransformResult | null {
   const sourceText = text ?? ''
   const lines = sourceText.split('\n')
   if (sourceLine < 0 || sourceLine >= lines.length) {

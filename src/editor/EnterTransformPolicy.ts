@@ -1,4 +1,4 @@
-import type { EditorSelectionState } from './EditorContract'
+import type { EditorSelectionState, EditorTransformResult } from './EditorContract'
 import { applyMarkdownEnter } from './MarkdownContext'
 
 export interface EnterTransformEvent {
@@ -12,7 +12,7 @@ export interface EnterTransformEvent {
 
 export function resolveMarkdownEnterTransform(
   event: EnterTransformEvent,
-): { text: string; selection: EditorSelectionState } | null {
+): EditorTransformResult | null {
   if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
     return null
   }
@@ -21,13 +21,5 @@ export function resolveMarkdownEnterTransform(
   // canonicalTextFilter enforces that as a document invariant, so this path
   // does not re-normalize the whole document on every Enter press. See that
   // filter's doc comment for why the old call was unsound as well as costly.
-  const next = applyMarkdownEnter(event.text, event.selection)
-  if (!next) {
-    return null
-  }
-
-  return {
-    text: next.text,
-    selection: next.selection,
-  }
+  return applyMarkdownEnter(event.text, event.selection)
 }

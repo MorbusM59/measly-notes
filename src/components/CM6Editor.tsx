@@ -45,6 +45,7 @@ import { sanitizeDocumentText, sanitizeDocumentTextExtended } from '../shared/te
 import { resolveScopeRange, isSameRange, type SelectionScope } from '../editor/ContractBridgeRangeUtils';
 import { computeMinimalTextReplacement } from '../editor/MinimalTextDiff';
 import { createCanonicalTextFilter } from '../editor/CanonicalTextFilter';
+import type { EditorTransformResult } from '../editor/EditorContract';
 import { ScrollTransitionController } from '../editor/ScrollTransitionController';
 import type { ReviewFlagEntry, ReviewFlagRemap, ReviewFlagSeverity } from '../shared/reviewFlags';
 import { hashLineText, reviewFlagSeverityRank } from '../shared/reviewFlags';
@@ -318,62 +319,42 @@ function toSelectionState(range: { anchor: number; head: number; from: number; t
 // edited.
 const ProgrammaticHydrationAnnotation = Annotation.define<true>();
 
-function commonPrefixLen(a: string, b: string): number {
-  const max = Math.min(a.length, b.length);
-  let i = 0;
-  while (i < max && a.charCodeAt(i) === b.charCodeAt(i)) i += 1;
-  return i;
-}
-
-function commonSuffixLen(a: string, b: string, maxLen: number): number {
-  let i = 0;
-  while (i < maxLen && a.charCodeAt(a.length - 1 - i) === b.charCodeAt(b.length - 1 - i)) i += 1;
-  return i;
-}
-
 /**
- * Applies a transform's `{text, selection}` result -- the CM6 equivalent of
+ * Applies a transform's result -- the CM6 equivalent of
  * ContractBridgePlugin.tsx's replaceEditorTextFromCanonical +
  * scheduleTransformSelectionReplay, collapsed into a single atomic dispatch
  * since CM6 (unlike Lexical) applies a change and its selection together
  * without a deferred-DOM-commit race to work around.
  *
- * Dispatches only the minimal `{from, to, insert}` range covering where
- * `oldText` and `next.text` actually differ (common-prefix/common-suffix
- * diff -- the same technique PreviewBlockSplit.ts/MarkdownContext.ts/
- * canonicalizeParagraphSegmentsIncremental already use elsewhere in this
- * codebase), not a blanket `{from: 0, to: doc.length}` replace of the whole
- * document. The EditorBindings transform contract (onTabIndentTransform/
- * onEnterTransform/onMarkdownShortcutTransform/onCharacterInsertTransform/
- * onCaretClickTransform) only ever changes a small localized region -- a full-document replace on
- * every Tab/Enter/formatting-shortcut keystroke forced CM6 to treat the
- * entire document as changed (undo-history entry size, decoration/measure
- * invalidation) regardless of how small the actual edit was, on every one of
- * these very common keys. Provably exact by construction: prefixLen and
- * suffixLen are literal matching runs of `oldText`/`next.text`, so
- * `oldText.slice(0, prefixLen) + insert + oldText.slice(oldText.length -
- * suffixLen)` reconstructs `next.text` exactly -- not a "trust prior
- * computation" cache with a hazard class to verify, just a minimal-range
- * encoding of the same already-known target string.
+ * Dispatches the transform's own `edit` range. It used to *rediscover* that
+ * range with a common-prefix/common-suffix diff of the old and new document
+ * strings -- two scans that between them walked the entire document, on
+ * every Enter and every Tab, to recover a position the transform had
+ * already computed and then thrown away at the contract boundary. The
+ * contract now carries it (EditorContract.ts's EditorTransformResult), so
+ * this is a dispatch rather than a search.
+ *
+ * The range still matters for the reason the diff was introduced: a
+ * full-document `{from: 0, to: doc.length}` replace on every Tab/Enter/
+ * formatting-shortcut keystroke forced CM6 to treat the whole document as
+ * changed (undo-history entry size, decoration and measure invalidation)
+ * regardless of how small the actual edit was.
  */
-function applyTransformResult(view: EditorView, oldText: string, next: { text: string; selection: EditorSelectionState }): void {
+function applyTransformResult(view: EditorView, oldText: string, next: EditorTransformResult): void {
   const anchor = Math.max(0, Math.min(next.text.length, next.selection.anchor));
   const focus = Math.max(0, Math.min(next.text.length, next.selection.focus));
+  const { from, to, insert } = next.edit;
 
-  if (oldText === next.text) {
+  if (from === to && insert.length === 0) {
     view.dispatch({ selection: EditorSelection.single(anchor, focus) });
     return;
   }
 
-  const prefixLen = commonPrefixLen(oldText, next.text);
-  const maxSuffixLen = Math.min(oldText.length, next.text.length) - prefixLen;
-  const suffixLen = commonSuffixLen(oldText, next.text, maxSuffixLen);
-
   view.dispatch({
     changes: {
-      from: prefixLen,
-      to: oldText.length - suffixLen,
-      insert: next.text.slice(prefixLen, next.text.length - suffixLen),
+      from: Math.max(0, Math.min(oldText.length, from)),
+      to: Math.max(0, Math.min(oldText.length, to)),
+      insert,
     },
     selection: EditorSelection.single(anchor, focus),
   });
