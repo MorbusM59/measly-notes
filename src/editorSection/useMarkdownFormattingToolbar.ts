@@ -1037,6 +1037,17 @@ export function useMarkdownFormattingToolbar({
     applyProgrammaticEditorText(nextText, cursor, cursor)
   }, [activeNoteId, applyProgrammaticEditorText, currentEditorText, resolveSelectionBounds])
 
+  // NOT debounced, and not a candidate for it. This looks like a passive
+  // display -- it draws the is-active class on one toolbar button -- but it
+  // also decides whether insertTableOfContents inserts or removes, and gates
+  // the layout effect below that regenerates the table of contents as the
+  // note changes. A stale value makes the button do the wrong thing on a
+  // click and delays regeneration; verifyChapterTocButtonFix catches exactly
+  // that, and did.
+  //
+  // Its cost is instead bounded by the necessary-condition guard inside
+  // noteHasTableOfContents: a note with no table of contents at all -- almost
+  // all of them -- is ruled out by one allocation-free substring scan.
   const isTableOfContentsActive = useMemo(
     () => noteHasTableOfContents(currentEditorText, tocTitleLevel, tocLevel),
     [currentEditorText, tocTitleLevel, tocLevel],

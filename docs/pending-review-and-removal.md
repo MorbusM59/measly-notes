@@ -240,3 +240,76 @@ overwriting the live document is a symptom fix.
 
 **Noticed.** While removing the per-keystroke `doc.toJSON().join('\n')` from
 that same effect.
+
+### CM6Editor's passive scrollbar-sync rAF loop
+
+**What.** `runPassiveSync` in `CM6Editor.tsx` — an unconditional
+`requestAnimationFrame` loop, started on mount and never stopped, that reads
+`scrollTop`, `scrollHeight`, `clientHeight` and the track's `clientHeight`
+every frame and re-syncs the custom scrollbar when any of them changed. Its
+own comment says it exists to catch "anything those miss (e.g. scrollHeight
+drift from an async font load reflow)".
+
+**Why it is suspect.** It is a 60Hz poll standing in for events that exist. Of
+the four values it watches, `scrollTop` already has a scroll listener,
+`clientHeight` is already covered by the ResizeObserver on `view.scrollDOM`,
+and the two genuinely unwatched ones — `scrollHeight` and the track height —
+would be covered by observing `view.contentDOM` and the track element. So the
+poll is a stand-in for two missing `ResizeObserver.observe` calls.
+
+Measured cost is modest and should not be oversold: ~55ms of self-time across
+a 5.8-second typing profile, roughly 1% of a core, continuous, whether or not
+anything is happening. It reads layout every frame, but in practice the caret
+update's own rAF has usually already flushed layout in the same frame, so it
+is probably not adding a forced reflow on top — that was assumed and then
+reasoned away, not measured.
+
+**What would have to be true to remove it.** Two things, and the second is the
+reason this was parked rather than done. First, establish that a
+ResizeObserver on `contentDOM` plus one on the track really does fire for
+every case the poll catches — the font-load reflow it names, and whatever
+else went unnamed. Second, replace what the loop is *also* quietly doing:
+it reads `viewRef.current` each frame and simply retries when the view or
+track is not mounted yet, so it doubles as the mount-readiness wait. An
+effect that runs once needs that handled explicitly.
+
+Verify against the live scrollbar scripts (`verifyPreviewCharThumb`,
+`verifyScrollbarSemantics`, `verifyEndOfTrackClick`, `verifyScrollSync`), not
+by reasoning — this surface has a documented history of races where the thumb
+stays hidden at 0/0.
+
+**Noticed.** Auditing what remains per keystroke after the input-pipeline
+rebuild; it showed up as continuous background cost rather than keystroke cost.
+
+### The table-of-contents regeneration layout effect
+
+**What.** The `useLayoutEffect` in `useMarkdownFormattingToolbar.ts` that keeps
+a note's table of contents in sync with its headings. It is keyed on
+`currentEditorText`, so in a note that HAS a table of contents it runs on every
+keystroke and does three full-document passes —
+`removeTableOfContentsAndAnchors`, `buildTableOfContentsInsertion`, and a
+string comparison of the result against the current text — before deciding,
+almost always, to do nothing.
+
+**Why it is suspect.** This is the same shape as everything the input-pipeline
+rebuild removed: work proportional to the whole note, on every keypress, to
+answer a question whose answer changes rarely. It has never appeared in any
+profile from this effort, and that is the point — `measureTypeLatency`'s
+synthetic fixtures contain no table of contents, so the effect returns at its
+`isTableOfContentsActive` guard and the cost is invisible. Every user with a
+table of contents in a large note pays it and no measurement here has ever
+seen it.
+
+**What would have to be true to fix it.** First measure it, with a fixture
+that actually has a table of contents — the number is currently unknown and
+should not be guessed at. Then the likely fix is that the effect needs to run
+when the *headings* changed, not when the text changed: the edit is now
+available (`EditorTextChangeEvent.edit`), so an edit that touches no heading
+line cannot change the table of contents. Debouncing is the tempting
+alternative and is more dangerous than it looks — see the sibling note below
+about `isTableOfContentsActive`, where exactly that was tried and broke the
+button, caught by `verifyChapterTocButtonFix`.
+
+**Noticed.** While auditing what remains per keystroke after the input-pipeline
+rebuild, after mistakenly debouncing `isTableOfContentsActive` and having the
+live test reject it.
