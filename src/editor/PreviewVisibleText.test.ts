@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildPreviewVisibleTextProjection, mapVisibleOffsetToSourceOffset } from './PreviewVisibleText'
 import { buildDocumentFindHits, buildPreviewVisibleDocumentFindHits } from './FindReplaceEngine'
-import { createPreviewSearchHighlightRehypePlugin } from './PreviewMarkdown'
+import { createPreviewSearchHighlightRehypePlugin, type RehypeAstNode } from './PreviewMarkdown'
 import { invalidatePreviewVirtualizerMeasurementsAfterIndex } from '../editorSection/usePreviewMarkdownRendering'
 
 describe('buildPreviewVisibleTextProjection', () => {
@@ -49,12 +49,12 @@ describe('buildPreviewVisibleTextProjection', () => {
 describe('createPreviewSearchHighlightRehypePlugin', () => {
   it('caps expensive DOM splitting when a single text node has too many matches', () => {
     const text = 'a'.repeat(300)
-    const tree = { type: 'root', children: [{ type: 'text', value: text }] }
+    const tree: RehypeAstNode = { type: 'root', children: [{ type: 'text', value: text }] }
 
-    createPreviewSearchHighlightRehypePlugin('a', false)()(tree as any)
+    createPreviewSearchHighlightRehypePlugin('a', false)()(tree)
 
     expect(tree.children).toHaveLength(1)
-    expect(tree.children[0]).toEqual({ type: 'text', value: text })
+    expect(tree.children?.[0]).toEqual({ type: 'text', value: text })
   })
 })
 
@@ -64,7 +64,7 @@ describe('invalidatePreviewVirtualizerMeasurementsAfterIndex', () => {
       itemSizeCache: new Map<number, number>([[0, 10], [1, 20], [2, 30], [3, 40]]),
       laneAssignments: new Map<number, number>([[0, 0], [1, 1], [2, 0], [3, 1]]),
       measurementsCache: [{ index: 0 }, { index: 1 }, { index: 2 }, { index: 3 }],
-    } as any
+    }
 
     invalidatePreviewVirtualizerMeasurementsAfterIndex(virtualizer, 2)
 

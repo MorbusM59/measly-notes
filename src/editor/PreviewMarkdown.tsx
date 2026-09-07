@@ -13,7 +13,8 @@ import { GROUP_MARKER_PREFIX, GROUP_MARKER_SUFFIX } from '../shared/openItemsTex
 // The rehype plugins below walk/splice hast trees generically across
 // root/element/text nodes without narrowing to hast's discriminated union,
 // so they share this loose structural shape instead of `any`.
-interface RehypeAstNode {
+/** Exported so tests can build a tree the plugin accepts without casting through `any`. */
+export interface RehypeAstNode {
   type: string
   value?: string
   tagName?: string

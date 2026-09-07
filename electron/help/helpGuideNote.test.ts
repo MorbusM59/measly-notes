@@ -30,7 +30,11 @@ describe('ensureHelpGuide', () => {
     // Fresh DBs already get the welcome note seeded during initialization, so
     // remove that seeded row and then simulate the real startup state: guide
     // family present, no real user note yet.
-    const raw = (db as any).requireDb() as { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } }
+    // requireDb is private on DatabaseService; this reaches past that
+    // deliberately to set up the startup state under test. Cast through
+    // `unknown` rather than `any` so the shape being relied on is still
+    // stated, and a change to it is still a type error.
+    const raw = (db as unknown as { requireDb: () => { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } } }).requireDb()
     raw.prepare('DELETE FROM notes WHERE id = ?').run('26-07-04_00-00_WELCOME00')
     raw.prepare('DELETE FROM notes_fts WHERE noteId = ?').run('26-07-04_00-00_WELCOME00')
 

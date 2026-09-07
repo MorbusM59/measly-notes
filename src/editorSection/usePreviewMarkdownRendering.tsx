@@ -313,18 +313,38 @@ interface PreviewMarkdownBlockProps {
   components: ReturnType<typeof createPreviewMarkdownComponents>
 }
 
+/**
+ * The shape of the react-virtual internals this function clears.
+ *
+ * Hand-written rather than imported because these are the library's own
+ * private fields -- `laneAssignments` is literally declared `private`, which
+ * no structural type can match, and `itemSizeCache` is keyed by a type that
+ * includes `bigint`. Describing them accurately in TypeScript is not
+ * possible; reaching for them is the whole point of this function.
+ */
+interface PreviewVirtualizerInternals {
+  itemSizeCache?: Map<unknown, number>
+  laneAssignments?: Map<number, number>
+  measurementsCache?: Array<{ index?: number } | undefined>
+  pendingMin?: number | null
+}
+
+/**
+ * Takes `unknown` so the one unavoidable cast lives here, in the function
+ * that knowingly pokes at library internals, rather than at each call site.
+ *
+ * A narrower parameter type was tried and is why `tsc` -- and therefore
+ * `npm run build` -- failed: a real virtualizer could not be assigned to it,
+ * even though every call site was passing exactly the right object.
+ */
 export function invalidatePreviewVirtualizerMeasurementsAfterIndex(
-  virtualizer: {
-    itemSizeCache?: Map<number | string, number>
-    laneAssignments?: Map<number, number>
-    measurementsCache?: Array<{ index?: number } | undefined>
-    pendingMin?: number | null
-  } | null | undefined,
+  virtualizer: unknown,
   index: number,
 ): void {
-  if (!virtualizer || !Number.isFinite(index) || index < 0) return
+  const internals = virtualizer as PreviewVirtualizerInternals | null | undefined
+  if (!internals || !Number.isFinite(index) || index < 0) return
 
-  const itemSizeCache = virtualizer.itemSizeCache
+  const itemSizeCache = internals.itemSizeCache
   if (itemSizeCache instanceof Map) {
     for (const key of Array.from(itemSizeCache.keys())) {
       if (typeof key === 'number' && key >= index) {
@@ -333,24 +353,25 @@ export function invalidatePreviewVirtualizerMeasurementsAfterIndex(
     }
   }
 
-  const laneAssignments = virtualizer.laneAssignments
+  const laneAssignments = internals.laneAssignments
   if (laneAssignments instanceof Map) {
     for (const laneIndex of Array.from(laneAssignments.keys())) {
       if (laneIndex >= index) laneAssignments.delete(laneIndex)
     }
   }
 
-  if (Array.isArray(virtualizer.measurementsCache)) {
-    for (let i = index; i < virtualizer.measurementsCache.length; i += 1) {
-      if (virtualizer.measurementsCache[i]?.index !== undefined) {
-        virtualizer.measurementsCache[i] = undefined
+  const measurementsCache = internals.measurementsCache
+  if (Array.isArray(measurementsCache)) {
+    for (let i = index; i < measurementsCache.length; i += 1) {
+      if (measurementsCache[i]?.index !== undefined) {
+        measurementsCache[i] = undefined
       }
     }
   }
 
-  const pendingMin = (virtualizer as { pendingMin?: number | null }).pendingMin
+  const pendingMin = internals.pendingMin
   if (pendingMin === null || pendingMin === undefined || pendingMin > index) {
-    ;(virtualizer as { pendingMin: number }).pendingMin = index
+    internals.pendingMin = index
   }
 }
 
@@ -895,10 +916,12 @@ export function usePreviewMarkdownRendering({
 
     virtualizer.scrollToIndex(index, { align: opts?.align ?? 'start', behavior: opts?.behavior })
     return true
-  // blockCharOffsetsRef is declared further down the file, so naming it here
-  // is a temporal dead zone error even though it is a stable ref the body may
-  // freely read at call time.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // blockCharOffsetsRef is deliberately absent from the deps: it is declared
+  // further down the file, so naming it here would be a temporal dead zone
+  // error, even though it is a stable ref the body may freely read at call
+  // time. exhaustive-deps exempts refs, so this needs no suppression -- an
+  // eslint-disable that sat here was reported as unused by the project's own
+  // --report-unused-disable-directives lint run.
   }, [virtualizer])
 
   // See UsePreviewMarkdownRenderingOptions.previewScrollToSourceLineRef --
