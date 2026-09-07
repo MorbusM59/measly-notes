@@ -4732,13 +4732,22 @@ export function CM6Editor({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    // toJSON().join('\n') instead of toString() -- same fix, same reason as
-    // the updateListener's own text production above: this effect is keyed
-    // on `initialText`, which changes every keystroke (mirrors
-    // NoteTextHydrationPlugin.tsx's own hydration-check effect on the
-    // Lexical side), so toString()'s ConsString-then-flatten-on-compare
-    // cost would otherwise be paid here too, every keystroke.
-    const currentText = view.state.doc.toJSON().join('\n');
+    // previousTextRef.current, not a freshly materialized doc string. The
+    // updateListener sets it from the very same document on every
+    // docChanged transaction (this effect's own hydration dispatch
+    // included), which is the property all five transform handlers already
+    // rely on. Materializing it again here -- this effect is keyed on
+    // `initialText`, so it runs every keystroke -- cost an O(document)
+    // toJSON().join per keypress to reproduce a string the editor was
+    // already holding.
+    //
+    // It also makes the equality check below O(1) in the common case rather
+    // than O(document): during typing, `initialText` IS the string the
+    // updateListener produced and handed to React, so the two are the same
+    // object and `===` short-circuits on identity. A rebuilt copy is a
+    // distinct object with equal contents, which is the one case string
+    // comparison has to walk in full.
+    const currentText = previousTextRef.current;
     const isNoteSwitch = lastHydratedNoteIdRef.current !== (noteId ?? null);
     if (!isNoteSwitch && currentText === initialText) return;
 

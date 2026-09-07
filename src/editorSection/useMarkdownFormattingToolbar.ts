@@ -59,8 +59,26 @@ function isTableOfContentsHeadingLine(line: string, tocLevel: number): boolean {
   return heading.text === 'Table of Contents' || heading.text === '[Table of Contents](#toc)'
 }
 
+/**
+ * Both heading forms this recognizes -- `Table of Contents` and
+ * `[Table of Contents](#toc)` -- contain this literal, so a note without it
+ * cannot have a table of contents. A necessary condition, not a heuristic:
+ * when it fails the answer is exactly `false`, and when it passes the full
+ * scan below still decides.
+ */
+const TABLE_OF_CONTENTS_LABEL = 'Table of Contents'
+
 function noteHasTableOfContents(sourceText: string, titleLevel: number | null, tocLevel: number): boolean {
-  const lines = normalizeInternalText(sourceText).split('\n')
+  // isTableOfContentsActive re-runs this on EVERY keystroke to decide
+  // whether one toolbar button draws as active. Splitting the whole
+  // document to answer that cost ~30k substring allocations per keypress on
+  // a large note; a single native substring scan with no allocation rules
+  // out every note that has no TOC at all, which is almost all of them.
+  if (!sourceText.includes(TABLE_OF_CONTENTS_LABEL)) return false
+
+  // Canonical by construction (CanonicalTextFilter.ts's document invariant),
+  // so no normalization pass over the document is needed here either.
+  const lines = sourceText.split('\n')
   const titleIndex = findOwnTitleLineIndex(lines, titleLevel)
   let inFence = false
 
