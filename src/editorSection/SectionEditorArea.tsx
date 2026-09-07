@@ -16,6 +16,7 @@ import { ChapterBar } from '../chapters/ChapterBar'
 import { isSealedNoteId } from '../shared/helpGuide'
 import type { ChapterPillSplitArm } from '../chapters/useChapterPillActions'
 import { EscapeHoldPanel } from './EscapeHoldPanel'
+import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
 
 export interface SectionEditorAreaProps {
   sectionId: string
@@ -43,6 +44,8 @@ export interface SectionEditorAreaProps {
   onEscapeHoldExportPdf: () => void | Promise<void>
   onEscapeHoldExportMd: () => void | Promise<void>
   onEscapeHoldOpenHelp: () => void | Promise<void>
+  /** Passed straight through to EscapeHoldPanel -- see its own `escapeMenu` prop and escapeMenuContract.ts. */
+  escapeMenu?: EscapeMenuContribution | null
   isExportingPdf: boolean
   isExportingMd: boolean
   /** Live user-configurable corner-radius/spacing base units (options menu sliders) -- threaded through so the escape-hold ring (escapeHoldRingLayout.ts) recomputes to match .editor-empty-state's actual on-screen shape instead of drifting from a stale hardcoded mirror. */
@@ -178,6 +181,7 @@ export function SectionEditorArea({
   onEscapeHoldExportPdf,
   onEscapeHoldExportMd,
   onEscapeHoldOpenHelp,
+  escapeMenu,
   isExportingPdf,
   isExportingMd,
   borderRadiusRegularPx,
@@ -429,6 +433,7 @@ export function SectionEditorArea({
                 onExportPdf={onEscapeHoldExportPdf}
                 onExportMd={onEscapeHoldExportMd}
                 onOpenHelp={onEscapeHoldOpenHelp}
+                escapeMenu={escapeMenu}
                 onClose={onEscapeHoldPanelClose}
               />
             </div>

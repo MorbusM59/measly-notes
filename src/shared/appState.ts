@@ -1,3 +1,4 @@
+import type { AdventureSession } from '../adventure/types';
 import type { TextureMaterialsBySurface, TextureSurfaceKey } from '../textures/types';
 import type { GlazeSettings } from './glaze';
 
@@ -218,6 +219,13 @@ export interface PersistedMenuState {
    * whatever was visible before.
    */
   reviewFlagsVisibleBySection?: Record<string, boolean>;
+  /**
+   * The saved adventure run (src/adventure), or null when there is none.
+   * Structurally sanitized on both sides of the bridge -- sanitizeMenu in
+   * electron/stateService.ts for the real app, and again in App.tsx's
+   * restore, since the browser-mode mock never calls sanitizeMenu at all.
+   */
+  adventure?: AdventureSession | null;
 }
 
 // Persisted boundary/scroll position as integer line counts. See

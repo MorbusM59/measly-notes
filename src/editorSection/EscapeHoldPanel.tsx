@@ -11,6 +11,7 @@ import {
 import { buildEscapeHoldRotationPlan, pixelsPerSlotAt } from './escapeHoldRotationCurve'
 import { computeEscapeHoldPointAtSlot } from './escapeHoldRingLayout'
 import type { EscapeHoldRingParams } from './escapeHoldRingLayout'
+import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
 
 // Two staggered setTimeout delays, not rAF (see the doc comments on the
 // effect and handler that use these) -- setTimeout with different delays
@@ -65,11 +66,24 @@ export interface EscapeHoldPanelProps {
   onExportMd: () => void | Promise<void>
   onOpenHelp: () => void | Promise<void>
   onClose: () => void
+  /**
+   * Cells contributed by a feature that lives inside this ring rather than
+   * merely being launched from it -- see escapeMenuContract.ts for the full
+   * contract. `entryCells` join the quick actions below; a non-null
+   * `activeMode` replaces them entirely for as long as it is up. Absent (or
+   * empty) means the ring behaves exactly as it always has, which is what
+   * every caller that has no such feature passes.
+   */
+  escapeMenu?: EscapeMenuContribution | null
 }
 
 interface PanelCell {
+  /** Stable identity: the React key, so a cell that survives a rebuild keeps its DOM node and its focus. */
+  id: string
   label: string
   icon: string
+  /** When set, activating this cell leaves the menu up -- see EscapeMenuCell.keepsMenuOpen. */
+  keepsMenuOpen?: boolean
   onSelect: () => void | Promise<void>
 }
 
@@ -185,6 +199,19 @@ interface PanelCell {
  * the panel (`runCell`); rotation is a keyboard-only way to browse without
  * committing, not a prerequisite for activating by mouse.
  *
+ * The ring is no longer exclusively its own: the `escapeMenu` prop lets a
+ * feature contribute extra cells to it, or take it over entirely for a
+ * while (escapeMenuContract.ts). A takeover -- a "mode" -- supplies the
+ * cells, the centre's prompt and status line, and a `stepKey` that says
+ * when the ring has moved on to a new decision; everything else here is
+ * unchanged, because a mode is meant to be cheap to write and must not
+ * have to reimplement the dial. Two consequences worth knowing: a cell can
+ * opt out of closing the menu (`keepsMenuOpen`), which is what lets a mode
+ * take input repeatedly, and `ringResetKey` folds "a mode advanced a step"
+ * into the same reset/focus path as "the panel opened" -- see its own doc
+ * comment, and the focus-follow effect's, for why the focus half of that is
+ * load-bearing rather than tidiness.
+ *
  * A small label sits centered inside the ring showing whichever cell's name
  * is currently relevant: `hoveredIndex` (mouse-only, set/cleared by each
  * button's own onMouseEnter/onMouseLeave, independent of focus) takes
@@ -247,23 +274,43 @@ export function EscapeHoldPanel({
   onExportMd,
   onOpenHelp,
   onClose,
+  escapeMenu,
 }: EscapeHoldPanelProps) {
   const hasActiveNote = Boolean(activeNoteId)
+  const activeMode = escapeMenu?.activeMode ?? null
+
+  // What "the ring now shows a different set of things" means, as one
+  // value: opening it, and (while a mode is up) that mode advancing to its
+  // next step. The reset layout effect and the focus-follow effect below
+  // both key off it, so a step change is handled by exactly the same code
+  // path as an open -- dial back to the top, animation cancelled, focus
+  // grabbed onto the new top cell. Focus in particular is not optional
+  // housekeeping here: a mode's cells are new DOM nodes on every step, and
+  // a ring that loses focus to <body> closes itself (handleRingBlur), which
+  // would end the mode on its first choice.
+  const ringResetKey = `${isOpen ? 'open' : 'closed'}:${activeMode?.id ?? ''}:${activeMode?.stepKey ?? ''}`
 
   const cells = useMemo<PanelCell[]>(() => {
+    // A mode owns the whole ring while it is up -- see the escapeMenu prop.
+    // Returning early rather than merging is what lets a mode be written
+    // without knowing which quick actions happen to be available behind it.
+    if (activeMode) return activeMode.cells
     const candidates = [
-      { label: 'New Note', icon: 'fa-solid fa-file', onSelect: onCreateNote, disabled: false },
-      { label: 'New Chapter', icon: 'fa-solid fa-bookmark', onSelect: onCreateChapter, disabled: !hasActiveNote || isActiveNoteTimeless },
+      { id: 'new-note', label: 'New Note', icon: 'fa-solid fa-file', onSelect: onCreateNote, disabled: false },
+      { id: 'new-chapter', label: 'New Chapter', icon: 'fa-solid fa-bookmark', onSelect: onCreateChapter, disabled: !hasActiveNote || isActiveNoteTimeless },
       // Mirrors EditorToolbar.tsx's own (now-removed) isPreviewMode gate:
       // PDF export only in render view, MD export only in edit view -- each
       // one only makes sense against the mode it actually reflects, so the
       // other simply drops out (see isPreviewMode's own doc comment above).
-      { label: 'Export PDF', icon: 'fa-solid fa-file-pdf', onSelect: onExportPdf, disabled: !hasActiveNote || isExportingPdf || !isPreviewMode },
-      { label: 'Export MD', icon: 'fa-solid fa-file-code', onSelect: onExportMd, disabled: !hasActiveNote || isExportingMd || isPreviewMode },
-      { label: 'User Guide', icon: 'fa-solid fa-graduation-cap', onSelect: onOpenHelp, disabled: false },
+      { id: 'export-pdf', label: 'Export PDF', icon: 'fa-solid fa-file-pdf', onSelect: onExportPdf, disabled: !hasActiveNote || isExportingPdf || !isPreviewMode },
+      { id: 'export-md', label: 'Export MD', icon: 'fa-solid fa-file-code', onSelect: onExportMd, disabled: !hasActiveNote || isExportingMd || isPreviewMode },
+      { id: 'user-guide', label: 'User Guide', icon: 'fa-solid fa-graduation-cap', onSelect: onOpenHelp, disabled: false },
     ]
-    return candidates.filter((candidate) => !candidate.disabled)
-  }, [hasActiveNote, isActiveNoteTimeless, isPreviewMode, isExportingPdf, isExportingMd, onCreateNote, onCreateChapter, onExportPdf, onExportMd, onOpenHelp])
+    // Contributed entry cells are appended, not interleaved: the built-in
+    // note actions keep their familiar order and position regardless of
+    // what else is currently reachable from here.
+    return [...candidates.filter((candidate) => !candidate.disabled), ...(escapeMenu?.entryCells ?? [])]
+  }, [activeMode, escapeMenu, hasActiveNote, isActiveNoteTimeless, isPreviewMode, isExportingPdf, isExportingMd, onCreateNote, onCreateChapter, onExportPdf, onExportMd, onOpenHelp])
 
   const [topIndex, setTopIndex] = useState(0)
   // Which cell is focused/tabbable -- deliberately separate state from
@@ -526,7 +573,7 @@ export function EscapeHoldPanel({
     setTopIndex(0)
     setFocusedIndex(0)
     setHoveredIndex(null)
-  }, [isOpen])
+  }, [ringResetKey, isOpen])
 
   // Invalidates any pending rotation frame if this instance is ever
   // actually unmounted (rare -- see the component doc comment on why it's
@@ -585,7 +632,13 @@ export function EscapeHoldPanel({
       buttonRefs.current[focusedIndex]?.focus()
     }, FOCUS_GRAB_DELAY_MS)
     return () => window.clearTimeout(timeoutId)
-  }, [isOpen, focusedIndex])
+    // ringResetKey is a dependency for a reason the name does not give
+    // away: when a mode advances a step, focusedIndex is commonly already
+    // 0 and stays 0, so nothing in this effect's own inputs changes -- yet
+    // every button was just unmounted and replaced, taking DOM focus with
+    // it to <body>. Without re-running here, handleRingBlur would see focus
+    // outside every ring and close the panel on the player's first choice.
+  }, [isOpen, focusedIndex, ringResetKey])
 
   const directionFromKey = (event: KeyboardEvent<HTMLDivElement>): 1 | -1 | null => {
     if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') return -1
@@ -688,9 +741,14 @@ export function EscapeHoldPanel({
     playContinuationLeg(distance, finalizeTopIndex)
   }
 
+  // The ring's default is to close on activation: a quick action does its
+  // thing and gets out of the way. A cell that opens or advances a mode
+  // opts out (keepsMenuOpen), because the next input belongs here too --
+  // that is the whole difference between running an action and playing
+  // something in the menu.
   const runCell = (cell: PanelCell) => {
     void cell.onSelect()
-    onClose()
+    if (!cell.keepsMenuOpen) onClose()
   }
 
   // Deferred well past the focus-grab effect's own delay (BLUR_CLOSE_CHECK_
@@ -745,7 +803,24 @@ export function EscapeHoldPanel({
           --circle-diameter/--spacing-large/--btn-square-larger-size tokens
           the ring geometry itself is built from, so it never needs to be
           kept in sync by hand). */}
-      <div className="editor-escape-hold-label"><div className="editor-escape-hold-label-box">{displayedLabel}</div></div>
+      <div className={`editor-escape-hold-label${activeMode ? ' is-mode' : ''}`}>
+        <div className={`editor-escape-hold-label-box${activeMode ? ' is-mode' : ''}`}>
+          {activeMode ? (
+            <>
+              {/* The mode's standing question, the cell currently under
+                  focus/hover, and the mode's own running state -- three
+                  distinct things, so they are three elements rather than
+                  one concatenated string, and editor.css can size each for
+                  the very small circle they share. */}
+              <span className="editor-escape-hold-label-prompt">{activeMode.prompt}</span>
+              <span className="editor-escape-hold-label-choice">{displayedLabel}</span>
+              {activeMode.detail ? (
+                <span className="editor-escape-hold-label-detail">{activeMode.detail}</span>
+              ) : null}
+            </>
+          ) : displayedLabel}
+        </div>
+      </div>
       {cells.map((cell, index) => {
         // This cell's position around the ring relative to the current top
         // ("slot 0"), not its fixed array index -- rotating the dial is
@@ -758,7 +833,7 @@ export function EscapeHoldPanel({
         return (
           <button
             type="button"
-            key={cell.label}
+            key={cell.id}
             ref={(el) => { buttonRefs.current[index] = el }}
             className={`editor-escape-hold-panel-btn${reduceVisualEffects ? ' is-simple-rotation' : ''}`}
             style={{

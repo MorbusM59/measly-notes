@@ -140,7 +140,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 *A small on-editor grid for the note actions you reach for most, without leaving the keyboard.*
 
 - Keeps showing while you hold \`Esc\`; tapping \`Esc\` once more (or clicking outside it) dismisses it without doing anything.
-- Navigate with the arrow keys or \`Tab\`/\`Shift+Tab\`, then \`Enter\`/\`Space\` or a click to run the highlighted action. Running any action closes the menu.
+- Navigate with the arrow keys or \`Tab\`/\`Shift+Tab\`, then \`Enter\`/\`Space\` or a click to run the highlighted action. Running an action closes the menu -- unless it's something that carries on *inside* the menu, in which case the menu stays up and its cells change to whatever comes next.
 - Currently wired up: New Note, New Chapter, Export PDF, Export MD, Help (opens this page -- see [The User Guide]($#the-user-guide)). New Note and Help always work; New Chapter and the two Export actions grey out with no note open (or one that can't take them, like a read-only auto-generated chapter). The remaining grid cells are reserved for future actions.
 
 ### [The User Guide](#the-user-guide)
@@ -153,6 +153,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - Opens exactly like clicking any note in the sidebar does -- as a temporary tab, replacing whatever that slot was showing. Leave it the same way too: pick another note, click a pinned tab, or open a different note from the sidebar. There's no dedicated close gesture any more.
 - Browsable with the same chapter bar every note with chapters uses -- click a chapter pill to jump to it, or the bookmark icon for a full table of contents.
 - Always render-only: nothing here can be edited, renamed, tagged, archived, or deleted.
+- While you're reading the guide, holding \`Esc\` offers one extra thing: **New adventure!**, the flame icon. It's a small choose-your-path game played entirely in the quick actions menu -- each cell is a choice, the menu stays up as you make them, and the circle in the middle shows where you are and how you're doing. Leave whenever you like (the \`X\` cell, or dismiss the menu); the run is kept, and the guide's menu will offer **Continue adventure** until you finish it or start a new one over it.
 
 ### [Scrollbar Navigation](#scrollbar-navigation)
 

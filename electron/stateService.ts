@@ -8,6 +8,7 @@ import type {
   SidebarMode,
   WindowState,
 } from '../src/shared/appState';
+import { sanitizeAdventureSession } from '../src/adventure/session';
 import { DEFAULT_GLAZE_SETTINGS, sanitizeGlazeSettings } from '../src/shared/glaze';
 import { DEFAULT_TEXTURE_MATERIALS, TEXTURE_SURFACES, type TextureColorHsva, type TextureMaterialSettings, type TextureMaterialsBySurface, type TextureSurfaceKey } from '../src/textures/types';
 import { DEFAULT_UI_FONT_KEY, DEFAULT_UI_FONT_SCALE, UI_FONT_OPTIONS, UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX, roundUiFontScale, type UiFontKey } from '../src/shared/UiTypography';
@@ -536,6 +537,11 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     spellCheckEnabled: Boolean(input?.spellCheckEnabled ?? false),
     chapterBarMode: sanitizeChapterBarMode(input?.chapterBarMode),
     isSidebarVisible: typeof input?.isSidebarVisible === 'boolean' ? input.isSidebarVisible : true,
+    // Content-blind on purpose: this side of the bridge can only check that
+    // a saved run is structurally a run. Whether its story still exists is
+    // decided in the renderer, where the content lives -- see
+    // src/adventure/session.ts's module comment.
+    adventure: sanitizeAdventureSession(input?.adventure),
     guideView: sanitizeGuideView(input?.guideView),
     undockedNote: sanitizeUndockedNote(input?.undockedNote),
     // Was missing entirely until this line -- sanitizeMenu (routed through

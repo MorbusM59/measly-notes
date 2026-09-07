@@ -162,6 +162,9 @@ import { normalizeInternalText } from './editor/TextPolicy'
 import { truncateTitle } from './shared/textSanitization'
 import { deriveNoteTitleFromText } from './shared/noteTitle'
 import { isNoteSearchQueryActive, matchesNoteSearchQuery } from './shared/noteSearch'
+import { useAdventureEscapeMenu } from './adventure/useAdventureEscapeMenu'
+import { sanitizeAdventureSession } from './adventure/session'
+import type { AdventureSession } from './adventure/types'
 import { ESCAPE_HOLD_MS } from './shared/escapeHold'
 import { HELP_GUIDE_NOTE_IDS, HELP_GUIDE_ROOT_ID } from './shared/helpGuide'
 import {
@@ -2135,6 +2138,14 @@ function App() {
   ])
   /** Which slot is currently showing the User Guide and what it was showing before. */
   const [guideView, setGuideView] = useState<{ sectionId: string; previousNoteId: string | null } | null>(null)
+  /**
+   * The saved adventure run, if any (src/adventure) -- the game reachable
+   * from the escape-hold menu while the User Guide is open. Lives here
+   * rather than inside the game module because it is persisted app state
+   * like everything else around it, and a run has exactly one home; see
+   * useAdventureEscapeMenu.ts's module comment.
+   */
+  const [adventureSession, setAdventureSession] = useState<AdventureSession | null>(null)
   /** The note currently shown as an undocked overlay in a section slot. */
   const [undockedNote, setUndockedNote] = useState<{
     noteId: string
@@ -4093,6 +4104,7 @@ function App() {
     isDoubleSizeMode?: boolean
     reviewGutterVisibleBySection?: Record<string, boolean>
     reviewFlagsVisibleBySection?: Record<string, boolean>
+    adventure?: AdventureSession | null
   }): PersistedMenuState => {
     const effectiveViewStateByMode = overrides?.sidebarViewStateByMode ?? sidebarViewStateByMode
 
@@ -4207,6 +4219,12 @@ function App() {
       isDoubleSizeMode: overrides?.isDoubleSizeMode ?? isDoubleSizeMode,
       reviewGutterVisibleBySection: overrides?.reviewGutterVisibleBySection ?? reviewGutterVisibleBySection,
       reviewFlagsVisibleBySection: overrides?.reviewFlagsVisibleBySection ?? reviewFlagsVisibleBySection,
+      // Presence-checked rather than `overrides?.adventure ?? adventureSession`:
+      // null is a MEANINGFUL override here (dismissing a finished run), and
+      // `??` would quietly discard it in favour of the state value this
+      // closure captured -- which, on the very call that clears a run, is
+      // still the run being cleared.
+      adventure: overrides && 'adventure' in overrides ? overrides.adventure ?? null : adventureSession,
       // Machine-level performance prefs, deliberately NOT part of
       // UiLayoutLoadout -- these must survive switching between layouts
       // rather than being reset to whatever each layout last had stored.
@@ -4288,6 +4306,7 @@ function App() {
     viewStyle,
     guideView,
     undockedNote,
+    adventureSession,
   ])
 
   /**
@@ -5587,6 +5606,34 @@ ${markdownHtml}
     await openGuideViewHere()
   }, [guideView, activeSectionId, closeGuideView, openGuideViewHere])
 
+  /**
+   * Writes a run through the one correct immediate-persist path
+   * (persistMenuStateNow, per CLAUDE.md) as well as into React state. Every
+   * committed choice comes through here, so a run is on disk before the
+   * ring has finished repainting -- the game's whole promise is that
+   * closing the app mid-adventure costs nothing, and a choice the player
+   * made and the app then forgot is the one failure it cannot recover from.
+   */
+  const commitAdventureSession = useCallback((next: AdventureSession | null) => {
+    setAdventureSession(next)
+    persistMenuStateNow({ adventure: next })
+  }, [persistMenuStateNow])
+
+  /**
+   * The escape-hold ring's contributed cells and (while one is playing)
+   * its takeover by the adventure game -- see
+   * src/escapeMenu/escapeMenuContract.ts. App.tsx supplies the two facts
+   * the game cannot know for itself (is the menu up, and does it currently
+   * belong to the User Guide) plus the saved run; everything else is the
+   * module's own.
+   */
+  const escapeMenuContribution = useAdventureEscapeMenu({
+    isGuideActive: guideView !== null && guideView.sectionId === activeSectionId,
+    isMenuOpen: isEscapeHoldPanelOpen,
+    session: adventureSession,
+    onCommitSession: commitAdventureSession,
+  })
+
   const isAllowedNonEditorFocusTarget = useCallback((target: EventTarget | null): boolean => {
     if (!(target instanceof HTMLElement)) return false
 
@@ -6075,6 +6122,13 @@ ${markdownHtml}
               find: sanitizeSidebarViewState(appState.menu.sidebarViewState?.find),
               options: sanitizeSidebarViewState(appState.menu.sidebarViewState?.options),
             }
+            // Sanitized again on this side deliberately: the browser-mode
+            // mock bridge clones saved state verbatim and never runs
+            // electron/stateService.ts's sanitizeMenu at all (CLAUDE.md),
+            // so this is the only structural check a dev:browser session
+            // ever gets -- and a malformed run must degrade to "no saved
+            // adventure", not to a crash on launch.
+            setAdventureSession(sanitizeAdventureSession(appState.menu.adventure))
             restoredGuideView = appState.menu.guideView ?? null
             restoredUndockedNote = appState.menu.undockedNote ?? null
             setGuideView(restoredGuideView)
@@ -9838,6 +9892,7 @@ ${markdownHtml}
                   onEscapeHoldExportPdf={handleExportPdf}
                   onEscapeHoldExportMd={handleExportMd}
                   onEscapeHoldOpenHelp={() => void handleHelpModeOpen()}
+                  escapeMenu={escapeMenuContribution}
                   isExportingPdf={isExportingPdf}
                   isExportingMd={isExportingMd}
                   borderRadiusRegularPx={borderRadiusRegularPx}

@@ -234,6 +234,7 @@ export function EditorSection({
   onEscapeHoldExportPdf,
   onEscapeHoldExportMd,
   onEscapeHoldOpenHelp,
+  escapeMenu,
   isExportingPdf,
   isExportingMd,
   borderRadiusRegularPx,
@@ -2160,6 +2161,7 @@ export function EditorSection({
         onEscapeHoldExportPdf={onEscapeHoldExportPdf}
         onEscapeHoldExportMd={onEscapeHoldExportMd}
         onEscapeHoldOpenHelp={onEscapeHoldOpenHelp}
+        escapeMenu={escapeMenu}
         isExportingPdf={isExportingPdf}
         isExportingMd={isExportingMd}
         borderRadiusRegularPx={borderRadiusRegularPx}

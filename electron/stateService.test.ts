@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { StateService } from './stateService'
+import { createSession } from '../src/adventure/engine'
+import { THE_LONG_MARGIN } from '../src/adventure/content/theLongMargin'
 
 // Regression coverage for the exact bug class this file is prone to:
 // sanitizeMenu (private, routed through by both saveAppState and
@@ -142,6 +144,38 @@ describe('StateService app-state field round-trip', () => {
     const loaded = await reader.loadAppState()
     expect(loaded.menu?.guideView).toEqual({ sectionId: 'section-1', previousNoteId: 'note-2' })
     expect(loaded.menu?.undockedNote).toEqual({ noteId: 'note-3', sectionId: 'section-1', previousNoteId: 'note-2' })
+  })
+
+  it('persists a saved adventure run across a save -> fresh-instance load, and drops a corrupt one', async () => {
+    // Same allowlist hazard as every test above, with one extra edge: this
+    // field is an object, so "present but structurally wrong" is a real
+    // possibility a boolean never had. A corrupt run must come back as
+    // absent -- the renderer already handles "no saved adventure" and
+    // would otherwise be handed a half-run to play.
+    const run = createSession(THE_LONG_MARGIN, { seed: 4242, nowMs: 1_700_000_000_000 })
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: { sidebarMode: 'date', selectedMonths: [], selectedYears: [], searchQuery: '', adventure: run },
+    })
+
+    const reader = new StateService(dataRoot)
+    expect((await reader.loadAppState()).menu?.adventure).toEqual(run)
+
+    const corruptWriter = new StateService(dataRoot)
+    await corruptWriter.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date',
+        selectedMonths: [],
+        selectedYears: [],
+        searchQuery: '',
+        adventure: { ...run, sceneId: 42 } as unknown as typeof run,
+      },
+    })
+
+    const corruptReader = new StateService(dataRoot)
+    expect((await corruptReader.loadAppState()).menu?.adventure).toBeNull()
   })
 
   it('persists the unified global spellcheck toggle across a save -> fresh-instance load', async () => {
