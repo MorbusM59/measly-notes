@@ -186,8 +186,7 @@ function toMarkdownInlineState(state: InlineScanState): MarkdownInlineState {
  * this exact same function starting partway through the document, with
  * initialState supplied by the cache, so the fast and slow paths can never
  * silently drift apart -- one implementation, two starting points, per this
- * codebase's own established FastParagraphResolver pattern in
- * SelectionOffsets.ts.
+ * codebase's own established fast-path/slow-path pattern.
  */
 function scanInlineStateFrom(text: string, startCursor: number, initialState: InlineScanState, offset: number): InlineScanState {
   const safeOffset = clamp(offset, 0, text.length)

@@ -195,9 +195,9 @@ import { resolveGlyphWidthPx } from '../editor/EditorTypography';
  * viewport-bound. `view.state.doc.toString()` (a full-document string
  * allocation) was called on every caret update via updateCaret's rAF
  * (docChanged/selectionSet/viewportChanged all schedule one), every
- * keyboard-refocus-caging reconcile, and every paste, purely to feed
- * CaretVisualPosition.ts/CaretTerminalOffset.ts's rawText parameter -- code
- * written for Lexical, where that's the cheapest available source. Replaced
+ * keyboard-refocus-caging reconcile, and every paste, purely to feed the
+ * `rawText` parameter of the Lexical-era caret-geometry helpers, where the
+ * whole document was the cheapest available source. Replaced
  * with resolveCM6CaretTopInScroll, a CM6-local equivalent using
  * view.state.doc.length and view.state.selection (both O(1)) plus a
  * bounded-length Text.sliceString tail probe instead of the whole document.
@@ -386,13 +386,10 @@ function applyTransformResult(view: EditorView, oldText: string, next: EditorTra
 }
 
 /**
- * CM6-native replacement for CaretVisualPosition.ts's resolveCaretTopInScroll
- * (written for Lexical, still used as-is by Editor.tsx/BlockCaretPlugin.tsx/
- * CagedScrollPlugin.tsx, which have a different, already-cheap rawText
- * source and don't share this defect -- kept CM6-local rather than changed
- * in those shared files).
+ * CM6-native replacement for the Lexical-era `resolveCaretTopInScroll`
+ * (removed along with the rest of that editor).
  *
- * The Lexical version needs the full canonical text string because Lexical
+ * That version needed the full canonical text string because Lexical
  * selection offsets are DOM-derived. CM6's own EditorState already carries
  * both facts any such check would need as O(1) values -- total document
  * length (view.state.doc.length) and whether the caret sits at that length
@@ -403,8 +400,8 @@ function applyTransformResult(view: EditorView, oldText: string, next: EditorTra
  * change via scheduleCaretUpdate's rAF), every keyboard-refocus-caging
  * reconcile, and every paste.
  *
- * Deliberately does NOT port CaretTerminalOffset.ts's
- * getTerminalTrailingVisualOffsetPx (a "+1 row per extra trailing newline"
+ * Deliberately does NOT carry over the Lexical-era
+ * `getTerminalTrailingVisualOffsetPx` (a "+1 row per extra trailing newline"
  * compensation for fallback-sourced caret rects at document end): that
  * compensates for a Lexical-specific quirk where consecutive trailing empty
  * paragraphs' DOM rects undercount by one row apiece. CM6 has no such
@@ -1803,7 +1800,7 @@ export function CM6Editor({
    * from the CM6 EditorView instead of Lexical's editor state. Two
    * deliberate differences from the original, both noted rather than
    * silently carried over or silently dropped:
-   * - No isRefocusTransactionActive/caged-scroll-settling guard yet -- the
+   * - No refocus-transaction/caged-scroll-settling guard yet -- the
    *   fixed-focus caging system (CagedScrollPlugin's own state machine)
    *   isn't ported here, so there's nothing to wait on yet. Revisit once it
    *   is.

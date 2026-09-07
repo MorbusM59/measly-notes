@@ -31,9 +31,10 @@ import type { EditorTextEdit } from './EditorContract'
  * Deliberately NOT a fancier structure (a rope, a Fenwick tree over line
  * lengths) to make that trailing shift sublinear. The shift is arithmetic on
  * a contiguous Float64/Smi array; the thing it replaced allocated a string
- * per line. Measure before adding a tree: this codebase already carries one
- * positional treap (`ParagraphOffsetIndex`) that was a real win for an
- * editor that no longer exists and has had zero consumers since.
+ * per line. Measure before adding a tree: this codebase carried a positional
+ * treap for years (`ParagraphOffsetIndex`, deleted once this landed) that was
+ * a genuine, well-tested win for an editor that no longer exists, and had
+ * zero consumers from the day that editor was removed.
  *
  * ## The invariant
  *

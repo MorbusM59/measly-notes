@@ -94,9 +94,8 @@ function readCollapsedCaretFromAdjacentContent(range: Range): SelectionRect | nu
 }
 
 // Walks up from `node` to the paragraph element (a direct child of rootEl)
-// that contains it -- mirrors the same "top-level child" notion used for
-// selection/offset mapping elsewhere (see BlockSelectionPlugin's
-// findTopLevelChild and SelectionOffsets' paragraph walking).
+// that contains it -- the same "top-level child" notion this file's own
+// findTopLevelChild uses for selection/offset mapping.
 function findParagraphElement(rootEl: HTMLElement, node: Node): HTMLElement | null {
   let current: Node | null = node;
   while (current && current.parentElement !== rootEl) {
