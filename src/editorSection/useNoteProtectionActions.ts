@@ -11,14 +11,6 @@ type NotePrimedAction = 'archive' | 'deletion'
 type ProtectedQuickReleaseAction = 'remove-archived' | 'remove-deleted' | null
 type SidebarModeForRemoval = 'date' | 'trash' | 'category' | 'archive' | 'find' | 'options'
 
-async function hashNormalizedText(text: string): Promise<string> {
-  const normalized = normalizeInternalText(text)
-  const encoder = new TextEncoder()
-  const data = encoder.encode(normalized)
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 export interface UseNoteProtectionActionsOptions {
   notes: NoteSummary[]
   activeNoteId: string | null
@@ -36,8 +28,6 @@ export interface UseNoteProtectionActionsOptions {
   sidebarMode: SidebarModeForRemoval
   activeNoteExternalPathRef: MutableRefObject<string | null>
   externalNoteOriginalTextByIdRef: MutableRefObject<Map<string, string>>
-  externalNoteOriginalHashByIdRef: MutableRefObject<Map<string, string>>
-  setCurrentExternalNoteHash: (updater: string | null | ((current: string | null) => string | null)) => void
   /** Called once a note is *permanently* removed from the DB (not archived/trashed) -- lets EditorSection.tsx evict any per-note-id caches (edit-mode restore snapshot, etc.) that would otherwise hold onto that id forever. */
   onNotePermanentlyDeleted?: (noteId: string) => void
   /** The chapter-aware "menu identity" note currently open in this section -- see useNoteChapters.ts's own doc comment. Used only to know whether a just-restored chapter's parent is the family currently on screen, so its chapter bar can be refreshed. */
@@ -70,8 +60,6 @@ export function useNoteProtectionActions({
   sidebarMode,
   activeNoteExternalPathRef,
   externalNoteOriginalTextByIdRef,
-  externalNoteOriginalHashByIdRef,
-  setCurrentExternalNoteHash,
   onNotePermanentlyDeleted,
   menuIdentityNoteId,
   refreshChapters,
@@ -161,17 +149,84 @@ export function useNoteProtectionActions({
     }
 
     const currentText = normalizeInternalText(latestEditorTextRef.current || activeNoteText)
-    const currentHash = await hashNormalizedText(currentText)
+
+    /**
+     * Whether the reader has typed since this save took its snapshot above.
+     *
+     * `currentText` is a photograph of the document taken before a long chain
+     * of awaits: a SHA-256 of the whole note, a file write with a read-back
+     * verification, an IPC round trip, and a database save. On a large note
+     * that chain runs for hundreds of milliseconds or more, and the reader is
+     * still typing through all of it.
+     *
+     * Every write-back below used to publish that photograph unconditionally
+     * -- into `latestEditorTextRef`, into `activeNoteText`, and so, by way of
+     * CM6Editor's hydration effect, into the LIVE DOCUMENT. Anything typed
+     * during the save was deleted by it. That is the reported bug: hold Enter
+     * on a large external note and the blank lines are taken back off you, in
+     * one case 54 of them at once, sometimes permanently.
+     *
+     * So the rule is: this save may report what it WROTE, but it may never
+     * roll the editor back to it. The bytes on disk are still correct -- they
+     * are `currentText` -- the note simply has unsaved changes again the
+     * instant the reader types during a save, which is exactly true.
+     */
+    const hasLiveTextMovedOn = (): boolean => (
+      normalizeInternalText(latestEditorTextRef.current || activeNoteText) !== currentText
+    )
 
     console.debug('[external-note] explicit save path starting', {
       noteId,
       externalPath,
       textLength: currentText.length,
-      hash: currentHash,
       activeNoteId,
     })
 
+    // ---- Reconcile with the file BEFORE overwriting it -------------------
+    //
+    // The note's baseline is the last recorded state of the file. If what is
+    // on disk now differs from it, somebody else edited the file since this
+    // app last looked, and the write below is about to destroy that. So it
+    // goes onto the timeline first, stamped with the FILE's own modified time
+    // and marked as coming from disk -- a heavier mark the reader can find and
+    // restore from. Preserving it costs one read; not preserving it costs
+    // somebody else's work.
+    //
+    // Deliberately before the write and not after: a check that runs after the
+    // overwrite can only ever confirm its own handiwork.
+    const baselineText = externalNoteOriginalTextByIdRef.current.get(noteId)
+    try {
+      const diskBefore = await window.thockdownExternalFiles.readFileSnapshot(externalPath)
+      if (diskBefore) {
+        const diskBeforeNormalized = normalizeInternalText(diskBefore.content)
+        if (baselineText !== undefined && diskBeforeNormalized !== baselineText) {
+          await window.thockdownNotes.saveNoteSnapshot({
+            id: noteId,
+            content: diskBeforeNormalized,
+            isManual: true,
+            isFromDisk: true,
+            timestamp: new Date(diskBefore.modifiedAtMs).toISOString(),
+          })
+          console.warn('[external-note] file changed on disk since this note last saw it -- preserved on the timeline before overwriting', {
+            noteId,
+            externalPath,
+            diskLength: diskBeforeNormalized.length,
+            baselineLength: baselineText.length,
+            modifiedAtMs: diskBefore.modifiedAtMs,
+          })
+        }
+      }
+    } catch (error) {
+      // A failed reconciliation must not block the save -- the reader's own
+      // content is the thing that must not be lost here.
+      console.error('[external-note] pre-write disk reconciliation failed', { noteId, externalPath, error })
+    }
+
     let diskSanityText: string | null = null
+    // The file's own modified time as of the post-write read, so the baseline
+    // snapshot recorded below is stamped with when the FILE changed rather
+    // than when this code happened to run.
+    let diskSanityModifiedAtMs: number | null = null
     let writeSucceeded = false
     let writeAttemptedViaNoteApi = false
     let writeAttemptedViaExternalApi = false
@@ -209,15 +264,22 @@ export function useNoteProtectionActions({
         writeAttemptedViaExternalApi,
       })
     } else {
-      latestEditorTextRef.current = currentText
+      // Only when nothing has been typed since the snapshot -- otherwise this
+      // assignment walks the app's own newest-text ref BACKWARDS, and every
+      // consumer of it (including the editor's hydration path) follows.
+      if (!hasLiveTextMovedOn()) {
+        latestEditorTextRef.current = currentText
+      }
       try {
         const savedSummary = await window.thockdownNotes.saveNote({ id: noteId, text: currentText })
         console.debug('[external-note] saveExternalNoteToFile persisted temp note text into DB', { noteId, externalPath, savedSummary })
 
         const nextSummary = syncedSummary ?? savedSummary
+        // Typing during the save means the note genuinely HAS unsaved changes
+        // again -- what went to disk is already one edit behind.
         const normalizedNextSummary = {
           ...nextSummary,
-          hasUnsavedChanges: false,
+          hasUnsavedChanges: hasLiveTextMovedOn(),
         }
 
         setNotes((previous) => {
@@ -234,9 +296,7 @@ export function useNoteProtectionActions({
           return next
         })
 
-        externalNoteOriginalHashByIdRef.current.set(noteId, currentHash)
-        setCurrentExternalNoteHash(currentHash)
-        if (activeNoteId === noteId) {
+        if (activeNoteId === noteId && !hasLiveTextMovedOn()) {
           setActiveNoteText(currentText)
         }
       } catch (error) {
@@ -245,10 +305,11 @@ export function useNoteProtectionActions({
     }
 
     try {
-      const diskContent = await window.thockdownExternalFiles.readFileContent(externalPath)
-      console.debug('[external-note] readFileContent after save', { noteId, externalPath, diskContentLength: diskContent?.length ?? null, diskContentIsNull: diskContent === null })
-      if (diskContent !== null) {
-        diskSanityText = diskContent
+      const diskAfter = await window.thockdownExternalFiles.readFileSnapshot(externalPath)
+      console.debug('[external-note] read file after save', { noteId, externalPath, diskContentLength: diskAfter?.content.length ?? null, diskIsNull: diskAfter === null })
+      if (diskAfter !== null) {
+        diskSanityText = diskAfter.content
+        diskSanityModifiedAtMs = diskAfter.modifiedAtMs
       } else {
         console.error('[external-note] failed to read disk content for sanity snapshot', { noteId, externalPath })
       }
@@ -265,11 +326,21 @@ export function useNoteProtectionActions({
 
     try {
       if (isDiskEqual) {
-        await window.thockdownNotes.saveNoteSnapshot({ id: noteId, content: currentText, isManual: false })
+        // The file now holds exactly what was written, so THIS is the note's
+        // new baseline -- recorded as a from-disk snapshot carrying the file's
+        // own modified time, which is what every later "has it changed since
+        // it came off disk" question is answered against.
+        await window.thockdownNotes.saveNoteSnapshot({
+          id: noteId,
+          content: currentText,
+          isManual: true,
+          isFromDisk: true,
+          timestamp: diskSanityModifiedAtMs !== null
+            ? new Date(diskSanityModifiedAtMs).toISOString()
+            : undefined,
+        })
         externalNoteOriginalTextByIdRef.current.set(noteId, currentText)
-        externalNoteOriginalHashByIdRef.current.set(noteId, currentHash)
-        setCurrentExternalNoteHash(currentHash)
-        if (activeNoteId === noteId) {
+        if (activeNoteId === noteId && !hasLiveTextMovedOn()) {
           setActiveNoteText(currentText)
         }
         setNotes((previous) => {
@@ -284,15 +355,24 @@ export function useNoteProtectionActions({
           return next
         })
       } else {
-        const diskHash = await hashNormalizedText(diskSanityNormalized)
-        await window.thockdownNotes.saveNoteSnapshot({ id: noteId, content: diskSanityNormalized, isManual: false })
+        // The write did not land what was asked of it -- the file holds
+        // something else entirely. Record what is actually there as the
+        // baseline, because that is the truth the next save must reconcile
+        // against, and say so loudly.
+        await window.thockdownNotes.saveNoteSnapshot({
+          id: noteId,
+          content: diskSanityNormalized,
+          isManual: true,
+          isFromDisk: true,
+          timestamp: diskSanityModifiedAtMs !== null
+            ? new Date(diskSanityModifiedAtMs).toISOString()
+            : undefined,
+        })
         externalNoteOriginalTextByIdRef.current.set(noteId, diskSanityNormalized)
-        externalNoteOriginalHashByIdRef.current.set(noteId, diskHash)
-        setCurrentExternalNoteHash(currentHash)
-        if (activeNoteId === noteId) {
+        if (activeNoteId === noteId && !hasLiveTextMovedOn()) {
           setActiveNoteText(currentText)
         }
-        console.error('[external-note] disk sanity mismatch after save', { noteId, currentHash, diskHash, writeSucceeded })
+        console.error('[external-note] disk sanity mismatch after save', { noteId, writeSucceeded })
       }
     } catch (error) {
       console.error('[external-note] failed to persist external note snapshots', { noteId, error })
@@ -302,11 +382,9 @@ export function useNoteProtectionActions({
     activeNoteText,
     notes,
     activeNoteExternalPathRef,
-    externalNoteOriginalHashByIdRef,
     externalNoteOriginalTextByIdRef,
     latestEditorTextRef,
     setActiveNoteText,
-    setCurrentExternalNoteHash,
     setNotes,
   ])
 
@@ -396,8 +474,6 @@ export function useNoteProtectionActions({
     clearNoteArmTimer()
 
     externalNoteOriginalTextByIdRef.current.delete(noteId)
-    externalNoteOriginalHashByIdRef.current.delete(noteId)
-    setCurrentExternalNoteHash((current) => (activeNoteId === noteId ? null : current))
 
     try {
       await window.thockdownNotes.deleteNote({ id: noteId })
@@ -411,7 +487,7 @@ export function useNoteProtectionActions({
     } catch (error) {
       console.error('Failed to delete external temp note', error)
     }
-  }, [activeNoteId, cancelPendingSave, clearNoteArmTimer, externalNoteOriginalTextByIdRef, externalNoteOriginalHashByIdRef, setCurrentExternalNoteHash, setNotes, setActiveNoteId, setActiveNoteText, onNotePermanentlyDeleted])
+  }, [activeNoteId, cancelPendingSave, clearNoteArmTimer, externalNoteOriginalTextByIdRef, setNotes, setActiveNoteId, setActiveNoteText, onNotePermanentlyDeleted])
 
   const handleNoteRightPressStart = useCallback((noteId: string, event: MouseEvent<HTMLDivElement>) => {
     event.preventDefault()

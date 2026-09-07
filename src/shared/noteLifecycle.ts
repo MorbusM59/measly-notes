@@ -187,8 +187,8 @@ export interface NoteLifecycleApi {
   syncExternalNoteToFile(input: { id: string; content: string }): Promise<boolean>;
   getNoteIdByExternalPath(input: { externalPath: string }): Promise<string | null>;
   /** Returns the resulting snapshot's ID -- either newly inserted, or the existing latest one if the content is unchanged (dedup). */
-  saveNoteSnapshot(input: { id: string; content: string; isManual?: boolean }): Promise<number>;
-  getNoteSnapshots(input: LoadNoteInput): Promise<Array<{ id: number; noteId: string; content: string; timestamp: string; isManual: boolean }>>;
+  saveNoteSnapshot(input: { id: string; content: string; isManual?: boolean; isFromDisk?: boolean; timestamp?: string }): Promise<number>;
+  getNoteSnapshots(input: LoadNoteInput): Promise<Array<{ id: number; noteId: string; content: string; timestamp: string; isManual: boolean; isFromDisk: boolean }>>;
   deleteNoteSnapshot(input: DeleteNoteSnapshotInput): Promise<void>;
   /** A Timeline snapshot's own canonical BLOCK, independent of the live note's -- see docs/editor-contract.md's Viewport Model section. */
   saveSnapshotAnchor(input: { snapshotId: number; anchorBlockIndex: number | null }): Promise<void>;

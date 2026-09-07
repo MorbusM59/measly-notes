@@ -2248,8 +2248,34 @@ export class DatabaseService {
     return this.listChaptersForNote(parentNoteId);
   }
 
-  getNoteContentSnapshot(noteId: string): string | null {
+  /**
+   * The stored text of a note whose content lives in the database rather than
+   * in a file of its own (a temp/external note).
+   *
+   * ## The inversion this used to have
+   *
+   * It read the NEWEST SNAPSHOT first and fell back to the stored content.
+   * That made an external note's current text a function of its own history:
+   * `note_snapshots` is the timeline, and the timeline was deciding what the
+   * document said. It mostly worked only because the save queue writes a
+   * snapshot on every save, so the newest row usually happened to match --
+   * but it meant that adding any snapshot could change the note's content,
+   * and it left "the original" and "the current text" as two competing
+   * guesses over one undifferentiated table.
+   *
+   * History is derived from content, never the reverse. So the stored content
+   * (`notes_fts`, written by upsertNoteContent on every save) is the answer,
+   * and snapshots are consulted only as a legacy fallback: a note last written
+   * by an older build may have no stored content row yet, and returning null
+   * for it would present an existing note as empty.
+   */
+  readStoredNoteContent(noteId: string): string | null {
     const db = this.requireDb();
+
+    const ftsRow = db.prepare('SELECT content FROM notes_fts WHERE noteId = ?').get(noteId) as { content: string } | undefined;
+    if (ftsRow?.content !== undefined && ftsRow.content !== null) {
+      return ftsRow.content;
+    }
 
     const snapshotRow = db.prepare(`
       SELECT content
@@ -2259,12 +2285,7 @@ export class DatabaseService {
       LIMIT 1
     `).get(noteId) as { content: string } | undefined;
 
-    if (snapshotRow?.content) {
-      return snapshotRow.content;
-    }
-
-    const ftsRow = db.prepare('SELECT content FROM notes_fts WHERE noteId = ?').get(noteId) as { content: string } | undefined;
-    return ftsRow?.content ?? null;
+    return snapshotRow?.content ?? null;
   }
 
   getExternalSyncState(noteId: string): ExternalSyncState {
@@ -2572,34 +2593,74 @@ export class DatabaseService {
   //    duplicate automatic snapshot sitting right next to a new manual one
   //    with the same content.
   /** Returns the resulting snapshot's ID -- either newly inserted, or the existing latest one if content is unchanged (see dedup below). */
-  saveNoteSnapshot(noteId: string, content: string, isManual = false): number {
+  saveNoteSnapshot(
+    noteId: string,
+    content: string,
+    isManual = false,
+    options?: {
+      /** Records what was on disk for an external note. See the column's own comment. */
+      isFromDisk?: boolean;
+      /** ISO timestamp to record instead of "now" -- for a from-disk snapshot, the FILE's own modified time. */
+      timestamp?: string;
+    },
+  ): number {
     this.assertNotTimeless(noteId);
     const db = this.requireDb();
-    const timestamp = new Date().toISOString();
+    const isFromDisk = options?.isFromDisk === true;
+    const timestamp = options?.timestamp ?? new Date().toISOString();
 
     return db.transaction(() => {
-      const latest = db.prepare(`
-        SELECT id, content, isManual FROM note_snapshots
-        WHERE noteId = ?
-        ORDER BY datetime(timestamp) DESC, id DESC
-        LIMIT 1
-      `).get(noteId) as { id: number; content: string; isManual: number } | undefined;
+      // A from-disk snapshot is never deduplicated or merged into an existing
+      // row. It is a record that the file held this content at this time, and
+      // two of those are two distinct events even when the bytes match --
+      // whereas the dedup below exists to stop the ordinary save cadence from
+      // filling the timeline with identical rows. It also carries the file's
+      // own mtime, so "the latest row" is not necessarily where it belongs.
+      if (!isFromDisk) {
+        const latest = db.prepare(`
+          SELECT id, content, isManual FROM note_snapshots
+          WHERE noteId = ? AND isFromDisk = 0
+          ORDER BY datetime(timestamp) DESC, id DESC
+          LIMIT 1
+        `).get(noteId) as { id: number; content: string; isManual: number } | undefined;
 
-      if (latest && latest.content === content) {
-        if (isManual && latest.isManual === 0) {
-          db.prepare('UPDATE note_snapshots SET isManual = 1, timestamp = ? WHERE id = ?')
-            .run(timestamp, latest.id);
+        if (latest && latest.content === content) {
+          if (isManual && latest.isManual === 0) {
+            db.prepare('UPDATE note_snapshots SET isManual = 1, timestamp = ? WHERE id = ?')
+              .run(timestamp, latest.id);
+          }
+          return latest.id;
         }
-        return latest.id;
       }
 
       const result = db.prepare(`
-        INSERT INTO note_snapshots (noteId, content, timestamp, isManual)
-        VALUES (?, ?, ?, ?)
-      `).run(noteId, content, timestamp, isManual ? 1 : 0);
+        INSERT INTO note_snapshots (noteId, content, timestamp, isManual, isFromDisk)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(noteId, content, timestamp, isManual ? 1 : 0, isFromDisk ? 1 : 0);
 
       return Number(result.lastInsertRowid);
     })();
+  }
+
+  /**
+   * The snapshot an external note's "has unsaved changes" is judged against:
+   * the most recent record of what the FILE held.
+   *
+   * Identified by its own column, never by scanning for a row that happens not
+   * to be manual -- that older heuristic picked a different row as soon as a
+   * second automatic snapshot existed, which is how "original" and "newest"
+   * came to be two guesses over one undifferentiated pool.
+   */
+  getLatestFromDiskSnapshot(noteId: string): { id: number; content: string; timestamp: string } | null {
+    const db = this.requireDb();
+    const row = db.prepare(`
+      SELECT id, content, timestamp
+      FROM note_snapshots
+      WHERE noteId = ? AND isFromDisk = 1
+      ORDER BY datetime(timestamp) DESC, id DESC
+      LIMIT 1
+    `).get(noteId) as { id: number; content: string; timestamp: string } | undefined;
+    return row ?? null;
   }
 
   getNoteSnapshots(noteId: string): Array<{
@@ -2608,10 +2669,11 @@ export class DatabaseService {
     content: string;
     timestamp: string;
     isManual: boolean;
+    isFromDisk: boolean;
   }> {
     const db = this.requireDb();
     const rows = db.prepare(`
-      SELECT id, noteId, content, timestamp, isManual
+      SELECT id, noteId, content, timestamp, isManual, isFromDisk
       FROM note_snapshots
       WHERE noteId = ?
       ORDER BY datetime(timestamp) DESC
@@ -2621,6 +2683,7 @@ export class DatabaseService {
       content: string;
       timestamp: string;
       isManual: number;
+      isFromDisk: number;
     }>;
 
     return rows.map((row) => ({
@@ -2629,6 +2692,7 @@ export class DatabaseService {
       content: row.content,
       timestamp: row.timestamp,
       isManual: Boolean(row.isManual),
+      isFromDisk: Boolean(row.isFromDisk),
     }));
   }
 
@@ -2751,7 +2815,7 @@ export class DatabaseService {
   cloneSnapshotsUpTo(sourceNoteId: string, newNoteId: string, cutoffTimestamp: string): void {
     const db = this.requireDb();
     const rows = db.prepare(`
-      SELECT content, timestamp, isManual
+      SELECT content, timestamp, isManual, isFromDisk
       FROM note_snapshots
       WHERE noteId = ? AND datetime(timestamp) <= datetime(?)
       ORDER BY datetime(timestamp) ASC
@@ -2759,18 +2823,23 @@ export class DatabaseService {
       content: string;
       timestamp: string;
       isManual: number;
+      isFromDisk: number;
     }>;
 
     if (rows.length === 0) return;
 
+    // isFromDisk travels with the row like isManual does: a branch inherits the
+    // history it diverged from, and a from-disk marker that silently became an
+    // ordinary snapshot would leave the branch unable to say which of its
+    // inherited rows came from the file.
     const insertStmt = db.prepare(`
-      INSERT INTO note_snapshots (noteId, content, timestamp, isManual)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO note_snapshots (noteId, content, timestamp, isManual, isFromDisk)
+      VALUES (?, ?, ?, ?, ?)
     `);
 
     const tx = db.transaction((items: typeof rows) => {
       for (const row of items) {
-        insertStmt.run(newNoteId, row.content, row.timestamp, row.isManual);
+        insertStmt.run(newNoteId, row.content, row.timestamp, row.isManual, row.isFromDisk);
       }
     });
 
@@ -3840,6 +3909,14 @@ export class DatabaseService {
         content TEXT NOT NULL,
         timestamp TEXT NOT NULL,
         isManual INTEGER NOT NULL DEFAULT 0,
+        -- A snapshot of what was on DISK, for an external note. Its own kind
+        -- rather than a flavour of isManual: the original an external note is
+        -- compared against has to be identifiable outright, and code that
+        -- looked for "the one that isn't manual" would find the wrong row the
+        -- moment a second automatic snapshot existed. Carries the FILE's
+        -- modified time as its timestamp, so it can legitimately sort older
+        -- than snapshots already present.
+        isFromDisk INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (noteId) REFERENCES notes(id) ON DELETE CASCADE
       );
 
@@ -4113,6 +4190,7 @@ export class DatabaseService {
     this.migrateChapterTagsToParent();
     this.purgeParentlessChapters();
     this.ensureNoteSnapshotsColumn('anchorBlockIndex', 'INTEGER');
+    this.ensureNoteSnapshotsColumn('isFromDisk', 'INTEGER NOT NULL DEFAULT 0');
 
     // Notes are inserted (both on creation and on filesystem-sync upsert)
     // without ever setting cursorPos/anchorBlockIndex/progress*, so they

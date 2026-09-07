@@ -4758,6 +4758,7 @@ export function CM6Editor({
     const currentText = view.state.doc.toJSON().join('\n');
     const isNoteSwitch = lastHydratedNoteIdRef.current !== (noteId ?? null);
     if (!isNoteSwitch && currentText === initialText) return;
+
     lastHydratedNoteIdRef.current = noteId ?? null;
 
     const debugSwitchStartedAt = debugInputLagEnabled && isNoteSwitch ? performance.now() : null;
@@ -4769,8 +4770,47 @@ export function CM6Editor({
         annotations: ProgrammaticHydrationAnnotation.of(true),
       });
     } else {
+      const change = computeMinimalTextReplacement(currentText, initialText);
+      // ALWAYS recorded, no flag, capped at 60 entries.
+      //
+      // This branch overwrites the LIVE document with React's view of it. It
+      // exists for transient mismatches and is usually a no-op-sized nudge --
+      // but if `initialText` is ever STALE, this is the code that deletes
+      // what the reader just typed, and the symptom is precisely a reported
+      // one: press Enter, the text below jumps up a row with the caret at the
+      // start of it, and either a later render puts it back or the new line
+      // is gone for good.
+      //
+      // It is recorded unconditionally because the report is intermittent and
+      // external-note-specific: a flag that has to be set BEFORE the event
+      // cannot catch something nobody can reproduce on demand, and a reader
+      // who has just seen it can read the buffer afterwards instead:
+      //   copy(JSON.stringify(window.__thockdownHydrationOverwrites, null, 2))
+      // A deletion (`to` past `from`) on a same-note render is the
+      // interesting shape; a pure insertion is ordinary catch-up.
+      if (change.to > change.from) {
+        const host = window as unknown as {
+          __thockdownHydrationOverwrites?: Array<Record<string, unknown>>;
+        };
+        if (!host.__thockdownHydrationOverwrites) host.__thockdownHydrationOverwrites = [];
+        host.__thockdownHydrationOverwrites.push({
+          at: new Date().toISOString(),
+          noteId: noteId ?? null,
+          deletedChars: change.to - change.from,
+          insertedChars: change.insert.length,
+          // The actual text being destroyed, bounded -- "a newline vanished"
+          // and "a paragraph vanished" need completely different fixes.
+          deleted: JSON.stringify(currentText.slice(change.from, change.to).slice(0, 120)),
+          inserted: JSON.stringify(change.insert.slice(0, 120)),
+          docLenBefore: currentText.length,
+          docLenAfter: initialText.length,
+        });
+        if (host.__thockdownHydrationOverwrites.length > 60) {
+          host.__thockdownHydrationOverwrites.splice(0, host.__thockdownHydrationOverwrites.length - 60);
+        }
+      }
       view.dispatch({
-        changes: computeMinimalTextReplacement(currentText, initialText),
+        changes: change,
         annotations: ProgrammaticHydrationAnnotation.of(true),
       });
     }

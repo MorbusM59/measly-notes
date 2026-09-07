@@ -141,7 +141,7 @@ export class NoteLifecycleService {
   private async readSummary(record: NoteRecord): Promise<NoteSummary | null> {
     try {
       const text = record.isTemp
-        ? (this.databaseService.getNoteContentSnapshot(record.id) ?? '')
+        ? (this.databaseService.readStoredNoteContent(record.id) ?? '')
         : await fs.readFile(record.filePath, 'utf8');
 
       const stat = record.isTemp
@@ -198,9 +198,9 @@ export class NoteLifecycleService {
     const fileName = path.basename(filePath);
     let rawText: string
     if (record?.isTemp) {
-      const snapshotText = this.databaseService.getNoteContentSnapshot(input.id)
-      if (snapshotText !== null) {
-        rawText = snapshotText
+      const storedText = this.databaseService.readStoredNoteContent(input.id)
+      if (storedText !== null) {
+        rawText = storedText
       } else if (record.externalPath) {
         rawText = await fs.readFile(record.externalPath, 'utf8')
       } else {
@@ -934,9 +934,14 @@ export class NoteLifecycleService {
 
     if (record?.isTemp) {
       const nowMs = Date.now();
-      const snapshotRows = await this.getNoteSnapshots({ id: input.id });
-      const originalSnapshotRow = snapshotRows.find((row) => !row.isManual) ?? snapshotRows[0];
-      const originalSnapshotText = originalSnapshotRow ? normalizeText(originalSnapshotRow.content) : null;
+      // Compared against the most recent record of what the FILE held, found
+      // by its own column. This used to be `snapshotRows.find(row =>
+      // !row.isManual) ?? snapshotRows[0]` -- a scan for any row that happened
+      // not to be manual, which stopped meaning "the original" the moment the
+      // ordinary save cadence wrote a second automatic snapshot, and which the
+      // newest-first ordering then made depend on timestamps too.
+      const diskSnapshot = this.databaseService.getLatestFromDiskSnapshot(input.id);
+      const originalSnapshotText = diskSnapshot ? normalizeText(diskSnapshot.content) : null;
       const isCleanAgainstOriginal = originalSnapshotText !== null && originalSnapshotText === text;
       const hasUnsavedChanges = !isCleanAgainstOriginal;
       const syncMode = isCleanAgainstOriginal ? true : false;
@@ -1142,11 +1147,22 @@ export class NoteLifecycleService {
     return summary;
   }
 
-  async saveNoteSnapshot(input: { id: string; content: string; isManual?: boolean }): Promise<number> {
-    return this.databaseService.saveNoteSnapshot(input.id, input.content, Boolean(input.isManual));
+  async saveNoteSnapshot(input: {
+    id: string;
+    content: string;
+    isManual?: boolean;
+    /** Records what the FILE held, for an external note -- see the column's own comment in databaseService.ts. */
+    isFromDisk?: boolean;
+    /** ISO timestamp to record instead of "now"; for a from-disk snapshot, the file's own modified time. */
+    timestamp?: string;
+  }): Promise<number> {
+    return this.databaseService.saveNoteSnapshot(input.id, input.content, Boolean(input.isManual), {
+      isFromDisk: input.isFromDisk,
+      timestamp: input.timestamp,
+    });
   }
 
-  async getNoteSnapshots(input: LoadNoteInput): Promise<Array<{ id: number; noteId: string; content: string; timestamp: string; isManual: boolean }>> {
+  async getNoteSnapshots(input: LoadNoteInput): Promise<Array<{ id: number; noteId: string; content: string; timestamp: string; isManual: boolean; isFromDisk: boolean }>> {
     return this.databaseService.getNoteSnapshots(input.id);
   }
 
@@ -1201,7 +1217,7 @@ export class NoteLifecycleService {
     if (record?.isTemp && removingExternalTag) {
       await this.ensureNotesDir();
       const { filePath } = this.notePathFromId(input.id);
-      const snapshot = this.databaseService.getNoteContentSnapshot(input.id) ?? '';
+      const snapshot = this.databaseService.readStoredNoteContent(input.id) ?? '';
       await fs.writeFile(filePath, snapshot, 'utf8');
       const stat = await fs.stat(filePath);
 

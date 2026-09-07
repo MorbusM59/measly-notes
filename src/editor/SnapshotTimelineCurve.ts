@@ -16,6 +16,8 @@ export type SnapshotLike = {
   id: number
   timestamp: string // ISO string, as stored in note_snapshots
   isManual: boolean
+  /** Recorded what the FILE held, for an external note. Drawn with a heavier outline. */
+  isFromDisk?: boolean
 }
 
 export type PlacedSnapshot = SnapshotLike & {

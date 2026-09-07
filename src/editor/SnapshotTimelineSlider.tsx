@@ -335,6 +335,10 @@ function SnapshotMark({
       className={[
         'snapshot-timeline-mark',
         placement.isManual ? 'is-manual' : 'is-automatic',
+        // Its own class rather than a variant of the two above: a from-disk
+        // snapshot can be either manual or automatic, and what marks it out is
+        // where its CONTENT came from, not who asked for it.
+        placement.isFromDisk ? 'is-from-disk' : '',
         matchesPresent ? 'matches-present' : '',
         isActive ? 'is-active' : '',
         isHolding ? 'is-holding' : '',

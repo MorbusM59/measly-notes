@@ -43,7 +43,7 @@ import {
 function parseArgs(argv) {
   const args = {
     chars: 400000, keystrokes: 25, position: 'middle', port: 5191,
-    headed: false, json: false, key: 'x', throttle: 1, gap: 250, view: 'edit', profile: false, stacks: false, lagLog: false,
+    headed: false, json: false, key: 'x', throttle: 1, gap: 250, view: 'edit', profile: false, stacks: false, lagLog: false, external: false, defer: false,
   }
   for (const raw of argv) {
     const [key, value] = raw.replace(/^--/, '').split('=')
@@ -51,6 +51,8 @@ function parseArgs(argv) {
     else if (key === 'profile') args.profile = true
     else if (key === 'stacks') args.stacks = true
     else if (key === 'lagLog') args.lagLog = true
+    else if (key === 'external') args.external = true
+    else if (key === 'defer') args.defer = true
     else if (key === 'json') args.json = true
     else if (key === 'key') args.key = value
     else if (key === 'view') args.view = value
@@ -170,7 +172,34 @@ async function main() {
     // Set before the seed's own reload, so the flag is already in place when
     // the app boots into the note rather than a reload later.
     if (args.lagLog) await page.evaluate(() => window.localStorage.setItem('thockdown:debug-input-lag', '1'))
+    // deferPreviewOnRapidInput is a persisted menu setting that defaults to
+    // false, so by default EVERY keystroke commits setActiveNoteText
+    // synchronously and re-renders the whole app + preview pipeline. Seeded
+    // through the persisted state before the boot that matters, because the
+    // app reads it once on load.
+    if (args.defer) {
+      await page.evaluate(async () => {
+        const state = await window.thockdownState.loadAppState()
+        await window.thockdownState.saveAppState({
+          ...state,
+          menu: { ...state.menu, deferPreviewOnRapidInput: true },
+        })
+      })
+    }
     await seedLargeNoteAndReload(page, generateSyntheticDocument(args.chars))
+    // Tagging the note `external` is the whole of what makes it external to
+    // the renderer, and it is the only way to ask whether the external
+    // per-keystroke wiring costs anything measurable against an identical
+    // internal note.
+    if (args.external) {
+      await page.evaluate(async () => {
+        const sections = await window.thockdownSections.listSections()
+        const noteId = sections.find((section) => section.activeNoteId)?.activeNoteId
+        if (noteId) await window.thockdownNotes.addTagToNote({ id: noteId, tagName: 'external' })
+      })
+      await page.reload()
+      await page.waitForTimeout(2500)
+    }
     if (args.view === 'preview') await ensurePreviewMode(page)
     await placeCaretAt(page, args.position)
 

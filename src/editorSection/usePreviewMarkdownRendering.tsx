@@ -144,6 +144,15 @@ const PREVIEW_CHAR_RULER_TEXT = 'the quick brown fox jumps over the lazy dog and
 // scrolling doesn't visibly pop content in at the viewport edge.
 const PREVIEW_BLOCK_OVERSCAN = 6
 
+/**
+ * How long the document must stop changing before the hidden preview's block
+ * split catches up. Short enough that the pane is always ready to be shown,
+ * long enough that a burst of typing costs one split rather than one per
+ * character. See splitSourceText for why it settles rather than waits for the
+ * toggle.
+ */
+const PREVIEW_SPLIT_SETTLE_MS = 180
+
 /** Progress of the background block survey -- see previewMeasurementPrewarm.ts. */
 export interface PreviewDiscoveryState {
   isSurveying: boolean
@@ -660,19 +669,54 @@ export function usePreviewMarkdownRendering({
   // argument.
   const ownSplitCacheRef = useRef<PreviewBlockSplitCache | null>(null)
   const splitCacheRef = previewBlockSplitCacheRef ?? ownSplitCacheRef
+
+  /**
+   * The text the block split actually runs on.
+   *
+   * In RENDER VIEW it is the live text: the reader is looking at these blocks,
+   * so they must be current.
+   *
+   * In EDIT MODE the pane is dual-mounted but hidden, and nothing on screen is
+   * derived from these blocks -- yet the split ran on every keystroke anyway.
+   * Even fully incremental it is the single most expensive thing a keystroke
+   * does on a large note: 8.5ms per keystroke of a measured ~28ms total on a
+   * 1.5M-character document (CDP profile, `parseStructuralRanges`), spent
+   * re-deriving boundaries for a pane nobody can see.
+   *
+   * So while hidden it runs on a settled copy of the text instead. The delay
+   * is deliberately short, and this is NOT "recompute it once on toggle": the
+   * incremental split is only cheap because each call diffs against the
+   * previous one, so letting it fall arbitrarily far behind would trade a
+   * per-keystroke cost for a multi-second parse at the worst possible moment.
+   * A settle keeps every call a small delta AND keeps the pane ready.
+   *
+   * Entering render view takes the live text in the same render, not a frame
+   * later -- `isPreviewMode` is read here rather than only in the effect, so
+   * the toggle never shows a stale pane.
+   */
+  const [settledSplitText, setSettledSplitText] = useState(renderedDisplayText)
+  useEffect(() => {
+    if (isPreviewMode) {
+      setSettledSplitText(renderedDisplayText)
+      return undefined
+    }
+    const timeoutId = window.setTimeout(() => setSettledSplitText(renderedDisplayText), PREVIEW_SPLIT_SETTLE_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [renderedDisplayText, isPreviewMode])
+  const splitSourceText = isPreviewMode ? renderedDisplayText : settledSplitText
   // Warm-start from useEditorSectionMount's background prewarm if the text
   // matches. This avoids a second full remark parse on the first preview
   // render after edit mode had already parsed the document in the background.
   const splitResult = useMemo(
     () => {
       const cache = splitCacheRef.current
-      const hasMatchingCache = cache && cache.text === renderedDisplayText
+      const hasMatchingCache = cache && cache.text === splitSourceText
       const start = typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-input-lag') === '1' ? performance.now() : 0
-      const result = splitMarkdownIntoPreviewBlocksIncremental(renderedDisplayText, cache)
+      const result = splitMarkdownIntoPreviewBlocksIncremental(splitSourceText, cache)
       if (typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
         const elapsed = Number((performance.now() - start).toFixed(2))
         console.log('[preview-block-cache] usePreviewMarkdownRendering split', {
-          renderedLength: renderedDisplayText.length,
+          renderedLength: splitSourceText.length,
           hasMatchingCache: !!hasMatchingCache,
           cacheTextLength: cache?.text.length,
           ranges: cache?.ranges.length,
@@ -682,7 +726,7 @@ export function usePreviewMarkdownRendering({
       }
       return result
     },
-    [renderedDisplayText, splitCacheRef],
+    [splitSourceText, splitCacheRef],
   )
   // Committed in an effect, not during the useMemo above, so this cache
   // update never happens during a render React might discard (Strict Mode's

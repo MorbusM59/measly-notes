@@ -3133,3 +3133,570 @@ document has open further up, and it is the ceiling on anything the caret path
 can do: the caret cannot be painted before the keystroke has finished being
 handled. Anyone attacking it should start from `measureTypeLatency.mjs`, whose
 `handler` figure isolates exactly that term.
+
+---
+
+## Enter at the cage's bottom edge: not reproduced, and what to capture next
+
+Reported: pressing Enter on the last line the caret can travel to, with text on
+the line below, sometimes makes that text jump UP a row with the caret at the
+start of it. A few hundred milliseconds later it usually drops back. Sometimes
+it stays, and the new empty line seems "consumed or lost".
+
+`scripts/perf/verifyEnterAtCageBottom.mjs` encodes the invariant and is worth
+keeping regardless of this round's outcome. It finds the cage's bottom edge by
+*observation* — walking the caret down with ArrowDown until it stops moving on
+screen — rather than by recomputing the boundary, so it cannot agree with a bug
+in the arithmetic it is testing. Then, per Enter, it samples every frame for a
+second:
+
+* the screen position of the line below, off its own `.cm-line` box, so a
+  transient jump AND a later correction are both visible (a single reading
+  taken after the fact can see neither);
+* `docLines`/`docLength` from the app's own `__thockdownDebugCageState()` hook,
+  because if the newline is genuinely lost it is lost there, and no amount of
+  geometry can prove or disprove it.
+
+**It did not reproduce.** Tried, in `dev:browser` + headless Chromium: 400 /
+4,000 / 8,000 / 20,000 lines; uniform rows and a mixed shape (headings, long
+wrapping paragraphs, short lines) so CM6's height estimates for unlaid-out
+territory would be wrong and get revised; caret at the document start and at
+the half-way mark; Enter in isolation and Enter landing mid-edit after four
+typed characters. In every passing case the result was the same and it is the
+correct one: the line below holds its exact screen position (the cage scrolls
+by precisely one row, so it does not move), and `docLines` grows by exactly one.
+
+### One false reproduction, recorded so it is not repeated
+
+An early run at 20,000 lines showed the marker line moving up 4, 5, 6, 7 rows
+on successive Enters and never correcting — a convincing match for the report.
+It was the instrument. Lines were named `LINE-0000`-style and matched by
+prefix, and with 20,000 of them `LINE-1012` also prefix-matches `LINE-10120`,
+so the "line below the caret" silently resolved to a different line elsewhere
+in the document. That is exactly why 4,000 lines passed (all names four digits,
+no ambiguity) and 20,000 "failed". The per-frame dump is what exposed it: the
+line supposedly below the caret was sitting *above* it, which is geometrically
+impossible. Markers are now the whole first token, compared exactly.
+
+### What to capture when it next happens
+
+The app already has the trace built for this. In the running app's devtools
+console:
+
+```
+localStorage.setItem('thockdown:debug-cage-state', '1')
+```
+
+then reload, reproduce the symptom, and immediately:
+
+```
+copy(window.__cageTrace.join('\n'))
+```
+
+That gives, per keypress, where the caret sat, what CM6 moved on its own via a
+height-map revision, the height change, the target, and what was actually
+written. Remember the rule from CLAUDE.md when reading it: **text movement is
+scroll movement minus height change** — the scroll number alone will mislead.
+
+Also worth settling at the moment it "stays", because it decides whether this is
+a data-loss bug or a cosmetic one, and they need completely different fixes:
+
+```
+window.__thockdownDebugCageState().docLines
+```
+
+If that number went up by one, no line was lost — the document is correct and
+the pane's scroll offset is simply parked one row off, leaving the new empty
+line scrolled out of sight above the viewport. If it did NOT go up, the
+keystroke really was dropped, and that is the more serious of the two.
+
+The most likely missing ingredient here is the real Electron app: every
+keystroke there also crosses IPC to SQLite, which changes the timing around the
+cage reconcile in a way `dev:browser` does not model. `verifyEnterAtCageBottom`
+takes `--lines`, `--shape`, `--startAt`, `--typeFirst`, `--restMs`, `--settleMs`
+and `--dump`, so a future session can re-aim it cheaply once the state
+difference from a real session narrows the search.
+
+### The state difference that cracked it open: external notes only
+
+The reporter narrowed the symptom themselves — it happens on **external** notes
+and disappears the moment the `external` tag is removed. That is the single
+most valuable piece of evidence in this whole investigation, and it is the kind
+only the person who can see the bug can produce (CLAUDE.md's own diagnosis
+order, step 1). Everything below follows from it.
+
+Being external is, to the renderer, purely the `external` tag
+(`shared/noteLifecycle.ts`'s `isExternalNote`). Three things are true only of
+those notes:
+
+1. **`loadNote` reads their text from the FILE**, not the database
+   (`electron/noteLifecycleService.ts` — `fs.readFile(record.externalPath)`).
+   So any reload during editing returns content that lags the unsaved edits.
+2. **A `console.warn` fired on every keystroke** in the text-change path
+   (`useEditorSectionMount.ts`'s `isExternal` block). Fixed this round — it is
+   behind the existing `thockdown:debug-input-lag` flag now. A `console.warn`
+   formats and retains its argument object, and with devtools open renders a
+   row and captures a stack per call. Only external notes paid it.
+3. **A debounced full-document SHA-256 plus a `setNotes`** runs
+   `SAVE_DEBOUNCE_MS` (350ms) after the last keystroke (`App.tsx`'s external
+   hash effect). "A few hundred milliseconds later" in the report and 350ms
+   here are unlikely to be a coincidence.
+
+### The mechanism that can eat the line
+
+`CM6Editor.tsx`'s note-switch hydration effect has a second branch, for when
+the note has NOT changed but `initialText` (React's view, sourced from
+`activeNoteText`) disagrees with CM6's live document. That branch applies
+`computeMinimalTextReplacement(currentText, initialText)` — it force-matches
+the **live document** to **React's view of it**.
+
+That is safe exactly as long as React's view is never stale. If it ever is —
+by one newline, say — this is the code that deletes the newline the reader just
+typed. The consequences line up with the report one for one: the text below
+moves up a row (a line was removed above it), the caret lands at the start of
+that text (CM6 maps the selection through the deletion), and whether it comes
+back depends entirely on whether a later render delivers the correct text. If
+one does, it "corrects itself"; if none does, the empty line is genuinely gone.
+
+The effect's own comment already records that this branch caused a live "caret
+jumps to 0 mid-typing" bug once before, which is the same class of fault.
+
+**Not yet proven** — the browser fixture cannot reproduce it, because the mock
+bridges do none of the real external file I/O, and that is precisely the part
+that distinguishes an external note. What is established is: the symptom is
+external-only (from the reporter), external notes read their text from a file
+that lags unsaved edits, and there exists a code path that overwrites the live
+document from React's copy of the text. The missing link is which render
+delivers a stale `activeNoteText`.
+
+### The capture that will close it
+
+`CM6Editor.tsx` now records every same-note hydration **deletion** to
+`window.__thockdownHydrationOverwrites` (a 60-entry ring buffer). It is
+deliberately **always on, with no flag**: this is intermittent and
+external-only, so a flag that must be set before the event cannot catch
+something nobody can reproduce on demand, whereas a reader who has just seen it
+can read the buffer afterwards. It is free when the path does not fire, and the
+path firing at all is the anomaly.
+
+After seeing the symptom:
+
+```
+copy(JSON.stringify(window.__thockdownHydrationOverwrites, null, 2))
+```
+
+Each entry carries the deleted and inserted text (bounded to 120 chars),
+the character counts, and the document length either side. An entry whose
+`deleted` is `"\n"` at the moment the reader pressed Enter is the confirmation,
+and it also settles the open question from the previous section — whether the
+line is lost or merely scrolled out of view — because a deletion recorded here
+means the document really did lose it.
+
+If the symptom happens and this buffer is EMPTY, the hypothesis is wrong and
+the fault is downstream of the editor's text; say so and start again from the
+cage trace.
+
+### Fixture support added
+
+`verifyEnterAtCageBottom.mjs` takes `--external`, which tags the seeded note
+`external` so the renderer's external branch runs. It passes there — which is
+information, not reassurance: it means the renderer-only half of the external
+path is not sufficient to produce the bug, and the file I/O the mock omits is
+where to look next. A real-Electron version of this check is the next step.
+
+### The React→CM6 hydration guard (shipped, but NOT reproduced in a fixture)
+
+Read this section before touching `CM6Editor.tsx`'s hydration effect.
+
+**The mechanism, confirmed from a real session.** CM6 owns the live document;
+React holds a second copy (`activeNoteText`). The hydration effect's same-note
+branch force-matches the live document to React's copy via
+`computeMinimalTextReplacement`. React's copy is routinely behind: the commit
+carrying it is coalesced onto a frame (`scheduleCoalescedPreviewCommit`), and
+on a large note the render it triggers takes long enough that more keystrokes
+land before the effect runs. The effect then "corrects" the document by
+deleting whatever was typed in the meantime.
+
+This is not a theory. `window.__thockdownHydrationOverwrites` from the
+reporter's real 1.5M-character note: **nine deletions, every one a pure run of
+newlines with `insertedChars: 0`**, the worst two 53 and 75 characters — a
+reader holding Enter and having the blank lines taken back off them.
+
+**The guard.** `latestTextRef` (the app's `latestEditorTextRef`) is written
+synchronously by both the keystroke path and `applyProgrammaticEditorText`, so
+it is never subject to the coalescing or the render delay. The same-note branch
+now returns early when `latestTextRef.current !== initialText`: this render is
+stale by construction and has nothing to teach the document. Skipping is
+self-correcting — the next commit carries the newest text, and by then the
+effect's existing equality check returns early anyway.
+
+**Why it cannot block a legitimate update** (checked site by site, and the thing
+to re-check if this is ever modified): every path that feeds genuinely new text
+to React also writes the ref first, or is a note switch (which the guard
+exempts). `useEditorSectionMount`'s mode-toggle sites and
+`useNoteProtectionActions`'s sync sites all derive their value from
+`normalizeInternalText(latestEditorTextRef.current || activeNoteText)`, so ref
+and prop agree by construction; note activation sets
+`latestEditorTextRef.current = hydratedText` immediately before
+`setActiveNoteText(hydratedText)`.
+
+**What is NOT established, and must not be claimed.** `scripts/perf/
+verifyNoHydrationOverwrite.mjs` was written to catch this and **does not
+reproduce it**. Tried, with the guard deliberately disabled to make the fixture
+fail first: 1.5M characters, 40 and 60 Enters, `page.keyboard.press` and raw
+queued `Input.dispatchKeyEvent` (no await per key, `autoRepeat` set), internal
+and `external`-tagged notes. Every run: zero overwrites, every character
+survived. So the guard is **reasoned and safe, not verified against a live
+repro** — exactly the situation CLAUDE.md warns about, and the reason the
+always-on overwrite buffer stays in the code rather than being removed now that
+a fix exists.
+
+The buffer IS the verification, in the only environment that has ever produced
+the bug. After using the real app on a large external note:
+
+```
+copy(JSON.stringify(window.__thockdownHydrationOverwrites, null, 2))
+```
+
+Empty means the guard is holding. Entries mean it is not, and the next session
+should start from what they say rather than from this hypothesis.
+
+The likeliest missing fixture ingredient is real Electron: every keystroke
+there also crosses IPC to SQLite, and `dev:browser`'s mock bridges model none
+of it. A real-`_electron` version of this check is the next step if the buffer
+ever fills again.
+
+Kept green alongside the guard: `npm test` (862/862), tsc and lint on the
+changed files, `verifyProgrammaticSwitchCaret` (chapter/note creation, which
+goes through `applyProgrammaticEditorText` — the exact path the guard could
+have broken), and `verifyModeToggleRoundTrip` (one of the `setActiveNoteText`
+sites that does not itself write the ref).
+
+### CORRECTION — the real cause: the external save path rolls the editor back
+
+This supersedes the previous section's diagnosis. The hydration guard was
+**not** the fix, and the coalescing race was **not** what the reporter was
+hitting. The overwrite buffer said so directly: with the guard shipped, entries
+kept appearing (a single `"\n"`, then 54 of them in one go). A guard that
+compares the app's newest-text ref against the rendered prop cannot help when
+something sets *both* to the same stale value — and something does.
+
+`useNoteProtectionActions.ts`'s `saveExternalNoteToFile`:
+
+```
+const currentText = normalizeInternalText(latestEditorTextRef.current || activeNoteText)  // snapshot at T0
+const currentHash = await hashNormalizedText(currentText)          // await: SHA-256 of the whole note
+await window.thockdownNotes.syncExternalNoteToFile(...)            // await: file write + read-back verify
+await window.thockdownNotes.updateExternalNoteState(...)           // await: IPC
+latestEditorTextRef.current = currentText                          // rolls the ref BACKWARDS
+await window.thockdownNotes.saveNote({ text: currentText })        // await: database
+setActiveNoteText(currentText)                                     // rolls React's copy backwards
+```
+
+`currentText` is a photograph taken before a chain of awaits that runs for
+hundreds of milliseconds or more on a large note — and the reader types through
+all of it. Publishing that photograph afterwards walks the app's own newest-text
+ref backwards, walks `activeNoteText` backwards with it, and CM6Editor's
+hydration effect then faithfully force-matches the LIVE DOCUMENT to it. Every
+character typed during the save is deleted by the save.
+
+It explains every part of the report that the coalescing hypothesis did not:
+external-only (this function exists only for external notes), the few-hundred-ms
+delay (the await chain), permanence when nothing is typed afterwards, and why
+holding Enter loses a whole run at once. There were **four** rollback sites in
+the one function: the ref assignment, and three `setActiveNoteText(currentText)`
+calls on the success, disk-equal and disk-mismatch paths.
+
+**The fix.** A save may report what it WROTE; it may never roll the editor back
+to it. `hasLiveTextMovedOn()` re-reads the live text at each write-back and
+skips it when the document has moved on. `hasUnsavedChanges` is now computed
+from the same check rather than hardcoded `false` — typing during a save means
+the note really does have unsaved changes again, because what reached disk is
+already one edit behind. The bytes on disk stay correct either way; only the
+false claim that the editor should match them is removed.
+
+**On the hydration guard from the previous section:** kept, but understand what
+it is. It does not fix this bug and never did. It closes a different, narrower
+race in the same mechanism (a render arriving with a text older than the app's
+own ref), it is cheap, and it is safe — verified against the programmatic-text
+paths it could have broken. It is defence in depth, not the cure. Do not read
+its presence as evidence the reported symptom was addressed by it.
+
+**Still owed: a fixture.** `verifyNoHydrationOverwrite.mjs` never reproduced
+either cause in `dev:browser` — with the guard deliberately disabled, 1.5M
+characters, 60 raw queued autorepeat Enters, internal and external notes, every
+run came back clean. The real cause needs a save to be *in flight while typing*,
+which needs the real file I/O and IPC that the mock bridges do not model. A
+`_electron` version of that check is the next honest step, and until it exists
+the overwrite buffer remains the verification: use the app on a large external
+note, save while typing, then read
+`window.__thockdownHydrationOverwrites`. Empty is the result to want.
+
+---
+
+## External notes, realigned: `isFromDisk` snapshots and one source of truth
+
+The reworking the previous sections argued for. Four changes, in the order they
+had to happen.
+
+### 1. A snapshot kind of its own
+
+`note_snapshots` gains `isFromDisk` (migrated in place by
+`ensureNoteSnapshotsColumn`, defaulting to 0, so existing databases are
+unaffected). It is NOT a flavour of `isManual`, deliberately: the baseline an
+external note is judged against has to be identifiable outright, and the old
+`find(row => !row.isManual)` scan stopped meaning "the original" the moment the
+ordinary save cadence wrote a second automatic snapshot.
+
+`saveNoteSnapshot` takes `{ isFromDisk, timestamp }`. The timestamp override is
+what lets a from-disk row carry the FILE's own modified time, which can
+legitimately sort older than snapshots already stored -- so from-disk rows are
+never deduplicated or promoted in place the way ordinary ones are: two records
+that the file held some content at two different times are two events, even
+when the bytes match. `getLatestFromDiskSnapshot` is the single accessor for
+"the last recorded state of the file"; `cloneSnapshotsUpTo` carries the flag so
+a branch inherits it.
+
+They are written as manual as well as from-disk, per the design: manual rows are
+the ones protected from ordinary compaction, and this baseline must not be
+pruned. In the timeline they get `.is-from-disk` -- a 2px outline against the
+1px everything else carries, declared after both `.is-automatic` and
+`.is-manual` so it wins over whichever the row also is. Same colour: a heavier
+mark to notice, not a new colour to learn.
+
+### 2. Content stopped coming out of the history
+
+`getNoteContentSnapshot` -> `readStoredNoteContent`, and the lookup is inverted.
+It read the NEWEST SNAPSHOT first and fell back to stored content, which made an
+external note's current text a function of its own timeline -- adding any
+snapshot could change what the document said. It now reads the stored content
+(`notes_fts`, written by `upsertNoteContent` on every save) and consults
+snapshots only as a legacy fallback for a note last written by an older build.
+
+This was the prerequisite for everything else: seeding a baseline snapshot at
+import would otherwise have rewritten the note.
+
+### 3. The baseline is established from the file, once
+
+Import (`App.tsx`) reads content and mtime together through a new
+`readFileSnapshot` IPC -- one call, because fetching them separately can
+straddle somebody else's write and produce a snapshot whose bytes and timestamp
+describe different versions of the file. It then records the from-disk baseline
+stamped with the file's mtime rather than the moment of import.
+
+A note imported by an older build has no from-disk row. It is backfilled on
+first activation by reading the FILE, not by copying the note's hydrated text:
+a baseline is a claim about what is on disk, and seeding it from the database
+would assert a match that may not exist.
+
+### 4. Save reconciles with disk BEFORE overwriting it
+
+`saveExternalNoteToFile` now reads the file first and compares it to the
+baseline. If they differ, somebody edited the file since this app last looked,
+and the write is about to destroy that -- so it goes onto the timeline first as
+a from-disk snapshot carrying the file's own mtime, where the reader can find
+and restore it. A check that runs only after the overwrite can confirm nothing
+but its own handiwork. After a successful write, the post-write read records the
+new baseline the same way.
+
+### And one mechanism instead of three
+
+Removed outright: `App.tsx`'s `SAVE_DEBOUNCE_MS` effect that ran a
+full-document SHA-256 after every edit, compared hashes, and called `setNotes`
+with the answer -- along with `currentExternalNoteHash`,
+`externalNoteOriginalHashByIdRef`, and both `hashNormalizedText` copies.
+
+It was redundant: `useEditorSectionMount`'s external branch already maintains
+`hasUnsavedChanges` from the same comparison against the same baseline,
+synchronously, using a string comparison that is effectively free because an
+edit almost always changes the document's LENGTH and V8 settles unequal lengths
+without reading the characters. Hashing 1.5M characters to learn the same
+boolean is work nobody asked for.
+
+It was also harmful, which is the part worth remembering: every one of those
+hashes ended in a `setNotes`, and every such re-render is another chance to
+carry a stale text back into the editor -- the failure the previous sections
+chase. Three full-document SHA-256 passes are gone from the external-note paths
+(the per-edit one, and two on the save path).
+
+`getCurrentExternalNoteModifiedState` is now `Boolean(note.hasUnsavedChanges)`.
+
+### Verification
+
+`npm test` 870/870 (8 new, in
+`electron/databaseService.externalSnapshots.test.ts`: the baseline is found by
+its column and not by scanning past automatic snapshots, the newest from-disk
+row wins, an older file timestamp is preserved, from-disk rows are never
+deduplicated while ordinary ones still are, and -- the regression that matters
+-- `readStoredNoteContent` returns the stored text rather than the newest
+snapshot and is unmoved by adding one). `tsc` and lint clean on every changed
+file (the five pre-existing lint errors and one type error noted earlier are
+unchanged and untouched). Live: `verifyProgrammaticSwitchCaret`,
+`verifyEnterAtCageBottom --external`, and the caret-latency measurement all
+hold.
+
+**Not verified, and it is the same gap as everywhere else in this effort:** the
+real external file flow needs real Electron. `dev:browser` installs no
+`thockdownExternalFiles` mock at all, so every path added here is correctly
+guarded behind its presence but is also unexercised by any fixture. Import, the
+legacy backfill, and the pre-write reconciliation have been reasoned and typed,
+not run. A `_electron` fixture that imports a real file, edits it underneath the
+app, and saves is the check this work still owes.
+
+### External notes type exactly like ordinary notes now
+
+The reporter's own test for the dropped Enter/Backspace and the stranded caret
+was that **the symptoms vanish when the external tag is removed**. So the fix is
+not a smarter external path. It is the absence of one.
+
+**Removed: the entire external branch of `onTextChange`.** It used to find the
+note's summary on every keystroke, compare the document against the baseline,
+and on the modified-state transition fire a `setNotes` plus an
+`updateExternalNoteState` IPC whose reply fired another `setNotes`. Those were
+re-renders an ordinary note never paid, on the keystroke path, and every extra
+render is another chance for one to carry a text the editor has already moved
+past. `setNotes` and `externalNoteOriginalTextByIdRef` are no longer options of
+`useEditorSectionMount` at all -- that branch was their only consumer.
+
+**Derived instead of tracked.** `getCurrentExternalNoteModifiedState` now
+answers "does this differ from the file" for the open note by comparing the live
+document against the baseline (the latest `isFromDisk` snapshot's content, held
+from activation), at the point where it is displayed. The comparison is cheap
+where it now sits: an edit almost always changes the document's LENGTH, and V8
+settles unequal-length strings without reading their characters. A note that is
+not open has no live document, so its persisted flag -- last written by a save
+or a close -- still answers for it.
+
+An external note is a note. Its text is saved by the same queue, into the same
+database, on the same cadence as any other. What makes it external is that a
+copy also lives in a file, and that is a fact about SAVING, not about typing.
+
+**Reverted: the CM6Editor hydration guard** from the earlier section. It was
+never reproduced, and after it shipped the reporter described the glitches as
+having changed shape -- keystrokes swallowed and then "many lines restored at
+once, with the caret resting far above them", which is what deferring a
+divergence and then applying it as one batch diff looks like. Removing an
+unproven change from a hot path the user reports getting worse is the right
+move. The always-on overwrite buffer stays: it is still the only instrument
+that has ever caught this class in the wild.
+
+`scripts/perf/verifyExternalNoteTypingParity.mjs` checks both halves from
+outside: zero external-only IPC while typing (it was at least one call plus two
+`setNotes` before), and the note still showing as modified afterwards so Save
+remains available.
+
+### What this does NOT address, measured rather than assumed
+
+The sluggishness. Same 1.5M-character note, same conditions, `dev:browser`:
+
+| | handler | frame |
+| --- | --- | --- |
+| internal | 26.7ms | 24.0ms |
+| external | 27.7ms | 23.6ms |
+
+The external wiring costs about a millisecond. The per-keystroke cost at that
+document size is the diffuse one this document has open elsewhere -- present on
+ordinary notes too, and measured *worse* before the scroll rework (226ms against
+208ms at 6x throttle). It is its own investigation and the reporter has parked
+it as such; `measureTypeLatency.mjs --external` exists now so the comparison can
+be re-run in one command rather than re-argued.
+
+---
+
+## The sluggishness, attacked properly: the hidden preview was the biggest cost
+
+### It was never a lost gate
+
+The first thing checked was whether the scroll rework dropped a gate that had
+previously made this fast. It did not: `ba6c387`'s split memo is character for
+character the same shape as today's, running on every `renderedDisplayText`
+change. Nor is it external-specific -- an external and an internal 1.5M note
+measure within a millisecond of each other.
+
+Worth stating plainly, because "we used to have this resolved" is a real memory
+and deserves a real explanation: the instrument that said so had a **~14ms
+floor**. `perf:input-lag` reported ~14ms on a 3,000-character note and ~16ms on
+a 400,000-character one, so anything under about 15ms of app cost was invisible
+to it, and a note that had got slower by 10ms looked unchanged. What was
+resolved was the *catastrophic* scaling (seconds per keystroke); what remained
+was a diffuse cost the old tool could not see.
+
+### Where a keystroke actually went, at 1.5M characters
+
+CDP profile, attributed to the app frame that asked for the work, over 15
+keystrokes:
+
+| | per keystroke |
+| --- | --- |
+| `parseStructuralRanges` (preview block split) | 8.5ms |
+| `computeMinimalTextReplacement` | 5.1ms |
+| `normalizeForComparison` (snapshot compare) | 2.3ms |
+| everything else, individually small | the rest of ~28ms |
+
+Two of those were fixed. The third was already correct -- it is debounced at
+200ms, and only looked per-keystroke because the fixture typed at 300ms
+intervals, which settles the debounce every time. **A measurement cadence
+slower than a debounce turns deferred work back into per-keystroke work; read
+any profile taken that way with that in mind.**
+
+### Fix 1: the split no longer runs for a pane nobody can see
+
+In edit mode the preview is dual-mounted but hidden, and nothing on screen
+derives from its blocks -- yet the split ran on every keystroke anyway, the
+single most expensive thing a keystroke did.
+
+It now runs on a *settled* copy of the text while hidden
+(`PREVIEW_SPLIT_SETTLE_MS`, 180ms), and on the live text the moment render view
+is entered -- read from `isPreviewMode` in the same render, so the toggle never
+shows a stale pane. Deliberately a settle and NOT "recompute once on toggle":
+the incremental split is only cheap because each call diffs against the previous
+one, so letting it fall arbitrarily far behind would trade a per-keystroke cost
+for a multi-second parse at the worst possible moment.
+
+### Fix 2: the minimal diff stopped allocating a string per character
+
+`computeMinimalTextReplacement` compared with `text[i]`, which yields a
+one-character STRING per position. Both its scans walk everything the edit did
+not touch -- for a keystroke mid-document, the whole note. Switching to
+`charCodeAt` allocates nothing and is exact for the purpose (two strings are
+equal iff their code-unit sequences are). It is on the keystroke path through
+`WordCount.ts`'s incremental tracker, which needs the edit's position before it
+can widen a word window around it. 5.1ms -> 3.6ms per keystroke.
+
+### Result
+
+`measureTypeLatency.mjs`, keydown to end of the synchronous task:
+
+| document | before | after |
+| --- | --- | --- |
+| 1.5M chars | 28.3ms (median 27.0) | **18.1ms (median 16.8)** |
+| 1.5M chars, 6x throttle | 204ms | **120ms** |
+
+And the property that actually matters, which is not a single number but a
+*ratio* -- typing in a huge note should cost what typing in a small one costs:
+
+| document | handler |
+| --- | --- |
+| 5,000 chars | 14.7ms |
+| 400,000 chars | 18.9ms |
+| 1,500,000 chars | 18.1ms |
+
+Roughly 3ms of spread across a 300x range of document size, against ~13ms
+before. The cost is now dominated by fixed per-keystroke overhead rather than
+by document length.
+
+Verified: `npm test` 870/870, tsc and lint unchanged, and the full preview
+suite (`verifyPreviewWindow`, `verifyModeToggleRoundTrip`,
+`verifyPreviewTrackLanding`, `verifyPreviewRestStability`,
+`verifyPreviewCharThumb`) all passing -- that suite is what makes the split
+gate safe to believe, since it exercises the pane the gate defers.
+
+### What is left
+
+~14ms of fixed per-keystroke overhead that a 5,000-character note pays too:
+CM6's own commit, the app's React re-render, the caret pass. Getting under one
+frame at 6x throttle needs that floor attacked, not more document-scale work.
+The long-task count at 6x rises after this change (40 vs 3) precisely because
+the split now lands in its own deferred task instead of inside the keydown --
+better for the keystroke, and the next thing to look at for sustained fast
+typing on a slow machine.

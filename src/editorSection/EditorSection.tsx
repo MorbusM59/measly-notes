@@ -106,9 +106,7 @@ export interface EditorSectionProps extends Omit<SectionEditorAreaProps,
   isApplyingInitialViewportRef: MutableRefObject<boolean>
   pendingViewportRestoreRef: MutableRefObject<PersistedViewportState | null>
   externalNoteOriginalTextByIdRef: MutableRefObject<Map<string, string>>
-  externalNoteOriginalHashByIdRef: MutableRefObject<Map<string, string>>
   activeNoteExternalPathRef: MutableRefObject<string | null>
-  setCurrentExternalNoteHash: Dispatch<SetStateAction<string | null>>
 
   queueAppStateSaveStable: (selectedNoteId: string | null) => void
   updateActiveNoteTitlePreviewStable: (nextText: string) => void
@@ -193,9 +191,7 @@ export function EditorSection({
   isApplyingInitialViewportRef,
   pendingViewportRestoreRef,
   externalNoteOriginalTextByIdRef,
-  externalNoteOriginalHashByIdRef,
   activeNoteExternalPathRef,
-  setCurrentExternalNoteHash,
   queueAppStateSaveStable,
   updateActiveNoteTitlePreviewStable,
   revealNoteInMenuStable,
@@ -455,10 +451,8 @@ export function EditorSection({
     isApplyingInitialViewportRef,
     pendingViewportRestoreRef,
     notes,
-    setNotes,
     activeNoteHasDebugTagRef,
     setIsCaretSuspended,
-    externalNoteOriginalTextByIdRef,
     queueSave,
     queueAppStateSave: queueAppStateSaveStable,
     updateActiveNoteTitlePreview: updateActiveNoteTitlePreviewStable,
@@ -531,8 +525,7 @@ export function EditorSection({
   const evictPermanentlyDeletedNoteCaches = useCallback((noteId: string) => {
     editModeSnapshotByNoteIdRef.current.delete(noteId)
     externalNoteOriginalTextByIdRef.current.delete(noteId)
-    externalNoteOriginalHashByIdRef.current.delete(noteId)
-  }, [editModeSnapshotByNoteIdRef, externalNoteOriginalTextByIdRef, externalNoteOriginalHashByIdRef])
+  }, [editModeSnapshotByNoteIdRef, externalNoteOriginalTextByIdRef])
 
   // Local, not activeNoteSummary (computed further below, after this hook
   // call): the auto-TOC/auto-Open-Items chapter has no Time Machine history
@@ -755,29 +748,51 @@ export function EditorSection({
     let originalHash: string | null = null
 
     if (isExternalNote(loaded)) {
+      // Rows come back newest-first, so the first from-disk row IS the most
+      // recent record of what the file held -- identified by its own column
+      // rather than by scanning for one that isn't manual (which stopped
+      // meaning "the original" as soon as a second automatic snapshot existed).
       const snapshotRows = await window.thockdownNotes?.getNoteSnapshots({ id: loaded.id }) ?? []
-      const originalSnapshotRow = snapshotRows.find((row) => !row.isManual) ?? snapshotRows[0]
+      let baselineRow = snapshotRows.find((row) => row.isFromDisk) ?? null
 
-      originalText = originalSnapshotRow
-        ? normalizeInternalText(originalSnapshotRow.content)
-        : hydratedText
-
-      console.warn('[external-note] activating external note', {
-        noteId: loaded.id,
-        snapshotCount: snapshotRows.length,
-        hasOriginalSnapshot: !!originalSnapshotRow,
-        hydratedLength: hydratedText.length,
-        externalPath: loaded.externalPath,
-      })
-
-      if (!snapshotRows.some((row) => !row.isManual)) {
-        await window.thockdownNotes?.saveNoteSnapshot({ id: loaded.id, content: hydratedText, isManual: false })
-        console.warn('[external-note] created initial original snapshot for external note', { noteId: loaded.id, textLength: hydratedText.length })
+      // A note imported by an older build has no from-disk row yet. Establish
+      // one from the FILE, not from the hydrated database text: a baseline is
+      // a claim about what is on disk, and seeding it from the note's current
+      // content would assert the file matches when it may not -- exactly the
+      // false "in sync" this rework exists to remove. Reading the file once,
+      // on first activation of a legacy note, is the honest migration.
+      if (!baselineRow && loaded.externalPath && window.thockdownExternalFiles) {
+        const diskSnapshot = await window.thockdownExternalFiles.readFileSnapshot(loaded.externalPath)
+        if (diskSnapshot) {
+          const diskContent = normalizeInternalText(diskSnapshot.content)
+          await window.thockdownNotes?.saveNoteSnapshot({
+            id: loaded.id,
+            content: diskContent,
+            isManual: true,
+            isFromDisk: true,
+            timestamp: new Date(diskSnapshot.modifiedAtMs).toISOString(),
+          })
+          baselineRow = {
+            id: -1,
+            noteId: loaded.id,
+            content: diskContent,
+            timestamp: new Date(diskSnapshot.modifiedAtMs).toISOString(),
+            isManual: true,
+            isFromDisk: true,
+          }
+          console.warn('[external-note] backfilled from-disk baseline for a legacy external note', {
+            noteId: loaded.id, textLength: diskContent.length, modifiedAtMs: diskSnapshot.modifiedAtMs,
+          })
+        }
       }
+
+      // Only if the file could not be read at all. The note still needs some
+      // baseline to compare against, and its own hydrated text at least makes
+      // the modified indicator quiet rather than permanently wrong.
+      originalText = baselineRow ? normalizeInternalText(baselineRow.content) : hydratedText
 
       externalNoteOriginalTextByIdRef.current.set(loaded.id, originalText)
       originalHash = await hashNormalizedText(originalText)
-      externalNoteOriginalHashByIdRef.current.set(loaded.id, originalHash)
       activeNoteExternalPathRef.current = loaded.externalPath ?? null
       console.warn('[external-note] stored original hash for external note', {
         noteId: loaded.id,
@@ -825,7 +840,6 @@ export function EditorSection({
     activeNoteExternalPathRef,
     activeNoteTextRef,
     editModeSnapshotByNoteIdRef,
-    externalNoteOriginalHashByIdRef,
     externalNoteOriginalTextByIdRef,
     latestEditViewportRef,
     latestEditorTextRef,
@@ -1206,8 +1220,6 @@ export function EditorSection({
     sidebarMode,
     activeNoteExternalPathRef,
     externalNoteOriginalTextByIdRef,
-    externalNoteOriginalHashByIdRef,
-    setCurrentExternalNoteHash,
     onNotePermanentlyDeleted: evictPermanentlyDeletedNoteCaches,
     menuIdentityNoteId,
     refreshChapters,

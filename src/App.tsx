@@ -116,7 +116,6 @@ import {
 import { BORDER_ALPHA_TOKENS, BOX_SHADOW_ALPHA_TOKENS } from './shared/borderShadowAlphaTokens'
 import { DEBUG_TAG_NAME, PROTECTED_TAGS, normalizeTagName } from './shared/tags'
 import { EditorSection } from './editorSection/EditorSection'
-import { SAVE_DEBOUNCE_MS } from './editorSection/useNoteSaveQueue'
 import { EditorToolbar } from './toolbar/EditorToolbar'
 import { DEFAULT_EDITOR_SECTION_ID, type EditorSectionEntry } from './shared/sections'
 import { computeSlotWidthsForCloseFlexAware, computeSlotWidthsForNewSlotFlexAware, computeSlotWidthsPx, type SlotWidthPx } from './shared/slotWidths'
@@ -1807,14 +1806,6 @@ function escapeAttributeSelectorValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
-async function hashNormalizedText(text: string): Promise<string> {
-  const normalized = normalizeInternalText(text)
-  const encoder = new TextEncoder()
-  const data = encoder.encode(normalized)
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 function App() {
   useWindowDragRegion()
 
@@ -2093,8 +2084,6 @@ function App() {
   // input all stayed empty) with no indication anything was wrong.
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
   const activeNoteExternalPathRef = useRef<string | null>(null)
-  const [currentExternalNoteHash, setCurrentExternalNoteHash] = useState<string | null>(null)
-  const externalNoteHashDebounceRef = useRef<number | null>(null)
   const [persistenceReady, setPersistenceReady] = useState(false)
   // Seeded at the shell's own minimum; the real width lands on the first
   // ResizeObserver callback (see appShellMinWidthPx).
@@ -2439,7 +2428,6 @@ function App() {
   const isWritingDebugEntryRef = useRef(false)
   const debugNoteCreationPromiseRef = useRef<Promise<string | null> | null>(null)
   const externalNoteOriginalTextByIdRef = useRef<Map<string, string>>(new Map())
-  const externalNoteOriginalHashByIdRef = useRef<Map<string, string>>(new Map())
   const pendingSidebarScrollRestoreRef = useRef<{ mode: SidebarMode; scrollTop: number } | null>(null)
   // Stay here rather than move into useEditorSectionMount: activateNote and
   // queueAppStateSave (both still in App.tsx) also read/write these, and
@@ -5838,14 +5826,16 @@ ${markdownHtml}
         return
       }
 
-      const [fileName, content] = await Promise.all([
+      const [fileName, diskSnapshot] = await Promise.all([
         externalApi.getFileBasename(filePath),
-        externalApi.readFileContent(filePath),
+        externalApi.readFileSnapshot(filePath),
       ])
 
-      if (content === null) {
+      if (diskSnapshot === null) {
         return
       }
+
+      const content = diskSnapshot.content
 
       const initialTitle = titleFromFileBasename(fileName)
       const created = await notesApi.createNote({ initialText: content, externalPath: filePath, title: initialTitle })
@@ -5855,8 +5845,22 @@ ${markdownHtml}
       const normalizedContent = normalizeInternalText(content)
       await notesApi.saveNote({ id: noteId, text: normalizedContent })
       console.debug('[external-note] saved imported external content into temp note', { noteId, filePath, contentLength: normalizedContent.length })
-      await notesApi.saveNoteSnapshot({ id: noteId, content: normalizedContent, isManual: false })
-      console.debug('[external-note] saved original external snapshot', { noteId, filePath, contentLength: normalizedContent.length })
+      // The note's baseline: what the FILE held, stamped with the file's own
+      // modified time rather than the moment of import. Marked isFromDisk so
+      // it is identifiable outright -- everything that later asks "has this
+      // note changed since it came off disk" compares against this row, and
+      // the previous approach (scan for a snapshot that isn't manual) picked a
+      // different row as soon as an ordinary save added a second automatic one.
+      await notesApi.saveNoteSnapshot({
+        id: noteId,
+        content: normalizedContent,
+        isManual: true,
+        isFromDisk: true,
+        timestamp: new Date(diskSnapshot.modifiedAtMs).toISOString(),
+      })
+      console.debug('[external-note] saved from-disk baseline snapshot', {
+        noteId, filePath, contentLength: normalizedContent.length, modifiedAtMs: diskSnapshot.modifiedAtMs,
+      })
       await notesApi.updateExternalNoteState({ id: noteId, hasUnsavedChanges: false, syncMode: true })
       console.debug('[external-note] updated temp note sync state for imported external file', { noteId, hasUnsavedChanges: false, syncMode: true })
       await refreshNotes(noteId)
@@ -5927,74 +5931,59 @@ ${markdownHtml}
     enqueueExternalFileImport(file.path, targetSectionId)
   }, [enqueueExternalFileImport])
 
-  const getCurrentExternalNoteModifiedState = useCallback((note: NoteSummary, currentHash: string | null = currentExternalNoteHash): boolean => {
+  /**
+   * Whether an external note differs from what was last recorded on disk.
+   *
+   * One mechanism, not three. This used to be backed by a second, independent
+   * opinion: a `SAVE_DEBOUNCE_MS` effect that ran a full-document SHA-256 of
+   * the note after every edit, compared it to a hash of the baseline, and
+   * called `setNotes` with the answer.
+   *
+   * It was redundant. `useEditorSectionMount`'s own external branch already
+   * maintains `hasUnsavedChanges` from exactly the same comparison, made
+   * against the same baseline, synchronously on the edit itself -- and it does
+   * it with a string comparison, which is effectively free here because an
+   * edit almost always changes the document's LENGTH and V8 settles unequal
+   * lengths without looking at the characters. Hashing 1.5M characters to
+   * learn the same boolean is work nobody asked for.
+   *
+   * It was also harmful. Every one of those hashes ended in a `setNotes`,
+   * whose re-render is one more chance to carry a stale text back into the
+   * editor -- the failure this whole round has been chasing. Removing it is
+   * both the cheaper and the safer answer.
+   */
+  const getCurrentExternalNoteModifiedState = useCallback((note: NoteSummary): boolean => {
     if (!isExternalNote(note)) return false
-    if (note.id !== activeSectionSnapshot?.activeNoteId) {
-      return Boolean(note.hasUnsavedChanges)
+
+    // DERIVED, not tracked. For the note currently open, "does this differ
+    // from the file" is answered by comparing the live document against the
+    // baseline -- the content of the note's latest isFromDisk snapshot, held
+    // in externalNoteOriginalTextByIdRef from activation.
+    //
+    // It used to be tracked instead: the editor's own keystroke path compared
+    // the same two strings, then pushed the answer through React state and an
+    // IPC round trip whose reply pushed it again. That is what made an
+    // external note behave differently from an ordinary one while typing, and
+    // the extra renders it produced are what let a stale text reach the editor
+    // -- dropped keystrokes and a caret left behind, none of which happen once
+    // the external tag is removed.
+    //
+    // The comparison itself is cheap where it now sits: an edit almost always
+    // changes the document's LENGTH, and V8 settles unequal-length strings
+    // without reading their characters.
+    if (note.id === activeSectionSnapshot?.activeNoteId) {
+      const baseline = externalNoteOriginalTextByIdRef.current.get(note.id)
+      if (baseline === undefined) return Boolean(note.hasUnsavedChanges)
+      const liveText = activeSectionSnapshot?.latestEditorTextRef.current
+        || activeSectionSnapshot?.activeNoteText
+        || ''
+      return normalizeInternalText(liveText) !== baseline
     }
 
-    if (note.hasUnsavedChanges) {
-      return true
-    }
-
-    return (
-      currentHash !== null
-      && currentHash !== externalNoteOriginalHashByIdRef.current.get(note.id)
-    )
-  }, [activeSectionSnapshot?.activeNoteId, currentExternalNoteHash])
-
-  useEffect(() => {
-    if (externalNoteHashDebounceRef.current !== null) {
-      window.clearTimeout(externalNoteHashDebounceRef.current)
-      externalNoteHashDebounceRef.current = null
-    }
-
-    const activeNoteId = activeSectionSnapshot?.activeNoteId
-    const activeNoteSummary = activeSectionSnapshot?.activeNoteSummary
-    if (!activeNoteId || !activeNoteSummary || !isExternalNote(activeNoteSummary)) {
-      setCurrentExternalNoteHash(null)
-      return
-    }
-
-    let disposed = false
-    const computeHash = async () => {
-      const currentText = normalizeInternalText(activeSectionSnapshot?.latestEditorTextRef.current || activeSectionSnapshot?.activeNoteText || '')
-      const hash = await hashNormalizedText(currentText)
-      if (disposed) return
-
-      setCurrentExternalNoteHash(hash)
-
-      const updatedState = getCurrentExternalNoteModifiedState(activeNoteSummary, hash)
-      setNotes((previous) => {
-        const index = previous.findIndex((note) => note.id === activeNoteId)
-        if (index < 0) return previous
-        const existing = previous[index]
-        if (existing.hasUnsavedChanges === updatedState) return previous
-        const next = [...previous]
-        next[index] = { ...existing, hasUnsavedChanges: updatedState }
-        return next
-      })
-    }
-
-    // Debounced on the same cadence as the save queue itself
-    // (SAVE_DEBOUNCE_MS): this hash only drives the "unsaved changes"
-    // indicator, not anything needing per-keystroke freshness. Previously
-    // ran a full-document SHA-256 on every keystroke, because
-    // activeSectionSnapshot (activeNoteText/currentEditorText are both
-    // fields on it) gets a new object identity every keystroke.
-    externalNoteHashDebounceRef.current = window.setTimeout(() => {
-      externalNoteHashDebounceRef.current = null
-      void computeHash()
-    }, SAVE_DEBOUNCE_MS)
-
-    return () => {
-      disposed = true
-      if (externalNoteHashDebounceRef.current !== null) {
-        window.clearTimeout(externalNoteHashDebounceRef.current)
-        externalNoteHashDebounceRef.current = null
-      }
-    }
-  }, [activeSectionSnapshot, getCurrentExternalNoteModifiedState])
+    // A note that is not open has no live document to compare; its persisted
+    // flag is the last thing a save or close recorded about it.
+    return Boolean(note.hasUnsavedChanges)
+  }, [activeSectionSnapshot, externalNoteOriginalTextByIdRef])
 
   const updateNoteAssignedId = useCallback((noteId: string, assignedId: string) => {
     setNotes((previous) => previous.map((note) => (note.id === noteId ? { ...note, assignedId } : note)))
@@ -9827,9 +9816,7 @@ ${markdownHtml}
                   isApplyingInitialViewportRef={isApplyingInitialViewportRef}
                   pendingViewportRestoreRef={pendingViewportRestoreRef}
                   externalNoteOriginalTextByIdRef={externalNoteOriginalTextByIdRef}
-                  externalNoteOriginalHashByIdRef={externalNoteOriginalHashByIdRef}
                   activeNoteExternalPathRef={activeNoteExternalPathRef}
-                  setCurrentExternalNoteHash={setCurrentExternalNoteHash}
                   queueAppStateSaveStable={queueAppStateSaveStable}
                   updateActiveNoteTitlePreviewStable={updateActiveNoteTitlePreviewStable}
                   revealNoteInMenuStable={revealNoteInMenuStable}

@@ -2,7 +2,6 @@ import { useCallback, useMemo, useRef, useEffect, useLayoutEffect } from 'react'
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import type { PersistedViewportState } from '../shared/appState'
 import type { NoteSummary } from '../shared/noteLifecycle'
-import { isExternalNote, isSameNoteSummary } from '../shared/noteLifecycle'
 import type {
   EditorAdapter,
   EditorBindings,
@@ -107,11 +106,9 @@ export interface UseEditorSectionMountOptions {
 
   /** The full shared notes list -- read (not just written) by onTextChange's external-note bookkeeping. */
   notes: NoteSummary[]
-  setNotes: Dispatch<SetStateAction<NoteSummary[]>>
   /** A ref, not a direct value: activeNoteHasDebugTag is computed later in App.tsx than this hook is called, and every usage here is a synchronous read-at-call-time guard, never a reactive dependency. */
   activeNoteHasDebugTagRef: MutableRefObject<boolean>
   setIsCaretSuspended: Dispatch<SetStateAction<boolean>>
-  externalNoteOriginalTextByIdRef: MutableRefObject<Map<string, string>>
 
   queueSave: (text: string, cursorPos?: number | null) => void
   queueAppStateSave: (selectedNoteId: string | null) => void
@@ -292,10 +289,8 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     isApplyingInitialViewportRef,
     pendingViewportRestoreRef,
     notes,
-    setNotes,
     activeNoteHasDebugTagRef,
     setIsCaretSuspended,
-    externalNoteOriginalTextByIdRef,
     queueSave,
     queueAppStateSave,
     updateActiveNoteTitlePreview,
@@ -1464,58 +1459,27 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
 
       if (!activeNoteId || !persistenceReady || activeNoteHasDebugTagRef.current) return
 
-      const noteSummary = notesRef.current.find((note) => note.id === activeNoteId)
-      const isExternal = noteSummary ? isExternalNote(noteSummary) : false
       const isUserEditableSource =
         event.source === 'user-input' || event.source === 'history-undo' || event.source === 'history-redo'
 
-      if (isExternal && isUserEditableSource) {
-        console.warn('[external-note] editor text change detected for external note', {
-          noteId: activeNoteId,
-          textLength: canonicalText.length,
-          source: event.source,
-        })
-
-        const originalExternalText = externalNoteOriginalTextByIdRef.current.get(activeNoteId)
-        debugLogCheckpoint('before canonicalText !== originalExternalText comparison')
-        const isCurrentlyModified = originalExternalText !== undefined
-          ? canonicalText !== originalExternalText
-          : Boolean(noteSummary && noteSummary.hasUnsavedChanges)
-        debugLogCheckpoint('after canonicalText !== originalExternalText comparison')
-
-        if (noteSummary && noteSummary.hasUnsavedChanges !== isCurrentlyModified) {
-          setNotes((previous) => {
-            const index = previous.findIndex((note) => note.id === activeNoteId)
-            if (index < 0) return previous
-            const existing = previous[index]
-            if (existing.hasUnsavedChanges === isCurrentlyModified) return previous
-            const next = [...previous]
-            next[index] = { ...existing, hasUnsavedChanges: isCurrentlyModified }
-            return next
-          })
-
-          const notesApi = window.thockdownNotes
-          if (notesApi) {
-            void notesApi.updateExternalNoteState({
-              id: activeNoteId,
-              hasUnsavedChanges: isCurrentlyModified,
-              syncMode: !isCurrentlyModified,
-            }).then((updatedSummary) => {
-              setNotes((previous) => {
-                const index = previous.findIndex((note) => note.id === updatedSummary.id)
-                if (index < 0) return previous
-                const existing = previous[index]
-                if (isSameNoteSummary(existing, updatedSummary)) return previous
-                const next = [...previous]
-                next[index] = updatedSummary
-                return next
-              })
-            }).catch((error) => {
-              console.error('[external-note] failed to persist unsaved state', { noteId: activeNoteId, isCurrentlyModified, error })
-            })
-          }
-        }
-      }
+      // NOTHING EXTERNAL-SPECIFIC HAPPENS HERE ANY MORE, deliberately.
+      //
+      // This used to carry a whole second bookkeeping path for external notes:
+      // find the note's summary, compare the document against the baseline,
+      // and -- on the modified-state transition -- a setNotes plus an
+      // updateExternalNoteState IPC whose .then fired another setNotes. An
+      // external note is a note. Its text is saved by the same queue, into the
+      // same database, on the same cadence as any other; what makes it
+      // external is that a copy of it also lives in a file, and that is a fact
+      // about SAVING, not about typing.
+      //
+      // Whether it differs from the file is now derived where it is displayed
+      // (App.tsx's getCurrentExternalNoteModifiedState, against the latest
+      // isFromDisk snapshot) rather than pushed through React state on the
+      // keystroke path. Deriving costs a string comparison at render time,
+      // which for an edit is settled by length alone; pushing cost two state
+      // updates and a round trip, and every one of those re-renders was
+      // another chance to carry a stale text back into the editor.
       debugLogCheckpoint('after isExternal block')
 
       if (!isUserEditableSource) {
@@ -1872,7 +1836,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     scheduleCoalescedPreviewCommit,
     deriveTypingSoundKeyId,
     resolveTypingSoundSpatialPan,
-    externalNoteOriginalTextByIdRef,
     isApplyingInitialViewportRef,
     latestEditorSelectionRef,
     latestEditorTextRef,
@@ -1880,7 +1843,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     setActiveNoteText,
     setEditorSelection,
     setEditorTextVersion,
-    setNotes,
     shouldPlayReverseTypingSound,
     shouldPlayTypingSound,
   ])

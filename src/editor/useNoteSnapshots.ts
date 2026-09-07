@@ -11,6 +11,8 @@ export type NoteSnapshotRecord = {
   content: string
   timestamp: string
   isManual: boolean
+  /** Recorded what the FILE held, for an external note. */
+  isFromDisk?: boolean
 }
 
 export type UseNoteSnapshotsResult = {
@@ -89,6 +91,7 @@ export function useNoteSnapshots(sectionId: string, noteId: string | null, liveT
       id: s.id,
       timestamp: s.timestamp,
       isManual: s.isManual,
+      isFromDisk: s.isFromDisk,
     }))
     return computeSnapshotPlacements(likeSnapshots, Date.now(), { curveConstant })
   }, [curveConstant, snapshots])
