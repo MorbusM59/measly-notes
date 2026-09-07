@@ -28,19 +28,19 @@ no longer exists is still being carried.
 `node scripts/perf/measureTypeLatency.mjs --chars=1500000 --shape=realistic
 --keystrokes=10 --position=middle --gap=500 --key=<key>`
 
-Session 3 shipped the first round of this rebuild. Interleaved A/B against
-the pre-session tree, three rounds each, on one machine (slower than the one
-the original figures came from -- compare within a column, not across):
+Sessions 3-4 rebuilt the typing path. Interleaved A/B against the
+pre-session tree on one machine (slower than the one the original figures
+came from -- compare within a column, not across), 30 keystrokes at 250ms:
 
-| key | before | after | Enter penalty |
-| --- | --- | --- | --- |
-| plain character | 42.6 / 53.5 / 41.0 | 33.5 / 34.9 / 32.6 | |
-| **Enter** | 61.3 / 68.4 / 60.3 | 44.3 / 43.5 / 41.8 | **18.7ms → 10.0ms** |
+| key | before | after |
+| --- | --- | --- |
+| plain character | 51.8 / 53.6 ms | 36.4 / 37.3 ms |
+| **Enter** | 78.0 / 79.2 ms | 49.3 / 50.5 ms |
 
-Every "after" run sits below every "before" run for both keys, which is the
-bar this codebase asks for. Roughly a fifth off an ordinary keypress, a
-third off Enter, and the Enter-specific penalty -- the thing this document
-set out to remove -- nearly halved.
+**The Enter penalty -- this document's target -- went from 25.9ms to
+13.0ms.** Every "after" run sits below every "before" run for both keys,
+which is the bar this codebase asks for. Roughly 30% off an ordinary
+keypress, 37% off Enter.
 
 **Interleave, always.** A single before-run and a single after-run taken
 minutes apart on this hardware differ by up to 40% for reasons that have
@@ -130,7 +130,13 @@ and returns `null` in the ordinary case — **it is already built the way this
 document argues for**, and is the model to copy. The contract is only dangerous
 for transforms that actually fire, and Enter fires on essentially every press.
 
-## What Enter actually requires, against what it does
+## What Enter actually requires, against what it did
+
+> **Resolved in session 4.** Enter now reads only what this section says it
+> needs: the caret line's bounds and text (O(line)), and `inFencedCodeBlock`
+> from the section's shared inline-state cache. `countLineIndex` is gone.
+> Kept because the audit method -- write down what the operation actually
+> reads, then compare -- is the point.
 
 Verified by reading `applyMarkdownEnter`'s body: of the whole
 `MarkdownSelectionContext` it is handed, it uses exactly four things —
@@ -481,64 +487,64 @@ would satisfy every text-level assertion in the suite while silently
 restoring the whole-document cost. Both A/B'd by disabling the code under
 test and confirming the tests fail.
 
-# The systemic pattern (this is the next structural step)
+# The systemic pattern, and how it was resolved (session 4)
 
-The transform contract was one instance of a defect this codebase has in at
-least four places. In each, the app **knows the edit**, throws it away at an
-interface boundary, and then spends O(document) rediscovering it — or never
-had it and pays O(document) for want of it:
+The transform contract turned out to be one instance of a defect in four
+places. In each, the app **knew the edit**, discarded it at an interface
+boundary, and then spent O(document) rediscovering it. All four were already
+labelled "incremental", each with a careful doc comment and a fuzz test; each
+had genuinely removed the per-line work and kept an **O(document) front end
+whose only job was to reconstruct the edit**.
 
-| consumer | what it does per keystroke | what it needs |
+| consumer | what it did per keystroke | outcome |
 | --- | --- | --- |
-| `trackWordCount` (`WordCount.ts`, via `EditorSection.tsx`) | `computeMinimalTextReplacement(oldText, newText)` — a full prefix/suffix diff — then does genuinely O(edit) work | the edit |
-| `deriveNoteTitleIncremental` (`noteTitle.ts`) | `text.split('\n')` on the whole document, then O(edit) work | the edit |
-| `updateInlineStateLineCacheIncremental` (`MarkdownContext.ts`) | `text.split('\n')` plus an O(lines) string-comparison diff, then O(edit) work | the edit |
-| `canonicalizeParagraphSegmentsIncremental` (`TextPolicy.ts`) | per-segment prefix/suffix reuse over the whole segment array | the edit |
+| `deriveNoteTitleIncremental` | `text.split('\n')` on the whole note, read `lines[0]`, discarded the rest | **deleted.** The rule had narrowed to "the first line" long ago; the cache was vestigial. Now one regex scan that stops at the first line break. |
+| `canonicalizeParagraphSegmentsIncremental` | — | **deleted.** Dead since Lexical, zero non-test callers. |
+| `updateInlineStateLineCacheIncremental` | split the note into lines, then walked both arrays comparing strings | **fed the edit.** `DocumentLineIndex` splices in O(edit); the changed line range falls out of the edit. The text-diff path stays as the fallback. |
+| `applyMarkdownEnter`'s context | `countLineIndex` (discarded) + a char-by-char scan from offset 0 to the caret, for one boolean | **fed the cache.** `countLineIndex` is gone; the fence flag comes from the caret line's cached entering state. |
+| `trackWordCount` | `computeMinimalTextReplacement`, a full prefix/suffix diff | **left alone** -- and the earlier note that it ran per keystroke was wrong. It sits inside a 200ms debounce; the profile attributed it per keystroke only because the harness types at 500ms intervals, which settles every debounce. See the instrument caveats above. |
 
-Every one of these is *already* labelled "incremental" and has a careful doc
-comment and a fuzz test. The per-line work genuinely was removed. What
-remains is an **O(document) front end whose entire job is to reconstruct the
-edit** — the same thing `applyTransformResult` was doing, for the same
-reason. A past optimization being real is not evidence it went far enough.
+Measured effect of the last two (30-keystroke Enter run): `scanInlineStateFrom`
+(164.3ms), `updateInlineStateLineCacheIncremental` (91.5ms), `countLineIndex`
+(61.2ms) and `computeCommonLinePrefixSuffixLen` (57.7ms) all disappear --
+374ms of self-time replaced by `applyEditToDocumentLineIndex` at 37.9ms.
 
-Their combined self-time in the current profile is roughly 150ms per
-10-keystroke run, and unlike the Enter penalty it is paid on **every key**.
+## What the shared primitives are
 
-**The shape of the fix.** These consumers should be fed the edit, not two
-documents to diff. The producer side now exists on the transform path
-(`EditorTransformResult.edit`) and has always existed on the CM6 side
-(`update.changes`, a `ChangeSet`). What is missing is a single edit-carrying
-channel from the editor to app-state consumers — `onTextChange` currently
-hands over `{text, selection}` and nothing about what changed.
+* **`DocumentLineIndex`** -- the note as lines, maintained by splicing rather
+  than re-splitting. An edit re-splits only the lines it spans and shifts the
+  trailing offsets numerically. Fuzzed against a full rebuild after every step
+  of 2,400 randomized edits. Deliberately *not* a tree; read its doc comment
+  before adding one.
+* **`EditorTextChangeEvent.edit`** and **`EditorTransformResult.edit`** -- the
+  producer side. Null means "recompute", never "nothing changed".
+* **One inline-state cache per section**, owned by `EditorSection`, written by
+  `useEditorSectionMount`'s `onTextChange` (the single writer), read by the
+  formatting toolbar and by Enter. Both readers verify it against the text
+  rather than trusting it, so a stale cache costs correctness nothing.
 
-The obvious shared primitive underneath is a **line index maintained by
-splicing rather than re-splitting**: `lines: string[]` plus
-`lineStartOffsets`, updated per edit in O(changed lines) plus an O(lines)
-pointer memmove, instead of ~30k fresh substring allocations per keystroke.
-Three of the four consumers above start by splitting the document into
-exactly this, independently, every keystroke.
-
-Design it once, deliberately, with the whole consumer list in view — the
-mistake to avoid is bolting an edit parameter onto each of the four in turn
-and ending up with four private incremental line indexes instead of one.
+The rule that made this safe, and the one to keep: **a cache fed a
+caller-supplied edit must verify it, not trust it.** Every consumer compares
+the cache's own text against the text the edit was computed against, and falls
+back to the path that existed before when they disagree.
 
 # Still open
 
-* **The input half of the transform contract.** Enter still calls
-  `resolveMarkdownSelectionContext`, which computes `countLineIndex`
-  (discarded entirely — ~20ms/10 keystrokes) and a full
-  `computeInlineStateAtOffset` scan (~45ms) to extract one boolean,
-  `inFencedCodeBlock`. Q1 and Q2 above say what it actually needs and why
-  wiring it to the existing incremental variant as-is would not help. The
-  fence state is the only genuinely document-wide input any transform has,
-  and it wants the same edit-driven treatment as the table above.
-* **Q5 — the small-note floor.** Still unattributed. Now the more
-  interesting question: with the document-scale costs coming down, what a
+* **Q5 -- the small-note floor.** Still unattributed, and now the most
+  interesting question: with the document-scale costs largely gone, what a
   keystroke costs when there is nothing to be proportional *to* is the next
   ceiling.
-* **Q6 — the 1,319 orphaned lines.** Untouched; consumer lists re-verified
-  as still accurate.
-* **The remaining tier-2 items** not covered by the table above:
-  `invalidatePreviewVirtualizerMeasurementsAfterIndex` (~50ms),
-  `usePreviewMarkdownRendering.tsx:1200` (~49ms), `runPassiveSync` (~59ms),
-  `normalizeForComparison` in `useNoteSnapshots` (~36ms). None audited yet.
+* **Q6 -- the 1,319 orphaned lines.** Untouched; consumer lists re-verified as
+  still accurate. (Session 4 deleted `canonicalizeParagraphSegments` and the
+  note-title cache, which were not on that list.)
+* **The preview/render tier, now the largest remaining block.** None of it
+  audited. From a 30-keystroke Enter profile: `CM6Editor.tsx:1890` (172.9ms),
+  `usePreviewMarkdownRendering.tsx:1200` (163.6ms),
+  `invalidatePreviewVirtualizerMeasurementsAfterIndex` (159.7ms),
+  `normalizeForComparison` in `useNoteSnapshots` (147.9ms), `runPassiveSync`
+  (131.1ms). **Check each against a debounce before believing the
+  attribution** -- that is exactly the mistake made with `trackWordCount`, and
+  the harness's 500ms cadence settles every 200ms debounce in the app.
+* **`applyEditToDocumentLineIndex`'s trailing-offset loop** is O(lines) numeric
+  work (37.9ms per 30 keystrokes). Cheap next to what it replaced, and not
+  worth a tree until something measures it as a problem.
