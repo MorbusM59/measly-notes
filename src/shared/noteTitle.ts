@@ -2,71 +2,47 @@ import { normalizeInternalText } from '../editor/TextPolicy'
 import { truncateTitle } from './textSanitization'
 
 /**
- * O(document length) ground truth: normalizes and splits the whole text,
- * then finds the first `# heading`-shaped line *anywhere in the document*
- * (not just near the top -- `.find()` semantics), falling back to the first
- * non-blank content line if no heading exists at all. Prefer
- * deriveNoteTitleIncremental for the per-keystroke hot path (see its doc
- * comment); this stays around as the correctness fallback it degrades to,
- * and as ground truth for the fuzz test.
+ * Everything normalizeInternalText turns into a line break. The line and
+ * paragraph separators belong here for the same reason `\r` does: after
+ * normalization they ARE newlines, so they end the first line.
  */
-export function deriveNoteTitleFromText(text: string): string {
-  const firstLine = normalizeInternalText(text).split('\n', 1)[0] ?? ''
-  if (firstLine.startsWith('# ')) {
-    return truncateTitle(firstLine.slice(2).trim()) || 'Missing title'
-  }
+const LINE_BREAK = /[\n\r\u2028\u2029]/
 
-  return 'Missing title'
-}
-
-interface FirstMatchCache {
-  lines: string[]
-  /** Index into `lines` of the first line satisfying the predicate, or null if none exists anywhere in the document. */
-  index: number | null
-}
-
-export interface NoteTitleCache {
-  headingMatch: FirstMatchCache
-  /**
-   * null means "not actually known for the current lines" -- distinct from
-   * a real FirstMatchCache with index: null (which means "confirmed no
-   * content line exists"). Left null whenever a call finds a heading and so
-   * never needs (and must not fabricate) a content-match answer; the next
-   * call that actually needs content matching passes this straight to
-   * updateFirstMatchIncremental, which treats null as "no cached answer,
-   * do a full scan" -- correctness fallback, not a lie about what was
-   * checked.
-   */
-  contentMatch: FirstMatchCache | null
+/**
+ * The note's first line, canonicalized -- read without touching the rest of
+ * the document.
+ *
+ * `regex.exec` stops at the first match, and normalization then runs over one
+ * line rather than the note. That matters because a note's title is
+ * re-derived on **every keystroke** (App.tsx's updateActiveNoteTitlePreview,
+ * called from onTextChange and from every transform), and the previous
+ * implementation reached the same first line via `text.split('\n')` -- around
+ * 30,000 substring allocations per keypress on a 1.5M-character note, of
+ * which it read element 0 and discarded the rest.
+ */
+function readCanonicalFirstLine(text: string): string {
+  const match = LINE_BREAK.exec(text)
+  return normalizeInternalText(match ? text.slice(0, match.index) : text)
 }
 
 /**
- * Incremental counterpart to deriveNoteTitleFromText, for the per-keystroke
- * hot path (App.tsx's updateActiveNoteTitlePreview, called from every
- * character/Enter/Tab/markdown-shortcut transform). Always produces the
- * same result as deriveNoteTitleFromText -- verified by NoteTitle.test.ts's
- * fuzz test -- but for the overwhelmingly common case (an edit that isn't
- * to whichever line currently determines the title) does O(edit size) work
- * instead of an O(document length) scan.
+ * A note's title is its first line, and only if that line is a `# ` heading.
  *
- * `text` is assumed already canonical (LF-only, no tabs/CR/BOM) -- true for
- * every call site this feeds, which all derive `text` from
- * normalizeInternalText's own output earlier in the same transform, the
- * same invariant ContractBridgePlugin.tsx's `previousTextRef` reuse already
- * relies on. Skips deriveNoteTitleFromText's own normalizeInternalText call
- * for that reason, same as that established pattern.
+ * There is deliberately no incremental variant. There used to be
+ * (`deriveNoteTitleIncremental`, plus a `NoteTitleCache` and a per-note cache
+ * map in App.tsx), written when the rule was "the first heading-shaped line
+ * anywhere in the document" and a full scan was genuinely needed. The rule
+ * was later narrowed to the first line, which made the whole cache
+ * vestigial -- but the scaffolding stayed, and with it the full-document
+ * split it existed to avoid repeating. Its own tests only ever passed a null
+ * cache, so nothing exercised the incremental path at all.
+ *
+ * Reading one line is cheaper than maintaining a cache of a document, so the
+ * cache is gone rather than fixed. If the rule ever widens again, widen this
+ * function first and only add state back if a measurement asks for it.
  */
-export function deriveNoteTitleIncremental(text: string, previous: NoteTitleCache | null): { title: string; cache: NoteTitleCache } {
-  const lines = text.split('\n')
-  const firstLine = lines[0] ?? ''
-
-  const headingMatch = firstLine.startsWith('# ')
-    ? { lines, index: 0 }
-    : { lines, index: null }
-
-  const title = firstLine.startsWith('# ') ? truncateTitle(firstLine.slice(2).trim()) || 'Missing title' : 'Missing title'
-  return {
-    title,
-    cache: { headingMatch, contentMatch: previous?.contentMatch ?? null },
-  }
+export function deriveNoteTitleFromText(text: string): string {
+  const firstLine = readCanonicalFirstLine(text)
+  if (!firstLine.startsWith('# ')) return 'Missing title'
+  return truncateTitle(firstLine.slice(2).trim()) || 'Missing title'
 }

@@ -160,7 +160,7 @@ import {
 } from './editor/PreviewMarkdown'
 import { normalizeInternalText } from './editor/TextPolicy'
 import { truncateTitle } from './shared/textSanitization'
-import { deriveNoteTitleFromText, deriveNoteTitleIncremental, type NoteTitleCache } from './shared/noteTitle'
+import { deriveNoteTitleFromText } from './shared/noteTitle'
 import { isNoteSearchQueryActive, matchesNoteSearchQuery } from './shared/noteSearch'
 import { ESCAPE_HOLD_MS } from './shared/escapeHold'
 import { HELP_GUIDE_NOTE_IDS, HELP_GUIDE_ROOT_ID } from './shared/helpGuide'
@@ -2145,10 +2145,6 @@ function App() {
   // registers -- populated by bootstrap, drained by the effect below as
   // each section's registry entry appears. Not app state: this is one-shot
   // bootstrap wiring, not something that should trigger a re-render itself.
-  // Per-note incremental cache for deriveNoteTitleIncremental, so
-  // updateActiveNoteTitlePreview's per-keystroke title re-derivation stays
-  // O(edit size) instead of O(document length) -- see shared/noteTitle.ts.
-  const noteTitleCacheByNoteIdRef = useRef<Map<string, NoteTitleCache>>(new Map())
   const initialNoteIdBySectionIdRef = useRef<Map<string, string>>(new Map())
   // Same one-shot hand-off pattern, for forcing a section's bar mode right
   // after it mounts -- used so a section swapped in via the tab-bar-mode
@@ -5633,17 +5629,7 @@ ${markdownHtml}
     const activeNoteId = getActiveSection()?.activeNoteId
     if (!activeNoteId) return
 
-    // Keyed by note id (not a single flat cache) so switching the active
-    // note -- or two split-view sections editing different notes and both
-    // calling this via the shared ref -- never diffs one note's lines
-    // against an unrelated note's; each note keeps its own incremental
-    // state across calls, and a note this ref hasn't seen yet just starts
-    // fresh (same cost as before, never worse).
-    const { title: nextTitle, cache: nextCache } = deriveNoteTitleIncremental(
-      nextText,
-      noteTitleCacheByNoteIdRef.current.get(activeNoteId) ?? null,
-    )
-    noteTitleCacheByNoteIdRef.current.set(activeNoteId, nextCache)
+    const nextTitle = deriveNoteTitleFromText(nextText)
 
     setNotes((previous) => {
       const index = previous.findIndex((note) => note.id === activeNoteId)

@@ -97,6 +97,23 @@ export interface EditorTextChangeEvent {
   // change actually inserted, which depends on the active OS keyboard
   // layout (e.g. QWERTY vs QWERTZ).
   physicalKeyCode?: string;
+  /**
+   * The single contiguous edit that produced `text` from `previousText`, in
+   * `previousText` coordinates -- or null when this change was not a single
+   * range (a multi-range transaction, an undo of one) or has no meaningful
+   * predecessor (initial load).
+   *
+   * Null means "recompute from scratch", never "nothing changed". Consumers
+   * that maintain incremental state off this MUST treat it as the
+   * correctness fallback it is; see DocumentLineIndex.ts, which does.
+   *
+   * Carried so app-state consumers stop rediscovering it. Before this, the
+   * note title, the word count and the markdown inline-state cache each
+   * derived the edit again from two whole documents -- by splitting both
+   * into lines, or by a prefix/suffix diff -- on every keystroke, to do a
+   * few characters' worth of work with the answer.
+   */
+  edit: EditorTextEdit | null;
 }
 
 export interface EditorSelectionChangeEvent {

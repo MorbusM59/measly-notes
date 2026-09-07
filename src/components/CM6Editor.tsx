@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Annotation, Compartment, EditorState, EditorSelection, Prec, RangeSetBuilder } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, EditorSelection, Prec, RangeSetBuilder, type ChangeSet } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, keymap, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -45,7 +45,7 @@ import { sanitizeDocumentText, sanitizeDocumentTextExtended } from '../shared/te
 import { resolveScopeRange, isSameRange, type SelectionScope } from '../editor/ContractBridgeRangeUtils';
 import { computeMinimalTextReplacement } from '../editor/MinimalTextDiff';
 import { createCanonicalTextFilter } from '../editor/CanonicalTextFilter';
-import type { EditorTransformResult } from '../editor/EditorContract';
+import type { EditorTextEdit, EditorTransformResult } from '../editor/EditorContract';
 import { ScrollTransitionController } from '../editor/ScrollTransitionController';
 import type { ReviewFlagEntry, ReviewFlagRemap, ReviewFlagSeverity } from '../shared/reviewFlags';
 import { hashLineText, reviewFlagSeverityRank } from '../shared/reviewFlags';
@@ -207,7 +207,7 @@ import { resolveGlyphWidthPx } from '../editor/EditorTypography';
  * how small the actual edit was -- now dispatches a minimal
  * common-prefix/common-suffix-diffed range instead (same technique already
  * proven in PreviewBlockSplit.ts/MarkdownContext.ts/
- * canonicalizeParagraphSegmentsIncremental). The four pre-commit transform
+ * MarkdownContext.ts's incremental caches). The four pre-commit transform
  * handlers (Tab/Enter/shortcut/character-insert) also no longer call
  * view.state.doc.toString() to build the `text` passed into the
  * EditorBindings callbacks -- they reuse previousTextRef.current, which the
@@ -318,6 +318,31 @@ function toSelectionState(range: { anchor: number; head: number; from: number; t
 // updatedAt-sorted "latest" view just from being opened, never mind actually
 // edited.
 const ProgrammaticHydrationAnnotation = Annotation.define<true>();
+
+/**
+ * The one contiguous `{from, to, insert}` a transaction made, or null when it
+ * made more than one.
+ *
+ * Every keystroke, paste, Enter, Tab and formatting shortcut in this editor
+ * produces exactly one range -- the multi-range case is real (a multi-cursor
+ * edit, an undo that reverts several) but rare, and null is the honest answer
+ * there rather than a lossy summary. Consumers fall back to a full recompute,
+ * which is what they did unconditionally before.
+ *
+ * Reading it costs O(ranges), not O(document): iterChanges walks the
+ * ChangeSet's own range list, and `inserted` is materialized only for the
+ * single range that survives.
+ */
+function readSingleRangeEdit(changes: ChangeSet): EditorTextEdit | null {
+  let found: EditorTextEdit | null = null;
+  let rangeCount = 0;
+  changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    rangeCount += 1;
+    if (rangeCount > 1) return;
+    found = { from: fromA, to: toA, insert: inserted.toString() };
+  });
+  return rangeCount === 1 ? found : null;
+}
 
 /**
  * Applies a transform's result -- the CM6 equivalent of
@@ -3850,6 +3875,7 @@ export function CM6Editor({
             previousText,
             selection: nextSelection,
             physicalKeyCode,
+            edit: readSingleRangeEdit(update.changes),
           };
           debugCheckpoint('before bindings.onTextChange');
           bindingsRef.current?.onTextChange?.(event);
@@ -3988,6 +4014,7 @@ export function CM6Editor({
       text: initialText,
       previousText: '',
       selection: initialSelection,
+      edit: null,
     });
     bindingsRef.current?.onSelectionChange?.({ source: 'initial-load', selection: initialSelection });
     bindingsRef.current?.onViewportChange?.({
