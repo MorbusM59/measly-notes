@@ -49,29 +49,40 @@ describe('wheel nudging', () => {
 })
 
 describe('sound-option glyphs', () => {
-  it('shows the muted speaker whenever nothing can be heard', () => {
-    expect(volumeIcon(0.8, true)).toContain('fa-volume-off')
-    expect(volumeIcon(0, false)).toContain('fa-volume-off')
+  it('shows the off bar when muted, not a quiet speaker', () => {
+    // fa-volume-off is a real level tier (0-32), so it cannot double as the
+    // muted mark without the two states becoming indistinguishable.
+    expect(volumeIcon(0.8, true)).toBe('fa-solid fa-ban')
+    expect(volumeIcon(0, true)).toBe('fa-solid fa-ban')
+    expect(volumeIcon(0, false)).toBe('fa-solid fa-volume-off')
   })
 
-  it('reads the level when audible', () => {
-    expect(volumeIcon(0.2, false)).toContain('fa-volume-low')
-    expect(volumeIcon(0.9, false)).toContain('fa-volume-high')
+  it('splits the volume tiers on the printed numbers 0-32 / 33-65 / 66-99', () => {
+    const at = (display: number) => volumeIcon(fromDisplayLevel(display), false)
+    // Boundaries, from both sides.
+    expect(at(0)).toBe('fa-solid fa-volume-off')
+    expect(at(32)).toBe('fa-solid fa-volume-off')
+    expect(at(33)).toBe('fa-solid fa-volume-low')
+    expect(at(65)).toBe('fa-solid fa-volume-low')
+    expect(at(66)).toBe('fa-solid fa-volume-high')
+    expect(at(99)).toBe('fa-solid fa-volume-high')
   })
 
   it('walks the room glyph through all four tiers', () => {
-    const glyphs = [0, 0.3, 0.6, 0.99, 1].map((room) => roomIcon(room, false))
-    expect(glyphs).toEqual([
-      'fa-solid fa-cube',
-      'fa-solid fa-house',
-      'fa-solid fa-church',
-      'fa-solid fa-mountain',
-      'fa-solid fa-mountain',
-    ])
+    const at = (display: number) => roomIcon(fromDisplayLevel(display), false)
+    expect(at(0)).toBe('fa-solid fa-cube')
+    expect(at(24)).toBe('fa-solid fa-cube')
+    expect(at(25)).toBe('fa-solid fa-house')
+    expect(at(49)).toBe('fa-solid fa-house')
+    expect(at(50)).toBe('fa-solid fa-church')
+    expect(at(74)).toBe('fa-solid fa-church')
+    expect(at(75)).toBe('fa-solid fa-mountain')
+    expect(at(99)).toBe('fa-solid fa-mountain')
   })
 
-  it('puts the same bar on both faces of the reverb switch', () => {
+  it('puts the same bar on every switch that is turned off', () => {
     expect(reverbIcon(true)).toBe('fa-solid fa-ban')
     expect(roomIcon(0.5, true)).toBe('fa-solid fa-ban')
+    expect(volumeIcon(0.5, true)).toBe('fa-solid fa-ban')
   })
 })

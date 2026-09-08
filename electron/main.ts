@@ -662,7 +662,20 @@ function registerIpcHandlers() {
     if (!win || win.isDestroyed()) return false
 
     if (windowIsUtilityCollapsed) {
-      return restoreWindowFromUtilityCollapse()
+      const restored = restoreWindowFromUtilityCollapse()
+      // Leaving mini mode maximizes, matching the glyph on the button that
+      // does it (the expand-to-corners arrows, not a restore-down box). Mini
+      // mode is the app at its smallest, so the way out of it is the app at
+      // its largest -- and the previous windowed size is not lost, because
+      // restore ran first: it is what unmaximize will hand back.
+      //
+      // Deliberately here rather than inside restoreWindowFromUtilityCollapse,
+      // which the 'toggle-maximize' action also calls on its way to deciding
+      // maximize-vs-unmaximize itself; maximizing in there would fight it.
+      if (restored && !win.isMaximized()) {
+        win.maximize()
+      }
+      return restored
     }
 
     const targetSize = resolveUtilityCollapseSize(payload)

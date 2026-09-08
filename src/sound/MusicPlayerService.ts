@@ -68,6 +68,41 @@ export class MissingFileError extends Error {
   }
 }
 
+/**
+ * How far short of the true end a forward seek stops. Landing exactly on the
+ * duration fires `ended`, which would hand the same crossing to two different
+ * code paths at once.
+ */
+export const SEEK_TAIL_GUARD_SEC = 0.05;
+
+/**
+ * Where a seek lands, and what it could not spend getting there.
+ *
+ * Split out of `seek()` as a pure function because the overshoot is what makes
+ * a scrub cross into the neighbouring song at the right offset, and getting
+ * its sign or magnitude wrong shows up as a subtly wrong entry point rather
+ * than as an obvious break -- the kind of arithmetic worth pinning without a
+ * media element in the way.
+ */
+export function resolveSeekTarget(
+  currentTimeSec: number,
+  durationSec: number,
+  fraction: number,
+): { timeSec: number; overshootSec: number } {
+  const maxTimeSec = durationSec - SEEK_TAIL_GUARD_SEC;
+  const requestedSec = currentTimeSec + durationSec * fraction;
+  if (requestedSec > maxTimeSec) {
+    return { timeSec: maxTimeSec, overshootSec: requestedSec - maxTimeSec };
+  }
+  if (requestedSec < 0) {
+    return { timeSec: 0, overshootSec: requestedSec };
+  }
+  return { timeSec: requestedSec, overshootSec: 0 };
+}
+
+/** Longest a from-the-end seek waits for a duration before giving up. */
+const DURATION_WAIT_TIMEOUT_MS = 2000;
+
 type PlaybackEndHandler = () => void;
 
 export class MusicPlayerService {
@@ -329,13 +364,66 @@ export class MusicPlayerService {
    * Seek forward (positive fraction) or backward (negative fraction) by a
    * percentage of the total duration.  Clamped to [0, duration−0.05] so the
    * ended event is not accidentally triggered by a forward seek at the tail.
+   *
+   * Returns the seconds the seek could NOT apply, signed: positive when it ran
+   * past the end, negative when it ran before the start, 0 when it landed
+   * inside the track. The caller uses that overshoot to continue the same
+   * movement into the neighbouring song at the right offset, so holding the
+   * scrub across a track boundary reads as one continuous motion rather than
+   * stalling against the end of the file.  Returns 0 whenever there is nothing
+   * to seek in (no element, or a duration the browser has not reported yet),
+   * because a crossing computed from an unknown duration would be a guess.
    */
-  seek(fraction: number): void {
-    if (!this.element) return;
+  seek(fraction: number): number {
+    if (!this.element) return 0;
     const duration = this.element.duration;
-    if (!Number.isFinite(duration) || duration <= 0) return;
-    const next = this.element.currentTime + duration * fraction;
-    this.element.currentTime = Math.max(0, Math.min(duration - 0.05, next));
+    if (!Number.isFinite(duration) || duration <= 0) return 0;
+    const { timeSec, overshootSec } = resolveSeekTarget(this.element.currentTime, duration, fraction);
+    this.element.currentTime = timeSec;
+    return overshootSec;
+  }
+
+  /**
+   * Position relative to the track's END, waiting for the browser to report a
+   * duration if it has not yet.  Used when a backward scrub crosses into the
+   * previous song: the offset is known ("0.4s before the end") before the
+   * length that offset is measured against is, and seeking to
+   * `duration - offset` the instant playback starts would silently land at 0
+   * because `duration` is still NaN at that point.
+   */
+  async setCurrentTimeFromEnd(secondsBeforeEnd: number): Promise<void> {
+    const el = this.element;
+    if (!el) return;
+    const duration = await this.whenDurationKnown();
+    // Element swapped underneath us (another song started); the newer one owns
+    // its position now, so leaving it alone is the only safe answer.
+    if (!duration || el !== this.element) return;
+    this.setCurrentTime(duration - SEEK_TAIL_GUARD_SEC - Math.max(0, secondsBeforeEnd));
+  }
+
+  /**
+   * Resolves with the current element's duration once known, or 0 if it never
+   * arrives.  Metadata is usually already there (preload is off, but playback
+   * has begun by the time this is called); the listener is for the case where
+   * it is not.
+   */
+  private whenDurationKnown(): Promise<number> {
+    const el = this.element;
+    if (!el) return Promise.resolve(0);
+    if (Number.isFinite(el.duration) && el.duration > 0) return Promise.resolve(el.duration);
+    return new Promise<number>((resolve) => {
+      const settle = () => {
+        el.removeEventListener('loadedmetadata', settle);
+        el.removeEventListener('error', settle);
+        clearTimeout(timer);
+        resolve(Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0);
+      };
+      // Bounded so a file that never reports metadata cannot leave a scrub
+      // gesture waiting on a promise that never settles.
+      const timer = setTimeout(settle, DURATION_WAIT_TIMEOUT_MS);
+      el.addEventListener('loadedmetadata', settle, { once: true });
+      el.addEventListener('error', settle, { once: true });
+    });
   }
 
   private teardownSource(): void {

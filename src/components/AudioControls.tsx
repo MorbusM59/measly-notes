@@ -18,6 +18,12 @@ import {
   toDisplayLevel,
   volumeIcon,
 } from '../shared/musicSoundOptions'
+import {
+  emptyPlayHistory,
+  forgetSong,
+  pushPlayed,
+  stepBack,
+} from '../shared/musicPlayHistory'
 import { useNonPassiveWheel } from '../shared/useNonPassiveWheel'
 import { musicPlayerService, MissingFileError } from '../sound/MusicPlayerService'
 
@@ -123,6 +129,20 @@ export const AudioControls = memo(function AudioControls({
 
   const currentSongRef = useRef<MusicSongEntry | null>(null)
 
+  // Back-stack of what has been played, so the rewind button's right-click can
+  // walk backwards more than one song. A ref, not state: nothing renders from
+  // it (the buttons look the same whether or not a previous song exists), and
+  // it is written from async playback paths where a stale closure would lose
+  // entries. Session-scoped -- a restart starts a fresh tally, with the
+  // restored song as its first entry.
+  const historyRef = useRef(emptyPlayHistory())
+
+  // Guards the song-crossing that a scrub past either end of a track triggers.
+  // The scrub interval keeps firing every 100 ms while the crossing's load is
+  // still in flight, and without this each of those ticks would start its own
+  // crossing and race the others to set the current song.
+  const isCrossingSongRef = useRef(false)
+
   const refreshCountsRef = useRef(async () => {
     const c = await window.thockdownAudioPlayer?.getPlaylistCounts()
     if (c) setCounts(c)
@@ -170,7 +190,49 @@ export const AudioControls = memo(function AudioControls({
 
   // ---------------------------------------------------------------- helpers
 
-  const advanceToNextSong = useCallback(async (slotsOverride?: PlaylistSlot[]) => {
+  /** Where in a track playback should begin, when not at the very start. */
+  type StartPosition = { fromStart: number } | { fromEnd: number }
+
+  /**
+   * Start a song and put the player's state behind it.
+   *
+   * `recordInHistory` is false only when the caller has already moved the
+   * back-stack cursor itself (walking backwards); recording there would
+   * truncate the very entries being walked.
+   */
+  const playSong = useCallback(async (
+    song: MusicSongEntry,
+    options: { position?: StartPosition; recordInHistory?: boolean } = {},
+  ) => {
+    setCurrentSong(song)
+    await musicPlayerService.play(song.filePath)
+    if (options.recordInHistory !== false) {
+      historyRef.current = pushPlayed(historyRef.current, song.id)
+    }
+    const { position } = options
+    if (position && 'fromStart' in position) {
+      musicPlayerService.setCurrentTime(position.fromStart)
+    } else if (position && 'fromEnd' in position) {
+      await musicPlayerService.setCurrentTimeFromEnd(position.fromEnd)
+    }
+    // play() restores gain to the configured volume (it has to, for the
+    // resume-from-pause case), which would undo the scrub dim mid-gesture --
+    // so a crossing that happens during a hold re-applies it.
+    if (isSeekScrubbing.current) musicPlayerService.beginScrub()
+    setIsPlaying(true)
+  }, [])
+
+  /** Drop a song that no longer exists from both the database and the tally. */
+  const purgeMissingSong = useCallback(async (songId: number) => {
+    await window.thockdownAudioPlayer?.purgeSong(songId)
+    historyRef.current = forgetSong(historyRef.current, songId)
+    await refreshCountsRef.current()
+  }, [])
+
+  const advanceToNextSong = useCallback(async (
+    slotsOverride?: PlaylistSlot[],
+    startAtSec = 0,
+  ) => {
     const slots = slotsOverride ?? activeRef.current
     if (slots.length === 0) {
       setIsPlaying(false)
@@ -188,15 +250,12 @@ export const AudioControls = memo(function AudioControls({
         return
       }
       try {
-        setCurrentSong(next)
-        await musicPlayerService.play(next.filePath)
-        setIsPlaying(true)
+        await playSong(next, startAtSec > 0 ? { position: { fromStart: startAtSec } } : {})
         return
       } catch (err) {
         if (err instanceof MissingFileError) {
           // Silently purge the bad entry and try the next song.
-          await window.thockdownAudioPlayer?.purgeSong(next.id)
-          await refreshCountsRef.current()
+          await purgeMissingSong(next.id)
           musicPlayerService.stop()
           continue
         }
@@ -208,7 +267,44 @@ export const AudioControls = memo(function AudioControls({
     // Exhausted retries — give up.
     setIsPlaying(false)
     setCurrentSong(null)
-  }, [])
+  }, [playSong, purgeMissingSong])
+
+  /**
+   * Walk one song back through the tally. Returns false when there is nothing
+   * behind the current song, so callers can leave the playhead where it is
+   * rather than inventing a destination.
+   *
+   * Songs purged since they were played are skipped over rather than treated
+   * as the end of the road -- the loop keeps stepping back past them, which is
+   * what a listener means by "the one before this".
+   */
+  const playPreviousSong = useCallback(async (position?: StartPosition): Promise<boolean> => {
+    for (;;) {
+      const step = stepBack(historyRef.current)
+      if (!step) return false
+
+      const song = await window.thockdownAudioPlayer?.getSongById(step.songId)
+      if (!song) {
+        historyRef.current = forgetSong(historyRef.current, step.songId)
+        continue
+      }
+
+      // Commit the cursor move before playing, so playSong does not re-record
+      // (and thereby truncate) the entries being walked.
+      historyRef.current = step.history
+      try {
+        await playSong(song, { position, recordInHistory: false })
+        return true
+      } catch (err) {
+        if (err instanceof MissingFileError) {
+          await purgeMissingSong(song.id)
+          musicPlayerService.stop()
+          continue
+        }
+        throw err
+      }
+    }
+  }, [playSong, purgeMissingSong])
 
   const refreshCounts = useCallback(async () => {
     await refreshCountsRef.current()
@@ -228,6 +324,9 @@ export const AudioControls = memo(function AudioControls({
       if (cancelled || !song) return
       pendingSeekSecRef.current = initialPositionSec ?? 0
       setCurrentSong(song)
+      // Seed the tally with the restored song, so it is the floor a rewind
+      // walks back to rather than a gap before the first song of this session.
+      historyRef.current = pushPlayed(historyRef.current, song.id)
       if (initialWasPlaying) {
         try {
           await musicPlayerService.play(song.filePath)
@@ -284,10 +383,9 @@ export const AudioControls = memo(function AudioControls({
         } catch (err) {
           if (err instanceof MissingFileError) {
             // File gone since last session — purge and pick a fresh song.
-            await window.thockdownAudioPlayer?.purgeSong(currentSong.id)
+            await purgeMissingSong(currentSong.id)
             setCurrentSong(null)
             musicPlayerService.stop()
-            await refreshCountsRef.current()
             await advanceToNextSong()
           } else {
             throw err
@@ -297,7 +395,7 @@ export const AudioControls = memo(function AudioControls({
         await advanceToNextSong()
       }
     }
-  }, [isPlaying, currentSong, advanceToNextSong])
+  }, [isPlaying, currentSong, advanceToNextSong, purgeMissingSong])
 
   // ---------------------------------------------------------------- favorability button
 
@@ -348,22 +446,23 @@ export const AudioControls = memo(function AudioControls({
       favPrimedRef.current = false
       musicPlayerService.stop()
       setIsPlaying(false)
-      await window.thockdownAudioPlayer?.purgeSong(currentSong.id)
+      await purgeMissingSong(currentSong.id)
       setCurrentSong(null)
-      await refreshCounts()
       // Pick the next song.
       await advanceToNextSong()
     }
     // Normal right-click handled by contextmenu event.
-  }, [currentSong, advanceToNextSong, refreshCounts])
+  }, [currentSong, advanceToNextSong, purgeMissingSong])
 
   // ---------------------------------------------------------------- seek buttons
-  // Two direction-fixed buttons, rewind and forward. Each one always seeks its
-  // OWN way on either mouse button -- the older single button's "right-click
-  // inverts" trick existed only because there was nowhere else to put rewind,
-  // and keeping it once a rewind button exists would mean two controls for one
-  // direction and a right-click that contradicts the glyph under the cursor.
-  // Click: 20% of the track. Hold: 5% per 100 ms after a 200 ms delay.
+  // Two direction-fixed buttons, rewind and forward, each owning its own way
+  // through the music on every gesture:
+  //   left-click        seek 20% of the track that way
+  //   right-click       change song that way (see jumpSong)
+  //   hold either       scrub 5% per 100 ms after a 200 ms delay
+  // A scrub that runs off either end of the track carries the overshoot into
+  // the neighbouring song rather than stalling against the file boundary, so a
+  // held rewind walks backwards through the tally continuously.
 
   const SEEK_HOLD_DELAY_MS = 200
   const SEEK_INTERVAL_MS = 100
@@ -372,6 +471,62 @@ export const AudioControls = memo(function AudioControls({
 
   /** +1 seeks forward, -1 rewinds. */
   type SeekDirection = 1 | -1
+
+  /**
+   * Seek within the current track, continuing into the next or previous song
+   * with whatever the track could not absorb.
+   *
+   * The forward crossing is deliberately the same path a song ending takes,
+   * afterPlay included, because running off the end of a track IS that track
+   * finishing as far as the library's priority bookkeeping is concerned.
+   */
+  const seekBy = useCallback(async (fraction: number) => {
+    const overshootSec = musicPlayerService.seek(fraction)
+    if (overshootSec === 0) return
+    // A crossing is already loading; this tick's overshoot belongs to the track
+    // being left behind, so dropping it is correct rather than merely safe.
+    if (isCrossingSongRef.current) return
+
+    isCrossingSongRef.current = true
+    try {
+      if (overshootSec > 0) {
+        const finished = currentSongRef.current
+        if (finished) await window.thockdownAudioPlayer?.afterPlay(finished.id)
+        await advanceToNextSong(undefined, overshootSec)
+      } else {
+        // No previous song: the playhead stays pinned at 0, which is where
+        // seek() already left it.
+        await playPreviousSong({ fromEnd: -overshootSec })
+      }
+    } finally {
+      isCrossingSongRef.current = false
+    }
+  }, [advanceToNextSong, playPreviousSong])
+
+  /**
+   * Right-click: change song.
+   *
+   * Backward walks the tally. Forward does NOT walk it the other way -- it
+   * always picks a fresh random song, exactly as if the current one had
+   * reached its end, which is the whole of what "skip to the end of this
+   * song" means. That asymmetry is intentional: the tally exists to let a
+   * listener return to something, not to pre-decide what comes next.
+   */
+  const jumpSong = useCallback(async (direction: SeekDirection) => {
+    if (isCrossingSongRef.current) return
+    isCrossingSongRef.current = true
+    try {
+      if (direction === -1) {
+        await playPreviousSong()
+        return
+      }
+      const finished = currentSongRef.current
+      if (finished) await window.thockdownAudioPlayer?.afterPlay(finished.id)
+      await advanceToNextSong()
+    } finally {
+      isCrossingSongRef.current = false
+    }
+  }, [advanceToNextSong, playPreviousSong])
 
   const stopSeekScrub = useCallback(() => {
     if (seekTimerRef.current) {
@@ -394,29 +549,40 @@ export const AudioControls = memo(function AudioControls({
     seekTimerRef.current = setTimeout(() => {
       isSeekScrubbing.current = true
       musicPlayerService.beginScrub()
-      musicPlayerService.seek(direction * SEEK_HOLD_STEP)
+      void seekBy(direction * SEEK_HOLD_STEP)
       seekIntervalRef.current = setInterval(() => {
-        musicPlayerService.seek(direction * SEEK_HOLD_STEP)
+        void seekBy(direction * SEEK_HOLD_STEP)
       }, SEEK_INTERVAL_MS)
     }, SEEK_HOLD_DELAY_MS)
-  }, [])
+  }, [seekBy])
 
-  const handleSeekPointerUp = useCallback((event: React.PointerEvent) => {
+  /**
+   * The right-click action fires from pointer-up rather than from the
+   * contextmenu event, because contextmenu fires on press on some platforms
+   * and on release on others -- and on the press-firing ones it would jump to
+   * another song the instant a hold-to-scrub gesture began, before the scrub
+   * had a chance to mark itself. Waiting for the release means the same code
+   * decides between "this was a click" and "this was a hold" everywhere.
+   */
+  const handleSeekPointerUp = useCallback((event: React.PointerEvent, direction: SeekDirection) => {
     if (event.button !== 0 && event.button !== 2) return
+    const wasScrubbing = isSeekScrubbing.current
     stopSeekScrub()
-  }, [stopSeekScrub])
+    if (wasScrubbing) return
+    if (event.button === 2) void jumpSong(direction)
+  }, [stopSeekScrub, jumpSong])
 
   const handleSeekActivate = useCallback((direction: SeekDirection) => {
     // A hold that already scrubbed swallows the click that ends it, so a
     // release after scrubbing does not tack an extra 20% on top.
     if (isSeekScrubbing.current) return
-    musicPlayerService.seek(direction * SEEK_CLICK_STEP)
-  }, [])
+    void seekBy(direction * SEEK_CLICK_STEP)
+  }, [seekBy])
 
-  const handleSeekContextMenu = useCallback((event: React.MouseEvent, direction: SeekDirection) => {
+  const handleSeekContextMenu = useCallback((event: React.MouseEvent) => {
+    // Suppress the native menu only; the action itself runs on pointer-up.
     event.preventDefault()
-    handleSeekActivate(direction)
-  }, [handleSeekActivate])
+  }, [])
 
   // ---------------------------------------------------------------- playlist buttons
 
@@ -604,12 +770,12 @@ export const AudioControls = memo(function AudioControls({
         <button
           type="button"
           className="audio-ctrl-btn"
-          data-tooltip="Rewind 20%. Hold: scrub back 5%/100 ms."
-          aria-label="Rewind"
+          data-tooltip="Left-click: rewind 20%. Right-click: previous song. Hold: scrub back, crossing into the previous song."
+          aria-label="Rewind or previous song"
           onClick={() => handleSeekActivate(-1)}
-          onContextMenu={(e) => handleSeekContextMenu(e, -1)}
+          onContextMenu={handleSeekContextMenu}
           onPointerDown={(e) => handleSeekPointerDown(e, -1)}
-          onPointerUp={handleSeekPointerUp}
+          onPointerUp={(e) => handleSeekPointerUp(e, -1)}
           onPointerLeave={stopSeekScrub}
         >
           <span className="fa-solid fa-backward" aria-hidden="true" />
@@ -634,12 +800,12 @@ export const AudioControls = memo(function AudioControls({
         <button
           type="button"
           className="audio-ctrl-btn"
-          data-tooltip="Forward 20%. Hold: scrub forward 5%/100 ms."
-          aria-label="Fast forward"
+          data-tooltip="Left-click: forward 20%. Right-click: next song. Hold: scrub forward, crossing into the next song."
+          aria-label="Fast forward or next song"
           onClick={() => handleSeekActivate(1)}
-          onContextMenu={(e) => handleSeekContextMenu(e, 1)}
+          onContextMenu={handleSeekContextMenu}
           onPointerDown={(e) => handleSeekPointerDown(e, 1)}
-          onPointerUp={handleSeekPointerUp}
+          onPointerUp={(e) => handleSeekPointerUp(e, 1)}
           onPointerLeave={stopSeekScrub}
         >
           <span className="fa-solid fa-forward" aria-hidden="true" />

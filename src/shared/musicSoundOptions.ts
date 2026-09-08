@@ -62,23 +62,53 @@ export function nudgeLevel(fraction: number, deltaY: number, coarse: boolean): n
 }
 
 /**
- * Speaker glyph for the volume toggle. Muted always reads `fa-volume-off`, as
- * does an unmuted level of 0 -- the two are told apart by the button's active
- * highlight, not by a second glyph, so the muted icon stays the single
- * recognisable "no sound" mark.
+ * Speaker glyph tiers for the volume button, as [exclusive upper bound of the
+ * displayed level, glyph]. Three equal thirds of the 0-99 range: 0-32, 33-65,
+ * 66-99.
+ */
+export const VOLUME_ICON_TIERS: readonly string[] = [
+  'fa-solid fa-volume-off',
+  'fa-solid fa-volume-low',
+  'fa-solid fa-volume-high',
+];
+
+/**
+ * Speaker glyph for the volume toggle.
+ *
+ * Muted shows `fa-ban`, the same bar the reverb switch uses, rather than a
+ * quiet speaker: a bar reads as "switched off" at a glance and cannot be
+ * confused with a level that merely happens to be low, which `fa-volume-off`
+ * genuinely is at the bottom of its own tier. One "off" mark across all three
+ * switches also means the row can be read without knowing which control is
+ * which.
  *
  * The highlight on these switches marks the DEVIATION, not the healthy state:
  * lit means muted or bypassed. A row of six controls that all light up during
  * ordinary listening would make the lit state mean nothing; lighting only what
- * is currently turned off makes "something here is off" readable at a glance
- * without reading any glyph.
+ * is currently turned off makes "something here is off" readable at a glance.
  */
 export function volumeIcon(volume: number, isMuted: boolean): string {
-  if (isMuted) return 'fa-solid fa-volume-off';
-  const display = toDisplayLevel(volume);
-  if (display === 0) return 'fa-solid fa-volume-off';
-  if (display < 50) return 'fa-solid fa-volume-low';
-  return 'fa-solid fa-volume-high';
+  if (isMuted) return 'fa-solid fa-ban';
+  return pickTier(VOLUME_ICON_TIERS, volume);
+}
+
+/**
+ * Map a 0-1 level onto a tier list.
+ *
+ * Splitting the DISPLAY range rather than the raw fraction is what makes the
+ * boundaries land on the numbers the button prints beside it, so the glyph
+ * changes exactly when the readout crosses the stated value.
+ *
+ * The tier width is floored, which puts any remainder in the TOP tier rather
+ * than spreading it: three tiers give 0-32 / 33-65 / 66-99 (33, 33, 34) and
+ * four give 0-24 / 25-49 / 50-74 / 75-99 (25 each). An even split would put
+ * the three-tier boundaries at 33.3 and 66.6, which lands the glyph change on
+ * a number the readout never shows.
+ */
+function pickTier(tiers: readonly string[], level: number): string {
+  const display = toDisplayLevel(level);
+  const perTier = Math.floor((SOUND_LEVEL_MAX_DISPLAY + 1) / tiers.length);
+  return tiers[Math.min(tiers.length - 1, Math.floor(display / perTier))];
 }
 
 /**
@@ -96,9 +126,7 @@ export const ROOM_ICON_TIERS: readonly string[] = [
 
 export function roomIcon(room: number, isReverbBypassed: boolean): string {
   if (isReverbBypassed) return 'fa-solid fa-ban';
-  const tierCount = ROOM_ICON_TIERS.length;
-  const tier = Math.min(tierCount - 1, Math.floor(clamp01(room) * tierCount));
-  return ROOM_ICON_TIERS[tier];
+  return pickTier(ROOM_ICON_TIERS, room);
 }
 
 /** Reverb toggle glyph: the antenna when engaged, the bar when bypassed. */
