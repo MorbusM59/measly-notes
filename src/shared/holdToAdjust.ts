@@ -51,7 +51,7 @@ import {
  * scale by, not a duration to copy.
  */
 export const HOLD_TRAVEL_BASE_SEC = 0.5;
-export const HOLD_TRAVEL_ANIMATION_MULTIPLIER = 5;
+export const HOLD_TRAVEL_ANIMATION_MULTIPLIER = 2.5;
 
 /** How often a held value is recomputed. Fine enough to read as continuous. */
 export const HOLD_TICK_MS = 20;
