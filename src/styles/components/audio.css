@@ -20,7 +20,7 @@
 
 .audio-micro-grid {
   display:               grid;
-  grid-template-columns: repeat(5, var(--audio-btn-size));
+  grid-template-columns: repeat(6, var(--audio-btn-size));
   grid-template-rows:    auto auto;
   gap:                   var(--audio-control-gap);
 }
@@ -44,8 +44,25 @@
   transition:         background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.audio-playlist-btn {
+.audio-playlist-btn,
+.audio-sound-btn {
   font-size:          14px; /* icon glyph, fixed box -- see --ui-font-scale's scope note in tokens.css */
+}
+
+/* Numeric readouts in the sound-options row. Tabular figures so a level
+   ticking 8 -> 9 -> 10 under the wheel doesn't shift the digits sideways. */
+.audio-sound-level {
+  font-size:          11px; /* two-digit readout, fixed box -- see --ui-font-scale's scope note in tokens.css */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  user-select:        none;
+  cursor:             ns-resize;
+}
+
+/* A level whose toggle is currently off. Still legible and still adjustable
+   (scrolling it turns the toggle back on), just visibly not in effect. */
+.audio-sound-level.is-dimmed {
+  opacity: 0.45;
 }
 
 .audio-ctrl-btn:hover {

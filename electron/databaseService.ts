@@ -66,7 +66,7 @@ import {
 import { DEFAULT_TEXTURE_MATERIALS, TEXTURE_SURFACES, type TextureMaterialSettings, type TextureMaterialsBySurface } from '../src/textures/types';
 import type { MusicSongEntry, PlaylistSlot, PlaylistCountsResult } from '../src/shared/audioPlayer';
 import type { ReviewFlagEntry, ReviewFlagWrite, ReviewFlagRemap } from '../src/shared/reviewFlags';
-import { AUDIO_EXTENSIONS } from '../src/shared/audioPlayer';
+import { AUDIO_EXTENSIONS, emptyPlaylistCounts, isPlaylistSlot, MAX_PLAYLIST_SLOT } from '../src/shared/audioPlayer';
 
 const require = createRequire(import.meta.url);
 let BetterSqlite3: typeof import('better-sqlite3');
@@ -3850,13 +3850,65 @@ export class DatabaseService {
       'SELECT playlistSlot, COUNT(*) AS cnt FROM music_songs GROUP BY playlistSlot'
     ).all() as Array<{ playlistSlot: number; cnt: number }>;
 
-    const result: PlaylistCountsResult = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const result = emptyPlaylistCounts();
     for (const row of rows) {
-      if (row.playlistSlot >= 1 && row.playlistSlot <= 5) {
-        result[row.playlistSlot as PlaylistSlot] = row.cnt;
+      if (isPlaylistSlot(row.playlistSlot)) {
+        result[row.playlistSlot] = row.cnt;
       }
     }
     return result;
+  }
+
+  /**
+   * Widens `music_songs.playlistSlot`'s CHECK constraint when the shared slot
+   * contract grows a bucket.
+   *
+   * The CREATE TABLE above already carries the current range, but it is an
+   * IF NOT EXISTS: on a database written by an older build the table is left
+   * exactly as it was, still refusing the new slot number, and every attempt
+   * to add files to the new bucket would fail a constraint at INSERT time
+   * with nothing in the UI to explain it. SQLite cannot ALTER a CHECK, so the
+   * only fix is the documented 12-step table rebuild, in miniature.
+   *
+   * Idempotent and cheap: it reads the stored DDL and returns immediately
+   * unless the range literal is actually stale, so it costs one
+   * `sqlite_master` lookup on every launch after the one that migrates.
+   * Indexes are recreated explicitly because DROP TABLE takes them with it.
+   */
+  private migrateMusicSongsSlotRange(): void {
+    const db = this.requireDb();
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'music_songs'"
+    ).get() as { sql: string } | undefined;
+    if (!row?.sql) return;
+    if (row.sql.includes(`BETWEEN 1 AND ${MAX_PLAYLIST_SLOT}`)) return;
+
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE music_songs_migrating (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          filePath    TEXT    NOT NULL UNIQUE,
+          playlistSlot INTEGER NOT NULL CHECK(playlistSlot BETWEEN 1 AND ${MAX_PLAYLIST_SLOT}),
+          priority    INTEGER NOT NULL DEFAULT 1,
+          favorability INTEGER NOT NULL DEFAULT 1,
+          title       TEXT    NOT NULL DEFAULT '',
+          artist      TEXT    NOT NULL DEFAULT '',
+          durationSec REAL    NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO music_songs_migrating
+          (id, filePath, playlistSlot, priority, favorability, title, artist, durationSec)
+        SELECT id, filePath, playlistSlot, priority, favorability, title, artist, durationSec
+        FROM music_songs
+        WHERE playlistSlot BETWEEN 1 AND ${MAX_PLAYLIST_SLOT};
+
+        DROP TABLE music_songs;
+        ALTER TABLE music_songs_migrating RENAME TO music_songs;
+
+        CREATE INDEX IF NOT EXISTS idx_music_songs_slot     ON music_songs(playlistSlot);
+        CREATE INDEX IF NOT EXISTS idx_music_songs_priority ON music_songs(priority);
+      `);
+    })();
   }
 
   private ensureSchema(): void {
@@ -3987,7 +4039,7 @@ export class DatabaseService {
       CREATE TABLE IF NOT EXISTS music_songs (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         filePath    TEXT    NOT NULL UNIQUE,
-        playlistSlot INTEGER NOT NULL CHECK(playlistSlot BETWEEN 1 AND 5),
+        playlistSlot INTEGER NOT NULL CHECK(playlistSlot BETWEEN 1 AND ${MAX_PLAYLIST_SLOT}),
         priority    INTEGER NOT NULL DEFAULT 1,
         favorability INTEGER NOT NULL DEFAULT 1,
         title       TEXT    NOT NULL DEFAULT '',
@@ -4188,6 +4240,11 @@ export class DatabaseService {
     // means only actually-orphaned notes lose anything).
     this.migrateChaptersToSingleParent();
     this.migrateChapterTagsToParent();
+    // Deliberately here rather than inside the CREATE TABLE block above, for
+    // the same reason as the chapters migrations: CREATE TABLE IF NOT EXISTS
+    // is a no-op on a database that already has the table, so a widened
+    // CHECK constraint only reaches an existing install through a rebuild.
+    this.migrateMusicSongsSlotRange();
     this.purgeParentlessChapters();
     this.ensureNoteSnapshotsColumn('anchorBlockIndex', 'INTEGER');
     this.ensureNoteSnapshotsColumn('isFromDisk', 'INTEGER NOT NULL DEFAULT 0');

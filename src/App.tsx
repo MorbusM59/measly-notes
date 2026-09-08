@@ -5,6 +5,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, PointerEvent 
 import ReactMarkdown from 'react-markdown'
 import { SidebarOptionsPanel } from './sidebar/SidebarOptionsPanel'
 import { AudioControls } from './components/AudioControls'
+import { isPlaylistSlot } from './shared/audioPlayer'
 import MouseCursorOverlay from './components/MouseCursorOverlay'
 import { installFocusDiagnostics } from './dev/focusDiagnostics'
 import { TooltipLayer } from './components/TooltipLayer'
@@ -2406,8 +2407,12 @@ function App() {
   const [musicVolume, setMusicVolume] = useState(0.8)
   const [musicReverbAmount, setMusicReverbAmount] = useState(0)
   const [musicReverbRoom, setMusicReverbRoom] = useState(0.3)
+  // Mute / bypass are flags over the levels above, never a zeroed level plus a
+  // remembered copy -- see PersistedMenuState's note on why.
+  const [musicMuted, setMusicMuted] = useState(false)
+  const [musicReverbBypassed, setMusicReverbBypassed] = useState(false)
+  const [musicSoundOptionsOpen, setMusicSoundOptionsOpen] = useState(false)
   const [musicActiveSlots, setMusicActiveSlots] = useState<import('./shared/audioPlayer').PlaylistSlot[]>([])
-  const [musicAccordionNonce, setMusicAccordionNonce] = useState(0)
   // Last-played song/position/playing-state restored from the previous session,
   // handed to AudioControls once as its "initial*" props (see below).
   const [musicRestoreSongId, setMusicRestoreSongId] = useState<number | null>(null)
@@ -4172,6 +4177,9 @@ function App() {
       musicVolume,
       musicReverbAmount,
       musicReverbRoom,
+      musicMuted,
+      musicReverbBypassed,
+      musicSoundOptionsOpen,
       musicActiveSlots,
       musicLastSongId: musicPlaybackRef.current.songId ?? undefined,
       musicLastPositionSec: musicPlaybackRef.current.positionSec,
@@ -4294,6 +4302,9 @@ function App() {
     musicVolume,
     musicReverbAmount,
     musicReverbRoom,
+    musicMuted,
+    musicReverbBypassed,
+    musicSoundOptionsOpen,
     musicActiveSlots,
     darkMode,
     uiMode,
@@ -4559,8 +4570,6 @@ function App() {
 
     if (sidebarMode === 'options' && nextMode !== 'options') {
       setLastSidebarModeBeforeOptions(nextMode)
-      // Clear one-shot music force-open intent when leaving options mode.
-      setMusicAccordionNonce(0)
     }
 
     setSidebarViewStateByMode(nextSidebarViewStateByMode)
@@ -6412,9 +6421,12 @@ ${markdownHtml}
             if (typeof appState.menu.musicVolume === 'number') setMusicVolume(appState.menu.musicVolume)
             if (typeof appState.menu.musicReverbAmount === 'number') setMusicReverbAmount(appState.menu.musicReverbAmount)
             if (typeof appState.menu.musicReverbRoom === 'number') setMusicReverbRoom(appState.menu.musicReverbRoom)
+            setMusicMuted(appState.menu.musicMuted ?? false)
+            setMusicReverbBypassed(appState.menu.musicReverbBypassed ?? false)
+            setMusicSoundOptionsOpen(appState.menu.musicSoundOptionsOpen ?? false)
             if (Array.isArray(appState.menu.musicActiveSlots)) {
               setMusicActiveSlots(
-                (appState.menu.musicActiveSlots as number[]).filter((s) => s >= 1 && s <= 5) as import('./shared/audioPlayer').PlaylistSlot[]
+                (appState.menu.musicActiveSlots as number[]).filter(isPlaylistSlot)
               )
             }
             if (typeof appState.menu.musicLastSongId === 'number') {
@@ -9556,13 +9568,6 @@ ${markdownHtml}
                         setReducedCaretAnimation={setReducedCaretAnimation}
                         deferPreviewOnRapidInput={deferPreviewOnRapidInput}
                         setDeferPreviewOnRapidInput={setDeferPreviewOnRapidInput}
-                        musicAccordionNonce={musicAccordionNonce}
-                        musicVolume={musicVolume}
-                        setMusicVolume={setMusicVolume}
-                        musicReverbAmount={musicReverbAmount}
-                        setMusicReverbAmount={setMusicReverbAmount}
-                        musicReverbRoom={musicReverbRoom}
-                        setMusicReverbRoom={setMusicReverbRoom}
                         borderRadiusRegularPx={borderRadiusRegularPx}
                         setBorderRadiusRegularPx={setBorderRadiusRegularPx}
                         spacingRegularPx={spacingRegularPx}
@@ -9836,23 +9841,23 @@ ${markdownHtml}
 
               <AudioControls
                 volume={musicVolume}
+                onVolumeChange={setMusicVolume}
+                isMuted={musicMuted}
+                onMutedChange={setMusicMuted}
                 reverbAmount={musicReverbAmount}
+                onReverbAmountChange={setMusicReverbAmount}
                 reverbRoom={musicReverbRoom}
+                onReverbRoomChange={setMusicReverbRoom}
+                isReverbBypassed={musicReverbBypassed}
+                onReverbBypassedChange={setMusicReverbBypassed}
                 activeSlots={musicActiveSlots}
                 onActiveSlotsChange={setMusicActiveSlots}
                 initialSongId={musicRestoreSongId}
                 initialPositionSec={musicRestorePositionSec}
                 initialWasPlaying={musicRestoreWasPlaying}
                 playbackStateRef={musicPlaybackRef}
-                isOptionsOpen={sidebarMode === 'options'}
-                isMiniMode={windowIsCollapsed}
-                onOpenMusicOptions={() => {
-                  if (sidebarMode !== 'options') setMusicAccordionNonce((n) => n + 1)
-                  toggleSidebarOptionsMenu()
-                }}
-                onAdjustMusicVolume={(delta) => setMusicVolume((v) => clamp(v + delta, 0, 1))}
-                onAdjustMusicReverb={(delta) => setMusicReverbAmount((v) => clamp(v + delta, 0, 1))}
-                onAdjustMusicRoom={(delta) => setMusicReverbRoom((v) => clamp(v + delta, 0, 1))}
+                isSoundOptionsOpen={musicSoundOptionsOpen}
+                onSoundOptionsOpenChange={setMusicSoundOptionsOpen}
               />
 
               <div className="window-controls window-controls-right" aria-label="Window controls right">

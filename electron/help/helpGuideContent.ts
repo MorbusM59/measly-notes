@@ -662,7 +662,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 
 - **Settings (gear)** — opens/closes the Settings panel, see [Settings Panel]($HELP§APPEARANCE-SETTINGS#settings-panel).
 - **Music player** — see [Music Player]($HELP§MUSIC-PLAYER).
-- **Mini mode** — collapses the window into a compact strip; while collapsed, the music player's options button is disabled.
+- **Mini mode** — collapses the window into a compact strip; the music player stays fully usable, sound options included.
 - **Minimize / Maximize–Restore / Close** — standard window controls.
 - **User Guide (lightbulb)** — the upper half of the split maximize button. Opens this guide, exactly like the Quick Actions Menu's own Help cell, see [The User Guide]($HELP§NOTES-EDITING#the-user-guide).
 - **Dark mode / Double size** — a split button in the toolbar's left cluster (not in this bar): the top half switches the whole app between light and dark presets, the bottom half is double size (2x). Double size doubles the app's page zoom and, to match, the window's minimum size, so 2x content gets 2x room instead of being squeezed into the same space. Toggling off relaxes the minimum again but doesn't shrink a window you've since resized larger. Persists across restarts.
@@ -820,15 +820,6 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - Four sound sets — Pops, Pins, Creamy, Forge — plus volume, per-key pitch variance, global pitch, bass/treble mix, reverb, and pitch jitter controls.
 - **Spatial** slider adds stereo panning, centered (off) by default. Left of center pans by keyboard key position (left-hand keys sound from the left, right-hand keys from the right, non-character keys like arrows/Tab/Backspace stay centered); right of center pans by where the caret sits on the current line (line start sounds left, the far edge before an automatic wrap sounds right). The two modes don't blend — the slider picks one or the other by which side of center it's on, with distance from center setting how strong the effect is.
 
-### [Music Settings](#music-settings)
-
-> **Where?**
-> Settings panel → Music.
-
-*Volume and reverb controls for the built-in music player.*
-
-- Controls the same player described in [Music Player]($HELP§MUSIC-PLAYER); this panel just holds its volume and reverb sliders.
-
 ### [Data](#data-synchronization-settings)
 
 > **Where?**
@@ -866,14 +857,16 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 > **Where?**
 > The window-controls bar, center.
 
-*A built-in music player with five themed playlist slots, each holding your own local audio files.*
+*A built-in music player with six themed playlist slots, each holding your own local audio files.*
 
-- Slots: Vocal, Instrumental, Ambient, Rock, Electro.
+- Slots: Vocal, Instrumental, Ambient, Rock, Electro, Lounge.
 - **Adding music** — right-click a slot to pick individual files; shift+right-click to add an entire folder at once.
 - **Clearing a slot** — hold a right-click on a slot until it arms, then release to clear every song in it.
 - **Choosing what plays** — click a slot to toggle it in or out of the active playback pool; more than one slot can be active at once.
-- **Playback** — play/stop; the favorite/skip button (click to favorite the current song for early replay, right-click to skip it, hold right-click to purge it from its slot entirely); the seek button (click forward 20%, right-click back 20%, hold to scrub continuously).
-- **Volume and reverb** — adjustable from [Settings panel → Music]($HELP§APPEARANCE-SETTINGS#music-settings), or directly by scrolling over the player: plain scroll adjusts volume, Shift+scroll adjusts reverb amount, Ctrl+scroll adjusts reverb room size.
+- **Playback** — play/stop; rewind and fast-forward (click for 20%, hold to scrub continuously — each button always moves its own way, on either mouse button); and the favorite/skip button (click to favorite the current song for early replay, right-click to skip it, hold right-click to purge it from its slot entirely).
+- **Sound options** — the headphones button swaps the row of playlist slots for six sound controls, and swaps back. Nothing else opens or closes: volume and reverb live in the player itself, not in the settings panel.
+  - Three of them are **numbers** — volume, reverb, and room size, each reading 0–99. Hover one and scroll to change it; hold Shift to move by ten.
+  - The other three are **switches**. The speaker mutes; the antenna turns reverb off; the room icon (a box, a room, a hall, open air, showing which size you're in) is a second face of that same reverb switch, so either one turns it off and both show the crossed circle while it is. Turning something off never loses its number — switch it back on and it returns to where you left it. So does adjusting the number while it's off: that turns it back on for you.
 - **Resuming across restarts** — if music was playing when the app was last closed, it resumes on launch (same song and position), fading in over 10 seconds from silence and full reverb up to your usual volume/reverb settings.
 `,
   `## Data Storage

@@ -17,8 +17,32 @@ export const AUDIO_PLAYER_CHANNELS = {
   getSongById:          'audio-player:get-song-by-id',
 } as const;
 
-/** One slot out of the 5 playlist buttons (1-indexed). */
-export type PlaylistSlot = 1 | 2 | 3 | 4 | 5;
+/** One slot out of the playlist buttons on the player's bottom row (1-indexed). */
+export type PlaylistSlot = 1 | 2 | 3 | 4 | 5 | 6;
+
+/**
+ * Every playlist slot, in the order their buttons appear. This is the single
+ * source of truth for how many buckets exist: the renderer's button row, the
+ * persisted-state sanitiser's range check, the playlist-count record and the
+ * database's own CHECK constraint (plus the rebuild migration that widens it)
+ * all derive from this array rather than hard-coding a number. Adding a
+ * bucket is a matter of widening `PlaylistSlot`, appending here, and giving
+ * it an icon and a theme name below.
+ */
+export const PLAYLIST_SLOTS: readonly PlaylistSlot[] = [1, 2, 3, 4, 5, 6];
+
+/** Highest valid slot number -- derived, never written out by hand. */
+export const MAX_PLAYLIST_SLOT: PlaylistSlot = PLAYLIST_SLOTS[PLAYLIST_SLOTS.length - 1];
+
+/** Narrowing guard for values arriving from persisted state or the database. */
+export function isPlaylistSlot(value: unknown): value is PlaylistSlot {
+  return Number.isInteger(value) && (PLAYLIST_SLOTS as readonly number[]).includes(value as number);
+}
+
+/** An all-zero count record covering exactly the slots that exist. */
+export function emptyPlaylistCounts(): PlaylistCountsResult {
+  return Object.fromEntries(PLAYLIST_SLOTS.map((slot) => [slot, 0])) as PlaylistCountsResult;
+}
 
 export type MusicSongEntry = {
   id: number;
@@ -77,7 +101,7 @@ export type AudioPlayerApi = {
   skipSong(id: number): Promise<void>;
   /** Permanently delete a song from the database. */
   purgeSong(id: number): Promise<void>;
-  /** Return the total song count for each of the 5 playlist slots. */
+  /** Return the total song count for each playlist slot. */
   getPlaylistCounts(): Promise<PlaylistCountsResult>;
   /** Look up a single song by its DB id (used to restore the last-played song across sessions). */
   getSongById(id: number): Promise<MusicSongEntry | null>;
@@ -113,13 +137,15 @@ export const PLAYLIST_SLOT_ICONS: Record<PlaylistSlot, string> = {
   3: 'fa-solid fa-torii-gate',
   4: 'fa-solid fa-bolt',
   5: 'fa-solid fa-microchip',
+  6: 'fa-solid fa-mug-hot',
 };
 
-/** FA icon classes used for each playlist slot button (bottom row). */
-export const PLAYLIST_SLOT_THEMESS: Record<PlaylistSlot, string> = {
+/** Human-readable theme name for each playlist slot button (bottom row). */
+export const PLAYLIST_SLOT_THEMES: Record<PlaylistSlot, string> = {
   1: 'Vocal',
   2: 'Instrumental',
   3: 'Ambient',
   4: 'Rock',
   5: 'Electro',
+  6: 'Lounge',
 };

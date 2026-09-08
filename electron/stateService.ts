@@ -9,6 +9,7 @@ import type {
   WindowState,
 } from '../src/shared/appState';
 import { sanitizeAdventureSession } from '../src/adventure/session';
+import { isPlaylistSlot } from '../src/shared/audioPlayer';
 import { DEFAULT_GLAZE_SETTINGS, sanitizeGlazeSettings } from '../src/shared/glaze';
 import { DEFAULT_TEXTURE_MATERIALS, TEXTURE_SURFACES, type TextureColorHsva, type TextureMaterialSettings, type TextureMaterialsBySurface, type TextureSurfaceKey } from '../src/textures/types';
 import { DEFAULT_UI_FONT_KEY, DEFAULT_UI_FONT_SCALE, UI_FONT_OPTIONS, UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX, roundUiFontScale, type UiFontKey } from '../src/shared/UiTypography';
@@ -355,8 +356,11 @@ function sanitizeChapterBarMode(input: unknown): 'tags' | 'tabs' | undefined {
 }
 
 function sanitizeMusicActiveSlots(input: unknown): number[] | undefined {
+  // Range comes from the shared slot contract, not a literal, so adding a
+  // playlist bucket cannot silently leave this allowlist one slot behind and
+  // drop the new bucket's active state on every save.
   return Array.isArray(input)
-    ? input.filter((value): value is number => Number.isInteger(value) && value >= 1 && value <= 5)
+    ? input.filter((value): value is number => isPlaylistSlot(value))
     : undefined;
 }
 
@@ -524,6 +528,9 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     musicVolume: sanitizeOptionalNumber(input?.musicVolume),
     musicReverbAmount: sanitizeOptionalNumber(input?.musicReverbAmount),
     musicReverbRoom: sanitizeOptionalNumber(input?.musicReverbRoom),
+    musicMuted: sanitizeOptionalBoolean(input?.musicMuted),
+    musicReverbBypassed: sanitizeOptionalBoolean(input?.musicReverbBypassed),
+    musicSoundOptionsOpen: sanitizeOptionalBoolean(input?.musicSoundOptionsOpen),
     musicActiveSlots: sanitizeMusicActiveSlots(input?.musicActiveSlots),
     musicLastSongId: sanitizeOptionalNumber(input?.musicLastSongId),
     musicLastPositionSec: sanitizeOptionalNumber(input?.musicLastPositionSec),

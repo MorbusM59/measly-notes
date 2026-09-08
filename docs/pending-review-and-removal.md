@@ -306,3 +306,29 @@ shaped `## A ... # B`, where the current code returns the later `# B`.
 
 **Noticed.** Profiling a note with a table of contents, after the regeneration
 effect that dominated it was fixed.
+
+### AccordionSection's `forceOpenNonce` now has no callers
+
+**What.** `AccordionSection` (`src/components/AccordionSection.tsx`) accepts a
+`forceOpenNonce` prop: bumping the number force-opens the section, so a
+control elsewhere in the app can send the user to a collapsed settings
+section already unfolded. It had exactly one user -- the music player's
+headphones button, which opened the sidebar's Options panel with the Music
+accordion forced open.
+
+**Why it is suspect.** The music player now owns its volume and reverb
+controls directly (its headphones button swaps its own bottom row instead of
+opening the sidebar), so the Music accordion is gone and with it the only
+caller. The prop, its `useEffect`, and the "clear the one-shot intent when
+leaving options mode" reset it needed in `App.tsx` are all now unexercised
+machinery kept alive only by the component's own signature.
+
+**What would have to be true to remove it.** That no other feature is about
+to want "deep-link into a collapsed settings section" -- it is a reasonable
+generic capability for a settings panel, and the next feature that needs it
+would rebuild the same thing. Either find a second caller and keep it, or
+confirm none is planned and delete the prop with its effect; do not leave it
+half-alive.
+
+**Noticed.** Moving the music volume/reverb sliders out of the options menu
+and into the player's own sound-options row.

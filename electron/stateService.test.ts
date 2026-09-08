@@ -214,6 +214,61 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.menu?.spellCheckEnabled).toBe(true)
   })
 
+  // The music player's sound-options row replaced the sidebar's volume/reverb
+  // sliders, and its mute/bypass switches are FLAGS over retained levels
+  // rather than zeroed levels -- which only works if the flags themselves
+  // survive a restart. A flag missing from sanitizeMenu would be dropped
+  // silently and the app would come back audible with the level intact,
+  // exactly the failure mode this file exists for.
+  it('persists the music sound-option flags across a save -> fresh-instance load', async () => {
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date',
+        selectedMonths: [],
+        selectedYears: [],
+        searchQuery: '',
+        musicVolume: 0.42,
+        musicReverbAmount: 0.6,
+        musicReverbRoom: 0.75,
+        musicMuted: true,
+        musicReverbBypassed: true,
+        musicSoundOptionsOpen: true,
+      },
+    })
+
+    const reader = new StateService(dataRoot)
+    const loaded = await reader.loadAppState()
+    expect(loaded.menu?.musicMuted).toBe(true)
+    expect(loaded.menu?.musicReverbBypassed).toBe(true)
+    expect(loaded.menu?.musicSoundOptionsOpen).toBe(true)
+    // The levels are retained, not destroyed, by the flags being on.
+    expect(loaded.menu?.musicVolume).toBe(0.42)
+    expect(loaded.menu?.musicReverbAmount).toBe(0.6)
+    expect(loaded.menu?.musicReverbRoom).toBe(0.75)
+  })
+
+  // The sixth ("Lounge") bucket needs the persisted-slot allowlist to know
+  // about it; sanitizeMusicActiveSlots hard-coded 1-5 before it existed.
+  it('persists an active slot from the full playlist range', async () => {
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date',
+        selectedMonths: [],
+        selectedYears: [],
+        searchQuery: '',
+        musicActiveSlots: [1, 6, 7, 0],
+      },
+    })
+
+    const reader = new StateService(dataRoot)
+    const loaded = await reader.loadAppState()
+    expect(loaded.menu?.musicActiveSlots).toEqual([1, 6])
+  })
+
   it('clearAppState resets persisted app state back to the default baseline', async () => {
     const writer = new StateService(dataRoot)
     await writer.saveAppState({

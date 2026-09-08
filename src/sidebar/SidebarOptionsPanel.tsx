@@ -543,14 +543,6 @@ export interface SidebarOptionsPanelProps {
   deferPreviewOnRapidInput: boolean
   setDeferPreviewOnRapidInput: (value: boolean) => void
 
-  musicAccordionNonce: number
-  musicVolume: number
-  setMusicVolume: (value: number) => void
-  musicReverbAmount: number
-  setMusicReverbAmount: (value: number) => void
-  musicReverbRoom: number
-  setMusicReverbRoom: (value: number) => void
-
   borderRadiusRegularPx: number
   setBorderRadiusRegularPx: (value: number) => void
   spacingRegularPx: number
@@ -668,7 +660,7 @@ export interface SidebarOptionsPanelProps {
 
 /**
  * The Settings/Options sidebar view -- typography, UI presets, colors,
- * textures, glaze, filters, scroll feel, audio, music, and misc tuning.
+ * textures, glaze, filters, scroll feel, audio, and misc tuning.
  * Purely App-global (no per-section state), extracted verbatim from
  * App.tsx with zero behavior change.
  */
@@ -825,13 +817,6 @@ export function SidebarOptionsPanel({
   setReducedCaretAnimation,
   deferPreviewOnRapidInput,
   setDeferPreviewOnRapidInput,
-  musicAccordionNonce,
-  musicVolume,
-  setMusicVolume,
-  musicReverbAmount,
-  setMusicReverbAmount,
-  musicReverbRoom,
-  setMusicReverbRoom,
   borderRadiusRegularPx,
   setBorderRadiusRegularPx,
   spacingRegularPx,
@@ -2870,49 +2855,6 @@ export function SidebarOptionsPanel({
               setAudioSpatial(nextValue)
               typingSoundManager.setSpatialAmount(nextValue)
             }}
-          />
-        </div>
-      </AccordionSection>
-
-      <AccordionSection
-        className="sidebar-options-section-music"
-        ariaLabel="Music"
-        heading="Music"
-        forceOpenNonce={musicAccordionNonce}
-      >
-        <div className="utility-setting-slider-stack" aria-label="Music player controls">
-          <CompactScrollbarSlider
-            id="music-volume"
-            min={0}
-            max={1}
-            step={0.01}
-            value={musicVolume}
-            trackLabel="volume"
-            ariaLabel="Music volume"
-            defaultValue={0.8}
-            onCommit={(value) => setMusicVolume(clamp(value, 0, 1))}
-          />
-          <CompactScrollbarSlider
-            id="music-reverb-amount"
-            min={0}
-            max={1}
-            step={0.01}
-            value={musicReverbAmount}
-            trackLabel="reverb"
-            ariaLabel="Music reverb amount"
-            defaultValue={0}
-            onCommit={(value) => setMusicReverbAmount(clamp(value, 0, 1))}
-          />
-          <CompactScrollbarSlider
-            id="music-reverb-room"
-            min={0}
-            max={1}
-            step={0.01}
-            value={musicReverbRoom}
-            trackLabel="room"
-            ariaLabel="Music reverb room size"
-            defaultValue={0.3}
-            onCommit={(value) => setMusicReverbRoom(clamp(value, 0, 1))}
           />
         </div>
       </AccordionSection>

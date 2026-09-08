@@ -171,9 +171,22 @@ export interface PersistedMenuState {
   deferPreviewOnRapidInput?: boolean;
   typingSoundEnabled?: boolean;
   typingSoundSet?: 'A' | 'B' | 'C' | 'D';
+  /**
+   * Music LEVELS, always 0–1 and always the value the user set — never zeroed
+   * to represent "off". Audibility is carried separately by the two flags
+   * below, so muting and un-muting is a flag flip rather than a destructive
+   * write plus a remembered copy, and a level adjusted while silenced is
+   * already correct when sound comes back.
+   */
   musicVolume?: number;
   musicReverbAmount?: number;
   musicReverbRoom?: number;
+  /** Volume silenced; `musicVolume` keeps the level to come back to. */
+  musicMuted?: boolean;
+  /** Reverb bypassed; both the reverb and the room button reflect this one flag. */
+  musicReverbBypassed?: boolean;
+  /** Bottom row of the player showing the sound options instead of the playlist buckets. */
+  musicSoundOptionsOpen?: boolean;
   musicActiveSlots?: number[];
   /** Last-played song's DB id, its playback position, and whether it was playing — restored on next launch. */
   musicLastSongId?: number;
