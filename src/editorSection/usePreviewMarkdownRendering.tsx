@@ -48,6 +48,7 @@ import {
   PREVIEW_PREWARM_IDLE_TIMEOUT_MS,
   resolveNextPrewarmBatchSize,
 } from './previewMeasurementPrewarm'
+import { traceSettle } from './previewSettleTrace'
 import { usePreviewWindow, type PreviewWindowApi } from './usePreviewWindow'
 import { countWrappedLines } from '../editor/scrollThumbMetrics'
 import {
@@ -299,6 +300,10 @@ export interface UsePreviewMarkdownRenderingOptions {
   applyProgrammaticEditorText: (nextText: string, selectionStart?: number, selectionEnd?: number) => void
   /** Called in the layout phase after every commit of the preview block subtree, before paint. The settle gate uses it as its "the DOM may have moved" signal -- both to re-evaluate its own geometry fixed point and to let the scroll restore re-attempt its anchor lookup at exactly the moments the element could have appeared, instead of polling animation frames. */
   onPreviewCommitted?: () => void
+  /** Whether the settle gate is currently holding the preview hidden for a note load. The measurement survey's "stand aside for the reader" rule consults it, because a scroll fired while the pane is hidden is the restore's, not the reader's -- see the scroll listener below, and previewSettleGate.ts's isHolding. */
+  isPreviewSettleHolding?: () => boolean
+  /** Populated here with "the survey still has heights to commit for the document on screen", which the settle gate reads as geometry that has not finished moving. See useEditorSectionMount's own declaration of this ref. */
+  previewMeasurementPendingRef?: MutableRefObject<(() => boolean) | null>
 }
 
 export interface UsePreviewMarkdownRenderingResult {
@@ -435,6 +440,8 @@ export function usePreviewMarkdownRendering({
   isActiveNoteEditable,
   applyProgrammaticEditorText,
   onPreviewCommitted,
+  isPreviewSettleHolding,
+  previewMeasurementPendingRef,
 }: UsePreviewMarkdownRenderingOptions): UsePreviewMarkdownRenderingResult {
   // Mirrors `notes`/`activeNoteText` for navigateToInternalPreviewLink's
   // call-time-only reads below, so that callback's identity -- and in turn
@@ -2143,6 +2150,13 @@ export function usePreviewMarkdownRendering({
   const commitPrewarmedSizes = useCallback(() => {
     const buffered = prewarmBufferRef.current
     if (buffered.size === 0) return
+    // Into the settle trace's buffer, not a separate one: this commit is the
+    // prime suspect whenever the render view visibly reflows AFTER the gate
+    // revealed it, and the two events are only legible together -- a reflow
+    // line and a commit line in the same frame answers the question outright,
+    // where two buffers would leave it to be reconstructed by eye. See
+    // previewSettleTrace.ts.
+    traceSettle(() => `survey commit blocks=${buffered.size}`)
     prewarmBufferRef.current = new Map()
     // Only a COMPLETED survey is worth remembering; a partial one (geometry
     // changed mid-sweep) would be a cache entry that silently under-describes
@@ -2527,10 +2541,62 @@ export function usePreviewMarkdownRendering({
   useEffect(() => {
     const scroller = previewScrollRef.current
     if (!scroller) return undefined
-    const onScroll = () => { lastPreviewScrollAtRef.current = performance.now() }
+    /**
+     * Stamps "the reader moved" -- but ONLY when it was the reader.
+     *
+     * A note load lands its restored position by scrolling, and that fires
+     * ordinary native scroll events indistinguishable from a wheel. Counted
+     * as the reader's, they made the survey stand aside for the whole
+     * PREVIEW_PREWARM_SCROLL_QUIET_MS window at precisely the moment it most
+     * needed to run: the blocks have just mounted on estimates, and until the
+     * survey replaces them the document's height is wrong. Measured from the
+     * settle trace on three ordinary notes, the survey committed 235-269ms
+     * AFTER the gate had already revealed the note -- and that commit moved
+     * the total height by up to 271px of 2837 (~10%), which is the reflow and
+     * the scrollbar jump the reader sees. When the same commit happened to
+     * land while the gate was still holding, the gate absorbed it and the
+     * reveal was final: the mechanism was already right, it was just being
+     * asked to run too late.
+     *
+     * Nobody scrolls a pane they cannot see, so the gate's own hold is the
+     * signal. The same reasoning the yield rule already applies to travel
+     * animations ("a travel animation fires scroll events of its own"), for
+     * the same reason -- the restore had simply never been added to it.
+     */
+    const onScroll = () => {
+      if (isPreviewSettleHolding?.()) return
+      lastPreviewScrollAtRef.current = performance.now()
+    }
     scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => scroller.removeEventListener('scroll', onScroll)
-  }, [previewScrollRef, spacerReady])
+  }, [previewScrollRef, spacerReady, isPreviewSettleHolding])
+
+  /**
+   * Publishes "the survey still owes this document a height commit" to the
+   * settle gate.
+   *
+   * `prewarmDoneRef` is the whole answer, including for the cases where there
+   * is nothing to survey: restartPrewarm sets it true immediately for a
+   * windowed document, for a geometry whose survey is already cached, and for
+   * an empty one -- so those never make the gate wait.
+   *
+   * A note switch clears it in restartPrewarm, which is a passive effect,
+   * while the gate opens its generation in the layout phase of the same
+   * commit. In the window between the two this can still be reporting the
+   * PREVIOUS document's completed survey. It cannot mislead the gate in
+   * practice -- the gate only evaluates from an animation frame, which is
+   * after passive effects have flushed -- and if it ever did, the cost is one
+   * reveal at the moment the gate would have chosen before any of this
+   * existed. This can make the gate hold too briefly; it can never make it
+   * hold too long.
+   */
+  useEffect(() => {
+    if (!previewMeasurementPendingRef) return undefined
+    previewMeasurementPendingRef.current = () => !prewarmDoneRef.current
+    return () => {
+      previewMeasurementPendingRef.current = null
+    }
+  }, [previewMeasurementPendingRef])
 
   useEffect(() => cancelPrewarmSchedule, [cancelPrewarmSchedule])
 

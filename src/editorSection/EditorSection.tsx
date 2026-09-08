@@ -1475,6 +1475,11 @@ export function EditorSection({
     editorSectionMountRest.previewSettleGateRef.current?.notifyCommit()
   }, [editorSectionMountRest.previewSettleGateRef])
 
+  /** Same stable-identity reasoning as the commit bridge above. */
+  const isPreviewSettleHolding = useCallback(() => (
+    editorSectionMountRest.previewSettleGateRef.current?.isHolding() ?? false
+  ), [editorSectionMountRest.previewSettleGateRef])
+
   // Published by usePreviewMarkdownRendering (which owns the block list and
   // the virtualizer) and consumed by usePreviewScrollbar (which owns the
   // thumb): the preview's position in character space. See
@@ -1503,6 +1508,8 @@ export function EditorSection({
     isActiveNoteEditable,
     applyProgrammaticEditorText,
     onPreviewCommitted: notifyPreviewSettleGateOfCommit,
+    isPreviewSettleHolding,
+    previewMeasurementPendingRef: editorSectionMountRest.previewMeasurementPendingRef,
   })
 
   const {
@@ -1532,6 +1539,22 @@ export function EditorSection({
     viewSpacing,
     viewLetterSpacingEm,
   })
+
+  // Hands the settle gate the render view's scrollbar. It is not inside the
+  // pane the gate hides -- it lives in its own <aside> (SectionEditorArea) --
+  // so without this it stayed visible through the hold and settled in full
+  // view once the measurement survey committed, which is the same defect the
+  // gate exists to remove, just in the half of the window it could not reach.
+  useEffect(() => {
+    const scrollbarRef = editorSectionMountRest.previewSettleScrollbarRef
+    scrollbarRef.current = {
+      getThumb: () => previewScrollbarThumbRef.current,
+      sync: syncPreviewCustomScrollbar,
+    }
+    return () => {
+      scrollbarRef.current = null
+    }
+  }, [editorSectionMountRest.previewSettleScrollbarRef, previewScrollbarThumbRef, syncPreviewCustomScrollbar])
 
   const {
     visibleDocumentFindHitRange,
