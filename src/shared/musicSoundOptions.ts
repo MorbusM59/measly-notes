@@ -64,8 +64,14 @@ export function nudgeLevel(fraction: number, deltaY: number, coarse: boolean): n
 /**
  * Speaker glyph for the volume toggle. Muted always reads `fa-volume-off`, as
  * does an unmuted level of 0 -- the two are told apart by the button's active
- * highlight (lit = audible), not by a second glyph, so the muted icon stays the
- * single recognisable "no sound" mark.
+ * highlight, not by a second glyph, so the muted icon stays the single
+ * recognisable "no sound" mark.
+ *
+ * The highlight on these switches marks the DEVIATION, not the healthy state:
+ * lit means muted or bypassed. A row of six controls that all light up during
+ * ordinary listening would make the lit state mean nothing; lighting only what
+ * is currently turned off makes "something here is off" readable at a glance
+ * without reading any glyph.
  */
 export function volumeIcon(volume: number, isMuted: boolean): string {
   if (isMuted) return 'fa-solid fa-volume-off';

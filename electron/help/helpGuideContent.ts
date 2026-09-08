@@ -867,6 +867,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - **Sound options** — the headphones button swaps the row of playlist slots for six sound controls, and swaps back. Nothing else opens or closes: volume and reverb live in the player itself, not in the settings panel.
   - Three of them are **numbers** — volume, reverb, and room size, each reading 0–99. Hover one and scroll to change it; hold Shift to move by ten.
   - The other three are **switches**. The speaker mutes; the antenna turns reverb off; the room icon (a box, a room, a hall, open air, showing which size you're in) is a second face of that same reverb switch, so either one turns it off and both show the crossed circle while it is. Turning something off never loses its number — switch it back on and it returns to where you left it. So does adjusting the number while it's off: that turns it back on for you.
+  - A lit switch here means *off*, the opposite of the buttons elsewhere in the app. These three are lit only while something is muted or bypassed, so a glance at the row tells you whether anything is holding your sound back, without reading a single icon.
 - **Resuming across restarts** — if music was playing when the app was last closed, it resumes on launch (same song and position), fading in over 10 seconds from silence and full reverb up to your usual volume/reverb settings.
 `,
   `## Data Storage

@@ -6,6 +6,12 @@ import ReactMarkdown from 'react-markdown'
 import { SidebarOptionsPanel } from './sidebar/SidebarOptionsPanel'
 import { AudioControls } from './components/AudioControls'
 import { isPlaylistSlot } from './shared/audioPlayer'
+import {
+  BTN_SQUARE_LARGE_SIZE_PX,
+  computeWindowControlsCollapsedWidthPx,
+  computeWindowControlsWidthPx,
+  DEFAULT_SPACING_REGULAR_PX,
+} from './shared/windowChromeMetrics'
 import MouseCursorOverlay from './components/MouseCursorOverlay'
 import { installFocusDiagnostics } from './dev/focusDiagnostics'
 import { TooltipLayer } from './components/TooltipLayer'
@@ -236,7 +242,6 @@ const GRID_DIVIDER_PX = 8
 // --sidebar-scrollbar-slot-width, and .sidebar-content's own border) so the
 // two stay in sync.
 const BTN_SQUARE_REGULAR_SIZE_PX = 32
-const BTN_SQUARE_LARGE_SIZE_PX = 40
 const CANONICAL_SCROLL_THICKNESS_PX = 16
 const SIDEBAR_CONTENT_BORDER_PX = 1
 // .toolbar-container / .display-modes each carry a 1px border on both sides
@@ -265,7 +270,6 @@ const SLOT_MIN_WIDTH_PX = 300
 // would break memo'd children comparing this prop by identity.
 const EMPTY_MAP = new Map<string, NotePrimedAction>()
 const DEFAULT_BORDER_RADIUS_REGULAR_PX = 6
-const DEFAULT_SPACING_REGULAR_PX = 4
 const DEFAULT_BORDER_ALPHA_PERCENT = 100
 const DEFAULT_BOX_SHADOW_ALPHA_PERCENT = 100
 const TEXTURE_PREVIEW_SURFACE: TextureSurfaceKey = 'appGrid'
@@ -1928,35 +1932,19 @@ function App() {
 
   // The window-controls column is sized to exactly what's in it -- the audio
   // player on the left, the window buttons on the right, one spacing-regular
-  // between them -- rather than to a round number with slack left over. Mirrors
-  // audio.css and controls.css: the audio grid is 5 square buttons whose side
-  // is half a large button box (--audio-btn-size), the window cluster is 3
-  // large buttons with spacing-small between them, and only the panel's two
-  // outer edges carry padding (the inner ones are 0 so the gap below is the
-  // whole separation). Ceil'd because a fractional spacing setting makes these
-  // sub-pixel and the column must never be narrower than its content.
-  const windowControlsMetrics = useMemo(() => {
-    const smallGapPx = spacingRegularPx / 2 // mirrors --spacing-small
-    const audioBtnSizePx = (BTN_SQUARE_LARGE_SIZE_PX - smallGapPx) / 2 // mirrors --audio-btn-size
-    const audioWidthPx = spacingRegularPx + 5 * audioBtnSizePx + 4 * smallGapPx
-    const windowButtonWidthPx = BTN_SQUARE_LARGE_SIZE_PX + smallGapPx
-    return { audioWidthPx, windowButtonWidthPx, smallGapPx }
-  }, [spacingRegularPx])
+  // between them -- rather than to a round number with slack left over. The
+  // arithmetic lives in shared/windowChromeMetrics.ts because the main process
+  // needs the same figure for the window minimum and used to keep a hand-copied
+  // literal of it that went stale; see that module's header.
+  const windowControlsWidthPx = useMemo(
+    () => computeWindowControlsWidthPx(spacingRegularPx),
+    [spacingRegularPx],
+  )
 
-  const windowControlsWidthPx = useMemo(() => {
-    const { audioWidthPx, windowButtonWidthPx, smallGapPx } = windowControlsMetrics
-    // minimize split + maximize split + close, then the panel's right padding
-    const buttonsWidthPx = 3 * windowButtonWidthPx - smallGapPx + spacingRegularPx
-    return Math.ceil(audioWidthPx + spacingRegularPx + buttonsWidthPx)
-  }, [spacingRegularPx, windowControlsMetrics])
-
-  // Mini mode hides the maximize split and the close button (controls.css), so
-  // only the minimize split is left beside the audio player.
-  const windowControlsCollapsedWidthPx = useMemo(() => {
-    const { audioWidthPx, windowButtonWidthPx, smallGapPx } = windowControlsMetrics
-    const buttonsWidthPx = windowButtonWidthPx - smallGapPx + spacingRegularPx
-    return Math.ceil(audioWidthPx + spacingRegularPx + buttonsWidthPx)
-  }, [spacingRegularPx, windowControlsMetrics])
+  const windowControlsCollapsedWidthPx = useMemo(
+    () => computeWindowControlsCollapsedWidthPx(spacingRegularPx),
+    [spacingRegularPx],
+  )
 
   // Mirrors --sidebar-min-width in tokens.css: the sidebar has to be wide
   // enough for the options panel's always-visible top section (font
@@ -4643,7 +4631,15 @@ function App() {
     // 2x its CSS size on screen. Same reasoning as computeEffectiveMinSize()
     // in electron/main.ts for the normal (non-collapsed) window minimum.
     const doubleSizeMultiplier = isDoubleSizeMode ? 2 : 1
-    const targetWidth = Math.max(96, windowControlsCollapsedWidthPx) * doubleSizeMultiplier
+    // The probe is a real collapsed clone laid out at max-content, so its width
+    // is the panel's actual footprint -- borders, spacing setting, every button
+    // in it -- and needs no arithmetic to stay true when any of those change.
+    // windowControlsCollapsedWidthPx is the fallback for the case the probe
+    // reports nothing (never observed, but a 0 here would size the window to
+    // the 96px floor and clip the player), exactly as `|| 160` is for height.
+    const measuredWidth = Math.ceil(probeRect.width)
+    const targetWidth =
+      Math.max(96, measuredWidth || windowControlsCollapsedWidthPx) * doubleSizeMultiplier
     const targetHeight = Math.max(40, Math.ceil(probeRect.height || 160)) * doubleSizeMultiplier
 
     // Ensure overlay is committed in the same event turn before native resize.

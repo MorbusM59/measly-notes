@@ -20,7 +20,12 @@
 
 .audio-micro-grid {
   display:               grid;
-  grid-template-columns: repeat(6, var(--audio-btn-size));
+  /* Column count comes from AUDIO_GRID_COLUMNS (shared/audioPlayer.ts), set
+     as a custom property by AudioControls -- the same constant the window
+     controls column's width is derived from, so the grid and the panel it
+     sits in can never disagree about how wide the player is. The fallback is
+     only for a stylesheet loaded without the component. */
+  grid-template-columns: repeat(var(--audio-grid-columns, 6), var(--audio-btn-size));
   grid-template-rows:    auto auto;
   gap:                   var(--audio-control-gap);
 }

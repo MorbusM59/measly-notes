@@ -34,6 +34,27 @@ export const PLAYLIST_SLOTS: readonly PlaylistSlot[] = [1, 2, 3, 4, 5, 6];
 /** Highest valid slot number -- derived, never written out by hand. */
 export const MAX_PLAYLIST_SLOT: PlaylistSlot = PLAYLIST_SLOTS[PLAYLIST_SLOTS.length - 1];
 
+/**
+ * Column count of the player's button grid, which is the bucket count: the
+ * bottom row is one button per slot and the top row's playback controls are
+ * laid out to fill exactly the same width (play spans two).
+ *
+ * This is a LAYOUT measurement, not just a render detail, and three places
+ * need it in agreement or the player visibly breaks:
+ *   1. the grid itself (audio.css, via the `--audio-grid-columns` custom
+ *      property AudioControls sets from this constant);
+ *   2. the renderer's window-controls column width (App.tsx's
+ *      `windowControlsMetrics`), which is an exact px track in the app grid
+ *      and in the mini-mode window size -- too narrow and the player
+ *      overflows the panel it sits in;
+ *   3. the main process's startup fallback for that same width
+ *      (`WINDOW_CONTROLS_WIDTH_PX` in electron/main.ts), used for the window
+ *      minimum until the renderer reports its own measured figure.
+ * (3) cannot import from here at the time it is needed, so it stays a mirrored
+ * literal -- its comment carries the arithmetic and names this constant.
+ */
+export const AUDIO_GRID_COLUMNS = PLAYLIST_SLOTS.length;
+
 /** Narrowing guard for values arriving from persisted state or the database. */
 export function isPlaylistSlot(value: unknown): value is PlaylistSlot {
   return Number.isInteger(value) && (PLAYLIST_SLOTS as readonly number[]).includes(value as number);

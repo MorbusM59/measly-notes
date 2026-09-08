@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import type { MusicSongEntry, PlaylistSlot, PlaylistCountsResult } from '../shared/audioPlayer'
 import {
+  AUDIO_GRID_COLUMNS,
   emptyPlaylistCounts,
   getNextActiveSlotsForToggle,
   PLAYLIST_SLOTS,
@@ -539,6 +540,10 @@ export const AudioControls = memo(function AudioControls({
   // Adjusting a level while its toggle is off turns the toggle back on. A
   // number that changes while nothing can be heard is a dead control, and the
   // toggle button remains the way to silence it again deliberately.
+  //
+  // These three switches light (is-active) when they are OFF -- see volumeIcon's
+  // note in musicSoundOptions.ts. The highlight marks what deviates from plain
+  // listening, so an unattended row reads as "nothing is muted" at a glance.
 
   const handleMuteToggle = useCallback(() => {
     onMutedChange(!isMuted)
@@ -575,7 +580,10 @@ export const AudioControls = memo(function AudioControls({
   return (
     <div className="audio-controls" aria-label="Audio player controls">
       {/* Top row — playback controls */}
-      <div className="audio-micro-grid">
+      <div
+        className="audio-micro-grid"
+        style={{ '--audio-grid-columns': AUDIO_GRID_COLUMNS } as React.CSSProperties}
+      >
         {/* Play / stop — spans 2 columns */}
         <button
           type="button"
@@ -654,10 +662,10 @@ export const AudioControls = memo(function AudioControls({
           <>
             <button
               type="button"
-              className={`audio-ctrl-btn audio-sound-btn${isMuted ? '' : ' is-active'}`}
+              className={`audio-ctrl-btn audio-sound-btn${isMuted ? ' is-active' : ''}`}
               data-tooltip={isMuted ? `Muted — click to restore volume ${toDisplayLevel(volume)}` : 'Mute'}
               aria-label={isMuted ? 'Unmute music' : 'Mute music'}
-              aria-pressed={!isMuted}
+              aria-pressed={isMuted}
               onClick={handleMuteToggle}
             >
               <span className={volumeGlyph} aria-hidden="true" />
@@ -673,10 +681,10 @@ export const AudioControls = memo(function AudioControls({
 
             <button
               type="button"
-              className={`audio-ctrl-btn audio-sound-btn${isReverbBypassed ? '' : ' is-active'}`}
+              className={`audio-ctrl-btn audio-sound-btn${isReverbBypassed ? ' is-active' : ''}`}
               data-tooltip={isReverbBypassed ? `Reverb off — click to restore ${toDisplayLevel(reverbAmount)}` : 'Turn reverb off'}
               aria-label={isReverbBypassed ? 'Enable reverb' : 'Disable reverb'}
-              aria-pressed={!isReverbBypassed}
+              aria-pressed={isReverbBypassed}
               onClick={handleReverbBypassToggle}
             >
               <span className={reverbGlyph} aria-hidden="true" />
@@ -692,10 +700,10 @@ export const AudioControls = memo(function AudioControls({
 
             <button
               type="button"
-              className={`audio-ctrl-btn audio-sound-btn${isReverbBypassed ? '' : ' is-active'}`}
+              className={`audio-ctrl-btn audio-sound-btn${isReverbBypassed ? ' is-active' : ''}`}
               data-tooltip={isReverbBypassed ? 'Reverb off — click to restore' : `Room size ${toDisplayLevel(reverbRoom)} — click to turn reverb off`}
               aria-label={isReverbBypassed ? 'Enable reverb' : 'Disable reverb'}
-              aria-pressed={!isReverbBypassed}
+              aria-pressed={isReverbBypassed}
               onClick={handleReverbBypassToggle}
             >
               <span className={roomGlyph} aria-hidden="true" />

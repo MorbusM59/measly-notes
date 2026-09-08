@@ -16,6 +16,7 @@ import { LOADOUT_CHANNELS } from '../src/shared/loadouts'
 import { AUDIO_PLAYER_CHANNELS, AUDIO_EXTENSIONS } from '../src/shared/audioPlayer'
 import type { PlaylistSlot } from '../src/shared/audioPlayer'
 import { NOTE_TABS_CHANNELS } from '../src/shared/tabs'
+import { computeWindowControlsWidthPx, DEFAULT_SPACING_REGULAR_PX } from '../src/shared/windowChromeMetrics'
 import { EDITOR_SECTIONS_CHANNELS } from '../src/shared/sections'
 import { CHAPTER_CHANNELS } from '../src/shared/chapters'
 import { REVIEW_FLAG_CHANNELS } from '../src/shared/reviewFlags'
@@ -130,7 +131,15 @@ const UTILITY_COLLAPSE_MIN_HEIGHT_PX = 40;
 // panel, and the window-controls panel is sized to its contents rather than a
 // round number, so this is a good deal lower than the 873 it used to be.
 const TOOLBAR_MIN_WIDTH_PX = 283;
-const WINDOW_CONTROLS_WIDTH_PX = 239;
+// Derived from the same function the renderer uses, at the default spacing
+// setting -- the only term this process cannot know, since the user's actual
+// spacing lives in renderer state. Was a hand-copied literal that read 239
+// (one playlist bucket short, and missing the panel's own border) while the
+// renderer had moved on; deriving it means a bucket or a border added later
+// reaches the window minimum without anyone remembering to update this line.
+// Still only the floor used until the renderer reports its measured figure a
+// moment after startup.
+const WINDOW_CONTROLS_WIDTH_PX = computeWindowControlsWidthPx(DEFAULT_SPACING_REGULAR_PX);
 // Mirrors the renderer's appShellMinHeightPx at the default spacing setting:
 // enough for the Date-view sidebar to show four note cards with the pagination
 // bar showing (see src/App.tsx). Only a stand-in until the renderer reports its
