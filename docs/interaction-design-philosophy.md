@@ -413,6 +413,41 @@ The goal is deterministic behavior with one source of truth per interaction phas
   jump, a scrollbar travel, a chapter change. One check for a running
   journey covers all of them, including the ones added later.
 
+### 3i. A held button ramps and coasts; it never races or crawls
+- **One routine owns press-and-hold value adjustment** (`src/shared/holdToAdjust.ts`
+  for the motion, `src/shared/useHoldToAdjust.ts` for the wiring). Any control
+  that lets the reader hold to change a number uses it. This is a toolkit
+  piece, not a music-player detail: nothing in either file knows what the
+  value means.
+- **The motion is the app's own scroll curve, not a rate.** The leading half
+  of the bell in `editor/ScrollCurvePlan` -- rest, up to a constant speed,
+  then that speed held until release, and a hard stop. The two usual
+  alternatives both fail: a rate proportional to hold duration takes off too
+  fast to aim, and a fixed amount per interval is either too slow to cross the
+  range or too coarse to land on a value. A two-step "slow then fast" only
+  hides the discontinuity where the reader will feel it.
+- **Ramp and shape come from the reader's animation settings unchanged.** They
+  describe a feel that should be identical everywhere the app moves. Only
+  speed converts, because a scroll's speed is in pixels and a value's is in
+  whatever it counts: the setting is restated as *how long a hold takes to
+  cross the whole range*, `0.5 + animationSpeed * 5` seconds. The floor is
+  what keeps the snappiest setting aimable rather than instantaneous.
+- **The curve is always the whole range's curve.** Where the press starts
+  changes only how soon it reaches an end, never how it feels -- a hold from
+  60 accelerates exactly like one from 0. Anchoring the curve to the remaining
+  distance instead would make the same gesture behave differently depending on
+  where the reader happened to be, which is the thing that makes a control
+  feel unpredictable.
+- **No hold threshold, and a tap always moves by one.** The value starts moving
+  on press rather than after a delay spent deciding whether this is a click;
+  a press that ends before the curve has earned a whole step still applies
+  one. Waiting 300ms to decide makes the control feel dead exactly when the
+  reader is being precise, and is unnecessary once a tap has a defined result.
+- **Released means stopped.** There is no release ramp-down here, unlike a
+  wheel spin (3g): a spin is momentum the hand imparted and left behind, while
+  a held button is a continuous instruction that ends when the finger lifts.
+  Coasting past the release would overshoot the value the reader stopped on.
+
 ### 3d. In edit view, text is never between rows
 - The edit pane is a grid of character cells. Text sits on row boundaries
   before, during and after every interaction -- a wheel, a held PageDown, a

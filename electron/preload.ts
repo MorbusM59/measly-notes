@@ -217,6 +217,7 @@ const audioPlayerApi: AudioPlayerApi = {
   pickNextSong:       (activeSlots) => ipcRenderer.invoke(AUDIO_PLAYER_CHANNELS.pickNextSong, activeSlots),
   afterPlay:          (id) => ipcRenderer.invoke(AUDIO_PLAYER_CHANNELS.afterPlay, id),
   favoriteSong:       (id) => ipcRenderer.invoke(AUDIO_PLAYER_CHANNELS.favoriteSong, id),
+  unfavoriteSong:     (id) => ipcRenderer.invoke(AUDIO_PLAYER_CHANNELS.unfavoriteSong, id),
   skipSong:           (id) => ipcRenderer.invoke(AUDIO_PLAYER_CHANNELS.skipSong, id),
   purgeSong:          (id) => ipcRenderer.invoke(AUDIO_PLAYER_CHANNELS.purgeSong, id),
   getPlaylistCounts:  () => ipcRenderer.invoke(AUDIO_PLAYER_CHANNELS.getPlaylistCounts),

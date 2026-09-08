@@ -62,6 +62,9 @@
   font-feature-settings: 'tnum' 1;
   user-select:        none;
   cursor:             ns-resize;
+  /* The hold gesture captures the pointer; without this a touch drag would be
+     taken as a scroll and cancel the press mid-adjustment. */
+  touch-action:       none;
 }
 
 /* A level whose toggle is currently off. Still legible and still adjustable

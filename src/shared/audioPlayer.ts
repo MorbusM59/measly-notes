@@ -11,6 +11,7 @@ export const AUDIO_PLAYER_CHANNELS = {
   pickNextSong:         'audio-player:pick-next-song',
   afterPlay:            'audio-player:after-play',
   favoriteSong:         'audio-player:favorite-song',
+  unfavoriteSong:       'audio-player:unfavorite-song',
   skipSong:             'audio-player:skip-song',
   purgeSong:            'audio-player:purge-song',
   getPlaylistCounts:    'audio-player:get-playlist-counts',
@@ -115,6 +116,17 @@ export type AudioPlayerApi = {
    * and increment its favorability by 1 (capped at 10).
    */
   favoriteSong(id: number): Promise<MusicSongEntry | null>;
+  /**
+   * Clear the replay marker a favourite carries: priority drops back to the
+   * bottom of the rotation, exactly where finishing the song would have put
+   * it, and favorability is left alone.
+   *
+   * Deliberately not `skipSong`, which also resets favorability to 1: taking
+   * the marker off a song says "not right now", not "I was wrong to like
+   * this", and a listener toggling the button off should not silently undo
+   * however many times they have favourited it before.
+   */
+  unfavoriteSong(id: number): Promise<MusicSongEntry | null>;
   /**
    * "Skip" the current song: set its priority to the current max and reset
    * its favorability to 1.

@@ -3835,6 +3835,29 @@ export class DatabaseService {
     return row ? this.rowToSongEntry(row) : null;
   }
 
+  /**
+   * Take the replay marker off a favourited song without disturbing how much
+   * it is liked.
+   *
+   * The priority it lands on is the same one `afterMusicPlay` gives a song
+   * that just finished -- the bottom of the rotation -- so un-favouriting
+   * leaves the library in the state it would have been in had the song simply
+   * played through, rather than in a state only this button can produce.
+   * Favorability is untouched, which is the whole difference from
+   * `skipMusicSong`.
+   */
+  unfavoriteMusicSong(id: number): MusicSongEntry | null {
+    const db = this.requireDb();
+    const tx = db.transaction(() => {
+      const { total } = db.prepare('SELECT COUNT(*) AS total FROM music_songs').get() as { total: number };
+      if (total === 0) return;
+      db.prepare('UPDATE music_songs SET priority = ? WHERE id = ?').run(total, id);
+    });
+    tx();
+    const row = db.prepare('SELECT * FROM music_songs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    return row ? this.rowToSongEntry(row) : null;
+  }
+
   skipMusicSong(id: number): void {
     const db = this.requireDb();
     const tx = db.transaction(() => {

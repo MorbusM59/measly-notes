@@ -1075,6 +1075,10 @@ function registerIpcHandlers() {
     return databaseService!.favoriteMusicSong(id);
   });
 
+  ipcMain.handle(AUDIO_PLAYER_CHANNELS.unfavoriteSong, async (_event, id: number) => {
+    return databaseService!.unfavoriteMusicSong(id);
+  });
+
   ipcMain.handle(AUDIO_PLAYER_CHANNELS.skipSong, async (_event, id: number) => {
     databaseService!.skipMusicSong(id);
   });

@@ -11,6 +11,7 @@ import {
   shouldStopCurrentSongOnSlotToggle,
 } from '../shared/audioPlayer'
 import {
+  fromDisplayLevel,
   nudgeLevel,
   reverbIcon,
   roomIcon,
@@ -24,8 +25,9 @@ import {
   pushPlayed,
   stepBack,
 } from '../shared/musicPlayHistory'
+import { useHoldToAdjust } from '../shared/useHoldToAdjust'
 import { useNonPassiveWheel } from '../shared/useNonPassiveWheel'
-import { musicPlayerService, MissingFileError } from '../sound/MusicPlayerService'
+import { musicPlayerService, MissingFileError, resolveSeekPress } from '../sound/MusicPlayerService'
 
 // Duration (ms) a pointer must be held to trigger the "arm for clear" action.
 const HOLD_THRESHOLD_MS = 700
@@ -191,7 +193,7 @@ export const AudioControls = memo(function AudioControls({
   // ---------------------------------------------------------------- helpers
 
   /** Where in a track playback should begin, when not at the very start. */
-  type StartPosition = { fromStart: number } | { fromEnd: number }
+  type StartPosition = { fromStart: number } | { fromEnd: number } | { fromFraction: number }
 
   /**
    * Start a song and put the player's state behind it.
@@ -214,6 +216,8 @@ export const AudioControls = memo(function AudioControls({
       musicPlayerService.setCurrentTime(position.fromStart)
     } else if (position && 'fromEnd' in position) {
       await musicPlayerService.setCurrentTimeFromEnd(position.fromEnd)
+    } else if (position && 'fromFraction' in position) {
+      await musicPlayerService.setCurrentTimeFraction(position.fromFraction)
     }
     // play() restores gain to the configured volume (it has to, for the
     // resume-from-pause case), which would undo the scrub dim mid-gesture --
@@ -399,11 +403,17 @@ export const AudioControls = memo(function AudioControls({
 
   // ---------------------------------------------------------------- favorability button
 
+  // The button is a toggle. Pressing it on an already-favourited song takes the
+  // replay marker back off, which is a priority change only -- favorability
+  // stays where it is, so toggling off does not walk back the earlier presses
+  // that raised it.
   const handleFavoriteLeft = useCallback(async () => {
     if (!currentSong) return
-    const updated = await window.thockdownAudioPlayer?.favoriteSong(currentSong.id)
+    const api = window.thockdownAudioPlayer
+    const updated = currentSong.priority === 0
+      ? await api?.unfavoriteSong(currentSong.id)
+      : await api?.favoriteSong(currentSong.id)
     if (updated) setCurrentSong(updated)
-    // Priority set to 0 = replay immediately on next advance; do nothing more here.
   }, [currentSong])
 
   const handleSkipRight = useCallback(async (event: MouseEvent) => {
@@ -572,12 +582,48 @@ export const AudioControls = memo(function AudioControls({
     if (event.button === 2) void jumpSong(direction)
   }, [stopSeekScrub, jumpSong])
 
-  const handleSeekActivate = useCallback((direction: SeekDirection) => {
+  /**
+   * A 20% press. Unlike the scrub above this never carries a leftover into the
+   * neighbouring song -- resolveSeekPress turns a press that cannot complete
+   * inside the track into a landmark instead, and this plays whichever one it
+   * named. See that function for why the two gestures differ.
+   */
+  const handleSeekActivate = useCallback(async (direction: SeekDirection) => {
     // A hold that already scrubbed swallows the click that ends it, so a
     // release after scrubbing does not tack an extra 20% on top.
-    if (isSeekScrubbing.current) return
-    void seekBy(direction * SEEK_CLICK_STEP)
-  }, [seekBy])
+    if (isSeekScrubbing.current || isCrossingSongRef.current) return
+
+    const outcome = resolveSeekPress(
+      musicPlayerService.currentTime,
+      musicPlayerService.currentDurationSec,
+      direction * SEEK_CLICK_STEP,
+    )
+
+    if (outcome.kind === 'within') {
+      musicPlayerService.setCurrentTime(outcome.timeSec)
+      return
+    }
+    if (outcome.kind === 'restart') {
+      musicPlayerService.setCurrentTime(0)
+      return
+    }
+
+    isCrossingSongRef.current = true
+    try {
+      if (outcome.kind === 'next-song') {
+        const finished = currentSongRef.current
+        if (finished) await window.thockdownAudioPlayer?.afterPlay(finished.id)
+        await advanceToNextSong()
+        return
+      }
+      // No song behind this one: fall back to restarting, so the press still
+      // does the nearest thing it can rather than nothing at all.
+      const moved = await playPreviousSong({ fromFraction: outcome.entryFraction })
+      if (!moved) musicPlayerService.setCurrentTime(0)
+    } finally {
+      isCrossingSongRef.current = false
+    }
+  }, [advanceToNextSong, playPreviousSong])
 
   const handleSeekContextMenu = useCallback((event: React.MouseEvent) => {
     // Suppress the native menu only; the action itself runs on pointer-up.
@@ -719,23 +765,46 @@ export const AudioControls = memo(function AudioControls({
     onReverbBypassedChange(!isReverbBypassed)
   }, [isReverbBypassed, onReverbBypassedChange])
 
+  // Wheel and hold share the "adjusting turns it back on" rule, so they share
+  // the intent that expresses it rather than each remembering to do it.
+  const unmuteForAdjust = useCallback(() => {
+    if (isMuted) onMutedChange(false)
+  }, [isMuted, onMutedChange])
+
+  const unbypassForAdjust = useCallback(() => {
+    if (isReverbBypassed) onReverbBypassedChange(false)
+  }, [isReverbBypassed, onReverbBypassedChange])
+
   const handleVolumeWheel = useCallback((event: WheelEvent) => {
     event.preventDefault()
-    if (isMuted) onMutedChange(false)
+    unmuteForAdjust()
     onVolumeChange(nudgeLevel(volume, event.deltaY, event.shiftKey))
-  }, [volume, isMuted, onMutedChange, onVolumeChange])
+  }, [volume, unmuteForAdjust, onVolumeChange])
 
   const handleReverbWheel = useCallback((event: WheelEvent) => {
     event.preventDefault()
-    if (isReverbBypassed) onReverbBypassedChange(false)
+    unbypassForAdjust()
     onReverbAmountChange(nudgeLevel(reverbAmount, event.deltaY, event.shiftKey))
-  }, [reverbAmount, isReverbBypassed, onReverbBypassedChange, onReverbAmountChange])
+  }, [reverbAmount, unbypassForAdjust, onReverbAmountChange])
 
   const handleRoomWheel = useCallback((event: WheelEvent) => {
     event.preventDefault()
-    if (isReverbBypassed) onReverbBypassedChange(false)
+    unbypassForAdjust()
     onReverbRoomChange(nudgeLevel(reverbRoom, event.deltaY, event.shiftKey))
-  }, [reverbRoom, isReverbBypassed, onReverbBypassedChange, onReverbRoomChange])
+  }, [reverbRoom, unbypassForAdjust, onReverbRoomChange])
+
+  // The hold gesture speaks in printed 0-99 levels; the graph wants fractions.
+  const handleVolumeLevel = useCallback((display: number) => {
+    onVolumeChange(fromDisplayLevel(display))
+  }, [onVolumeChange])
+
+  const handleReverbLevel = useCallback((display: number) => {
+    onReverbAmountChange(fromDisplayLevel(display))
+  }, [onReverbAmountChange])
+
+  const handleRoomLevel = useCallback((display: number) => {
+    onReverbRoomChange(fromDisplayLevel(display))
+  }, [onReverbRoomChange])
 
   const volumeGlyph = useMemo(() => volumeIcon(volume, isMuted), [volume, isMuted])
   const reverbGlyph = useMemo(() => reverbIcon(isReverbBypassed), [isReverbBypassed])
@@ -772,7 +841,7 @@ export const AudioControls = memo(function AudioControls({
           className="audio-ctrl-btn"
           data-tooltip="Left-click: rewind 20%. Right-click: previous song. Hold: scrub back, crossing into the previous song."
           aria-label="Rewind or previous song"
-          onClick={() => handleSeekActivate(-1)}
+          onClick={() => { void handleSeekActivate(-1) }}
           onContextMenu={handleSeekContextMenu}
           onPointerDown={(e) => handleSeekPointerDown(e, -1)}
           onPointerUp={(e) => handleSeekPointerUp(e, -1)}
@@ -785,7 +854,9 @@ export const AudioControls = memo(function AudioControls({
         <button
           type="button"
           className={`audio-ctrl-btn${currentSong?.priority === 0 ? ' is-active' : ''}`}
-          data-tooltip="Left-click: favourite (replay next). Right-click: skip. Hold right-click: purge."
+          data-tooltip={currentSong?.priority === 0
+            ? 'Left-click: clear the replay marker. Right-click: skip. Hold right-click: purge.'
+            : 'Left-click: favourite (replay next). Right-click: skip. Hold right-click: purge.'}
           aria-label="Favourite or skip current song"
           aria-pressed={currentSong?.priority === 0}
           onClick={() => { void handleFavoriteLeft() }}
@@ -802,7 +873,7 @@ export const AudioControls = memo(function AudioControls({
           className="audio-ctrl-btn"
           data-tooltip="Left-click: forward 20%. Right-click: next song. Hold: scrub forward, crossing into the next song."
           aria-label="Fast forward or next song"
-          onClick={() => handleSeekActivate(1)}
+          onClick={() => { void handleSeekActivate(1) }}
           onContextMenu={handleSeekContextMenu}
           onPointerDown={(e) => handleSeekPointerDown(e, 1)}
           onPointerUp={(e) => handleSeekPointerUp(e, 1)}
@@ -840,8 +911,10 @@ export const AudioControls = memo(function AudioControls({
             <SoundLevelButton
               value={volume}
               onWheel={handleVolumeWheel}
+              onLevelChange={handleVolumeLevel}
+              onAdjustStart={unmuteForAdjust}
               label="Music volume"
-              tooltip="Volume — scroll to adjust (Shift: by 10)"
+              tooltip="Volume — scroll to adjust (Shift: by 10). Hold left to lower, right to raise."
               isDimmed={isMuted}
             />
 
@@ -859,8 +932,10 @@ export const AudioControls = memo(function AudioControls({
             <SoundLevelButton
               value={reverbAmount}
               onWheel={handleReverbWheel}
+              onLevelChange={handleReverbLevel}
+              onAdjustStart={unbypassForAdjust}
               label="Music reverb amount"
-              tooltip="Reverb — scroll to adjust (Shift: by 10)"
+              tooltip="Reverb — scroll to adjust (Shift: by 10). Hold left to lower, right to raise."
               isDimmed={isReverbBypassed}
             />
 
@@ -878,8 +953,10 @@ export const AudioControls = memo(function AudioControls({
             <SoundLevelButton
               value={reverbRoom}
               onWheel={handleRoomWheel}
+              onLevelChange={handleRoomLevel}
+              onAdjustStart={unbypassForAdjust}
               label="Music reverb room size"
-              tooltip="Room size — scroll to adjust (Shift: by 10)"
+              tooltip="Room size — scroll to adjust (Shift: by 10). Hold left to lower, right to raise."
               isDimmed={isReverbBypassed}
             />
           </>
@@ -928,28 +1005,49 @@ export const AudioControls = memo(function AudioControls({
  * already have nudged the nearest scrollable ancestor -- the sidebar, here --
  * before preventDefault lands), and a hook cannot be called in a loop.
  *
- * It is deliberately NOT a button that does something on click: the click
- * gesture on a level belongs to its paired toggle, and a readout that both
- * scrolls and clicks would make the toggle ambiguous. Hence `tabIndex={-1}`
- * and a plain div -- there is no keyboard action to expose, and the value is
- * announced through aria-label on the group instead.
+ * Pressing it holds to sweep the value (left down, right up) on the same
+ * motion curve the app scrolls with -- see shared/holdToAdjust.ts for why that
+ * curve rather than a linear ramp. It stays a div with `tabIndex={-1}` rather
+ * than a button because there is no discrete click action to expose: every
+ * gesture on it is continuous, and its value is announced through the slider
+ * role above.
  */
 function SoundLevelButton({
   value,
   onWheel,
+  onLevelChange,
+  onAdjustStart,
   label,
   tooltip,
   isDimmed,
 }: {
   value: number
   onWheel: (event: WheelEvent) => void
+  /** Called with a new 0-99 display level while the button is held. */
+  onLevelChange: (displayLevel: number) => void
+  /** Runs when a hold begins, before the first change (used to un-mute). */
+  onAdjustStart: () => void
   label: string
   tooltip: string
   isDimmed: boolean
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
   useNonPassiveWheel(ref, onWheel)
+
   const display = toDisplayLevel(value)
+  const displayRef = useRef(display)
+  displayRef.current = display
+
+  // Press and hold to sweep the value on the app's own motion curve; see
+  // shared/holdToAdjust.ts. Left lowers, right raises.
+  const holdHandlers = useHoldToAdjust({
+    getValue: () => displayRef.current,
+    onChange: onLevelChange,
+    onHoldStart: onAdjustStart,
+    min: 0,
+    max: SOUND_LEVEL_MAX_DISPLAY,
+  })
+
   return (
     <div
       ref={ref}
@@ -961,6 +1059,7 @@ function SoundLevelButton({
       aria-valuenow={display}
       tabIndex={-1}
       data-tooltip={tooltip}
+      {...holdHandlers}
     >
       {display}
     </div>

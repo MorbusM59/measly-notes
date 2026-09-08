@@ -76,6 +76,20 @@ export class MissingFileError extends Error {
 export const SEEK_TAIL_GUARD_SEC = 0.05;
 
 /**
+ * How long after a song starts a rewind press means "the previous song"
+ * rather than "the start of this one".
+ *
+ * The universal transport-control convention: once you are past the opening
+ * moments, back means restart; in the opening moments it means go back a
+ * track, because nobody presses back two seconds in wanting to hear the same
+ * two seconds again.
+ */
+export const PREVIOUS_SONG_GRACE_SEC = 2;
+
+/** Where in the previous song a back press from within that grace window lands. */
+export const PREVIOUS_SONG_ENTRY_FRACTION = 0.8;
+
+/**
  * Where a seek lands, and what it could not spend getting there.
  *
  * Split out of `seek()` as a pure function because the overshoot is what makes
@@ -103,6 +117,71 @@ export function resolveSeekTarget(
 /** Longest a from-the-end seek waits for a duration before giving up. */
 const DURATION_WAIT_TIMEOUT_MS = 2000;
 
+/**
+ * What a 20% seek BUTTON PRESS should do, as opposed to what a scrub does.
+ *
+ * The two gestures want different things at a boundary and this is the whole
+ * of the difference:
+ *
+ *   A scrub is continuous motion through the timeline, so running off an end
+ *   carries the leftover into the neighbour and keeps moving (see `seek`).
+ *
+ *   A press is a discrete command, and carrying leftovers there produces
+ *   nonsense -- a forward press with 1% of the track left would drop the
+ *   listener 19% into the next song, somewhere they never asked to be. So a
+ *   press that cannot complete inside the track resolves to a landmark
+ *   instead: the start of the next song, or the start of this one.
+ *
+ * The one exception is a back press in the opening seconds, which is the
+ * familiar transport-control behaviour: there, "back" means the previous
+ * track, entered near its end rather than at its start, because a listener
+ * reaching backwards wants the music that was just playing, not four minutes
+ * of lead-in to it.
+ */
+export type SeekPressOutcome =
+  /** Stay in this song, at this time. */
+  | { kind: 'within'; timeSec: number }
+  /** Leave for the next song, from its beginning. */
+  | { kind: 'next-song' }
+  /** Restart the song currently playing. */
+  | { kind: 'restart' }
+  /** Leave for the previous song, entering at `entryFraction` of its length. */
+  | { kind: 'previous-song'; entryFraction: number };
+
+export function resolveSeekPress(
+  currentTimeSec: number,
+  durationSec: number,
+  fraction: number,
+): SeekPressOutcome {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    return { kind: 'within', timeSec: Math.max(0, currentTimeSec) };
+  }
+
+  const stepSec = durationSec * Math.abs(fraction);
+
+  if (fraction > 0) {
+    // Less than a step left to play: the press means the next song, not a
+    // hop to a sliver of this one's tail.
+    const remainingSec = durationSec - currentTimeSec;
+    return remainingSec < stepSec
+      ? { kind: 'next-song' }
+      : { kind: 'within', timeSec: currentTimeSec + stepSec };
+  }
+
+  if (fraction < 0) {
+    if (currentTimeSec < PREVIOUS_SONG_GRACE_SEC) {
+      return { kind: 'previous-song', entryFraction: PREVIOUS_SONG_ENTRY_FRACTION };
+    }
+    // Past the grace window but less than a step in: back means the top of
+    // this song, never a wrap into the one before it.
+    return currentTimeSec < stepSec
+      ? { kind: 'restart' }
+      : { kind: 'within', timeSec: currentTimeSec - stepSec };
+  }
+
+  return { kind: 'within', timeSec: currentTimeSec };
+}
+
 type PlaybackEndHandler = () => void;
 
 export class MusicPlayerService {
@@ -123,6 +202,20 @@ export class MusicPlayerService {
   get filePath(): string | null { return this.currentFilePath; }
   get duration(): number { return this.currentDuration; }
   get currentTime(): number { return this.element?.currentTime ?? 0; }
+  /** The playing track's length, or 0 while the browser has not reported one. */
+  get currentDurationSec(): number {
+    const duration = this.element?.duration;
+    return Number.isFinite(duration) && (duration ?? 0) > 0 ? (duration as number) : 0;
+  }
+
+  /** Position as a fraction of the track's length, for entering a song part-way in. */
+  async setCurrentTimeFraction(fraction: number): Promise<void> {
+    const el = this.element;
+    if (!el) return;
+    const duration = await this.whenDurationKnown();
+    if (!duration || el !== this.element) return;
+    this.setCurrentTime(duration * Math.max(0, Math.min(1, fraction)));
+  }
 
   /** Jump to an absolute position (seconds). Used to restore a saved playback position. */
   setCurrentTime(seconds: number): void {
