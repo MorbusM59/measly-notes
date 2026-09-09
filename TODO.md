@@ -33,12 +33,6 @@
 - [ ] On a full app restart, note text in the editor isn't aligned to the grid on initial load (both open sections, if split) — clicking into either editor section fixes it for both. Never root-caused; likely a measurement/layout timing issue on cold mount. The scroll-sync rewrite removed `applySourceAnchorToEditor` (the previously-suspected related mechanism) entirely, so re-check whether this still reproduces before investigating further -- if it doesn't, that was likely the cause.
 - [ ] The render view's scroll bridge spoofs the Universal Declaration of Human Rights (`src/assets/hrd.md`, via `scrollBridgeTexture.ts`). It is public-domain UN text and it is never readable at the speed it passes, but it is quoted at length all the same -- it needs an attribution line. Not in the User Guide: the guide tells a user how to work the app, and the bridge is not something they operate (see the note on guide scope in `CLAUDE.md`). Put it in the design-philosophy document below, whenever that gets written.
 
-- [ ] `src/shared/holdToAdjust.test.ts` fails on a clean tree: "restates the animation speed as a
-  whole-range crossing time" expects `holdFullTravelSec(0.4)` to be `0.5 + 0.4 * 5 = 2.5` and gets
-  `1.5`. Confirmed pre-existing at `3b5dad2` with the working tree stashed, so the whole suite's
-  baseline is no longer zero failures. Either the formula moved and the test was not moved with it,
-  or the formula regressed -- decide which, then fix that side.
-
 - [ ] Write a design-philosophy document -- a separate thing from the User Guide, and explicitly not user instructions. Read as a sales pitch for an app that is not for sale: what this app's design actually commits to, worked examples of those commitments being honored, and the blend of features that makes it unlike its neighbours. Home for everything that is interesting-but-not-instructional: the scroll bridge and the Declaration passing on it, why there are no context menus anywhere, why chapters cannot do what folders do. Some of this exists in scattered form in `docs/guiding-vision.md` (agent-facing) and in the interaction/workflow contracts under `docs/` -- this would be the outward-facing counterpart.
 
 ## Split-view rough edges (carried over from split-view handover doc)

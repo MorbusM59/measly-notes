@@ -26,9 +26,39 @@ afterEach(() => {
 })
 
 describe('hold travel time from the animation setting', () => {
+  /**
+   * The PROPERTY, not the arithmetic -- the test below owns the formula, and
+   * owns it against the constants themselves.
+   *
+   * This used to assert `holdFullTravelSec(0.4)` was `0.5 + 0.4 * 5`, with the
+   * multiplier written out by hand two lines under an import of that very
+   * constant, and a second assertion pinning the same input's answer to a bare
+   * `2.5`. Both were snapshots of one tuning of the constant, so tuning it (5
+   * -> 2.5, a deliberate feel change) broke a test that had no opinion about
+   * feel at all. The rule the function actually has to obey is the one its doc
+   * comment states: the scroll setting's own range is far shorter than any
+   * sensible time to walk a hundred steps, so this SCALES the setting rather
+   * than copying it.
+   */
   it('restates the animation speed as a whole-range crossing time', () => {
-    expect(holdFullTravelSec(0.4)).toBeCloseTo(0.5 + 0.4 * 5, 10)
-    expect(holdFullTravelSec(DEFAULT_RENDER_SCROLL_TOTAL_TIME_SEC)).toBeCloseTo(2.5, 10)
+    // A restatement, not a copy: crossing the range always takes longer than
+    // the scroll animation whose setting it comes from.
+    for (const speed of [0, 0.1, 0.4, 1, 2]) {
+      expect(holdFullTravelSec(speed)).toBeGreaterThan(speed)
+    }
+
+    // Affine in the setting: equal steps in the setting are equal steps in the
+    // travel time, so the slider reads as one continuous control.
+    const stepA = holdFullTravelSec(1) - holdFullTravelSec(0.5)
+    const stepB = holdFullTravelSec(1.5) - holdFullTravelSec(1)
+    expect(stepA).toBeCloseTo(stepB, 10)
+    expect(stepA).toBeGreaterThan(0)
+
+    // And the default setting lands somewhere a reader can actually aim: fast
+    // enough not to be a chore, slow enough to stop on a value.
+    const atDefault = holdFullTravelSec(DEFAULT_RENDER_SCROLL_TOTAL_TIME_SEC)
+    expect(atDefault).toBeGreaterThan(0.75)
+    expect(atDefault).toBeLessThan(6)
   })
 
   it('keeps a floor so the snappiest setting is still aimable', () => {
