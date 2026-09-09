@@ -31,22 +31,44 @@ export interface PreviewAnchorCandidate<T> {
  *
  * Returns null only for an empty candidate list.
  */
+/**
+ * How much slack the straddle test allows at the reference line.
+ *
+ * Not a fudge factor: the reference line is exactly where a landing PUTS a
+ * block's top, so the boundary case is not an edge case here -- it is the
+ * normal case, hit on every single restore. At exact equality the rule below
+ * is already right (the block starting at the line straddles it; the one
+ * ending there has been scrolled past), but both numbers arrive as
+ * accumulated floating-point sums of measured heights, and a difference of one
+ * ULP flips the comparison to the block above. Measured in the round-trip
+ * property test: a landing at 570.5999999999999 read back as the PREVIOUS
+ * block, because that block's bottom and the next block's top were the same
+ * quantity computed two different ways.
+ *
+ * A micron of a pixel is far below any geometry the browser can express (a
+ * subpixel is 1/64px at worst) and far above double-precision noise on numbers
+ * of this size, so it can only ever resolve the tie it is here for.
+ */
+const REFERENCE_BOUNDARY_TOLERANCE_PX = 1e-6
+
 export function selectPreviewAnchorCandidate<T>(
   candidates: PreviewAnchorCandidate<T>[],
   referenceOffsetPx = 0,
 ): PreviewAnchorCandidate<T> | null {
   if (candidates.length === 0) return null
 
+  const reference = referenceOffsetPx + REFERENCE_BOUNDARY_TOLERANCE_PX
+
   let straddling: PreviewAnchorCandidate<T> | null = null
   let firstBelow: PreviewAnchorCandidate<T> | null = null
   let lastAbove: PreviewAnchorCandidate<T> | null = null
 
   for (const candidate of candidates) {
-    if (candidate.top <= referenceOffsetPx && candidate.bottom > referenceOffsetPx) {
+    if (candidate.top <= reference && candidate.bottom > reference) {
       if (!straddling || candidate.top > straddling.top) straddling = candidate
       continue
     }
-    if (candidate.top > referenceOffsetPx) {
+    if (candidate.top > reference) {
       if (!firstBelow || candidate.top < firstBelow.top) firstBelow = candidate
       continue
     }

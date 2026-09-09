@@ -859,7 +859,9 @@ or streamlining gap could live, then verify live in the browser — not the reve
    comment at `:1654-1661` — confirm nothing re-enables or partially depends on CM6's native
    selection painting anywhere else). Highest-severity class per this project's own convention if
    anything is found here.
-5. **Preview/edit scroll sync** — `PreviewBlockIndex.ts`, `PreviewScrollAnchor.ts`,
+5. **Preview/edit scroll sync** — `PreviewBlockIndex.ts`, `previewLanding.ts` (the one
+   landing arithmetic both preview panes now go through; it replaced the element-resolution
+   approach in `PreviewScrollAnchor.ts`, which is deleted),
    `anchorBlockIndex` persistence/restore (`EditRestoreMath.ts`, `useEditorSectionMount.ts`'s
    restore paths), the mode-toggle path. This is the area the "Scroll-sync rewrite" section above
    most recently rewrote and explicitly flagged as **not yet live-verified in a real browser

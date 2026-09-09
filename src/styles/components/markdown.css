@@ -225,32 +225,34 @@
   text-shadow: var(--text-shadow-emboss-heading-glow);
 }
 
-/* The document's own first block opens flush with the top of the page -- a
-   note should never start with a gap above its own title.
+/* The document's outer edges carry the page margin and nothing else.
+   `--preview-edge-padding` IS the distance from the pane's edge to the text,
+   at both ends -- a note never opens with a gap above its own title, and
+   never trails one below its last line.
 
-   Both selectors are CLASSES, deliberately, and both live in one rule.
+   The rule is about the DOCUMENT's edges, so it is stated over every element
+   type rather than the two that happened to prompt it. It used to read
+   `> h1, > h2`, which left a note that opens on a paragraph, list, quote or
+   code block with that block's own inter-block margin stacked on top of the
+   page margin -- exactly the space-between-blocks spacing that has no
+   business at a document's edge.
 
-   By class, not by position: the preview is virtualized, so the spacer's
-   first DOM child is whichever block happens to be mounted right now, not
-   block 0. A `:first-child` rule here silently un-margins some heading in
+   Two spacings live in this file and only one of them belongs here:
+   inter-block margins are content (how airy the document reads between its
+   parts), the page margin is the page (how far the text sits from the
+   frame). Anywhere the two would add up, the page margin is the whole
+   answer.
+
+   By CLASS, not by `:first-child`: the windowed pane mounts a moving run, so
+   the container's first DOM child is whichever block happens to be mounted,
+   not block 0. A positional rule there silently un-margins some heading in
    the middle of the document as soon as the reader scrolls to it -- and
-   re-margins it when they scroll back, changing that block's height under
-   the virtualizer.
-
-   In one rule, not two: the background measurement prewarm renders block 0
-   into its own hidden host (previewMeasurementPrewarm.ts), so it needs the
-   same margin reset by its own class. When these were two separate rules
-   the prewarm's copy sat BEFORE `.markdown-preview h1`'s own margin at
-   equal specificity, so it lost the tie and block 0 was measured 0.5em
-   taller than it renders -- a gap under the title that no amount of
-   re-measuring could remove, because the measurement itself was wrong.
-   Whatever weight this rule carries, it now carries for both. */
-.markdown-preview .preview-first-block > h1,
-.markdown-preview .preview-first-block > h2,
-.markdown-preview .preview-prewarm-first-block > h1,
-.markdown-preview .preview-prewarm-first-block > h2 {
-  margin-top: 0;
-}
+   re-margins it when they scroll back, changing that block's measured
+   height underneath the window. (The PDF export renders every block as a
+   direct child of the pane and no window, so the positional form IS correct
+   there and exportStyles.ts keeps it.) */
+.markdown-preview .preview-first-block > * { margin-top: 0; }
+.markdown-preview .preview-last-block  > * { margin-bottom: 0; }
 
 .markdown-preview h1 { font-size: 1.9em; }
 .markdown-preview h2 { font-size: 1.55em; }
@@ -264,8 +266,6 @@
 .markdown-preview table {
   margin: 0.55em 0;
 }
-
-.markdown-preview > *:first-child { margin-top: 0; }
 
 .markdown-preview a {
   color:                var(--color-text-link);

@@ -364,9 +364,8 @@ original pair:
 1. **Move markdown parsing to a Web Worker.** Still not investigated. Strongest guarantee (a
    slow parse literally can't compete with keystroke handling on the main thread), but real
    integration cost: `src/editorSection/usePreviewScrollbar.ts`'s custom-scrollbar sync, and
-   the source-anchor resolution in `src/editor/EditRestoreMath.ts` /
-   `src/editor/PreviewScrollAnchor.ts` (`resolvePreviewSourceAnchorFromContainer`,
-   `findPreviewSourceAnchorElement`), all assume *synchronous* DOM access to the
+   the source-anchor capture in `src/editorSection/useEditorSectionMount.ts`
+   (`resolvePreviewSourceAnchorFromContainer`), both assume *synchronous* DOM access to the
    already-rendered markdown (`querySelectorAll` for `[data-source-line]` elements happening in
    the same tick as the edit). Moving the parse off-thread turns rendering into an async round
    trip, and those call sites would need rethinking. Given the CDP trace above shows the

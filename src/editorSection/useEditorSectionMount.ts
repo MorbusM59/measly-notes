@@ -20,7 +20,6 @@ import {
   scrollTopPxToLines,
   scrollTopLinesToPx,
   buildEditRestoreSnapshotFromUiState,
-  findPreviewSourceAnchorElement,
   RESTORE_OFFSET_LINES,
   readSourceAnchorLine,
   landScrollTopLines,
@@ -30,6 +29,7 @@ import {
 import { normalizeInternalText } from '../editor/TextPolicy'
 import { buildTransformResult } from '../editor/TransformResult'
 import { hashNormalizedText } from '../shared/hashText'
+import { readPreviewEdgePaddingPx, readPreviewLineHeightPx } from './previewBlockGeometry'
 import {
   splitMarkdownIntoPreviewBlocks,
   splitMarkdownIntoPreviewBlocksIncremental,
@@ -679,9 +679,15 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     // Measured at the same line a restore lands on, not at the container's
     // own top edge -- see selectPreviewAnchorCandidate and
     // EditRestoreMath's RESTORE_OFFSET_LINES.
+    //
+    // In the RENDER view's own line height, which is what applyPreviewSourceAnchor
+    // lands with. This used to be the EDIT view's -- an independent font-size and
+    // spacing setting, so the two halves of the round trip were measuring the same
+    // distance with two different rulers and agreed only by coincidence.
+    const referencePx = RESTORE_OFFSET_LINES * readPreviewLineHeightPx(container)
     const selected = selectPreviewAnchorCandidate(
       anchors.map((entry) => ({ entry, top: entry.top, bottom: entry.bottom })),
-      RESTORE_OFFSET_LINES * Math.max(1, lineHeightPx),
+      referencePx,
     )
     if (!selected) return null
 
@@ -692,7 +698,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     // won, because "the element covering the line" and "the first element
     // below it" drift in opposite directions.
     traceSettle(() => {
-      const reference = RESTORE_OFFSET_LINES * Math.max(1, lineHeightPx)
+      const reference = referencePx
       const pick = selected.entry.top <= reference && selected.entry.bottom > reference
         ? 'straddling'
         : selected.entry.top > reference ? 'firstBelow' : 'lastAbove'
@@ -706,7 +712,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       sourceAnchorLine: selected.entry.line,
       sourceAnchorText: selected.entry.element.textContent?.trim() ?? null,
     }
-  }, [lineHeightPx])
+  }, [])
 
   // Resolves the current source line for whichever mode is active, with no
   // markdown parsing at all -- edit's own analytical/DOM primitives only.
@@ -2537,27 +2543,30 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       container.style.scrollBehavior = behavior
     }
 
-    // Lands on the block covering `sourceLine`, one line-height below the
-    // top border (never flush at 0) -- the same RESTORE_OFFSET_LINES
-    // convention every other restore uses, achieved via `scroll-padding-top`
-    // on the container so the browser's own native `scrollIntoView` lands
-    // there directly. This is the ONLY scroll write this function makes.
-    // There is deliberately no follow-up nudge, and no "wait until
-    // scrollTop stops changing" polling: a raw/computed scrollTop write
-    // after the fact is exactly what fights react-virtual's own
-    // reconciliation as newly-mounted neighboring rows get their real
-    // measured heights (see docs/cm6-parity-hardening-plan.md's Bug 5
-    // follow-up) -- that reasoning is why this mechanism was originally
-    // built purely on scrollToIndex-to-mount + scrollIntoView-on-the-real-
-    // element with no override, and it stays that way; scroll-padding-top
-    // is a declarative shift of *where* scrollIntoView lands, not a second
-    // write competing with the first.
+    /**
+     * Lands the block covering `sourceLine` one render-line below the top
+     * border -- the RESTORE_OFFSET_LINES convention every restore uses.
+     *
+     * ONE scroll write, computed by one arithmetic that both panes share
+     * (previewLanding.ts, reached through previewScrollToSourceLine). There is
+     * deliberately no follow-up nudge and no "wait until scrollTop stops
+     * changing" polling: a second, corrective write after the fact is exactly
+     * what fought the pane's own reconciliation as newly-measured blocks
+     * settled, and on the windowed pane it re-anchored the window and walked
+     * the note forward on every switch.
+     *
+     * The offset is the RENDER view's line height, read from the pane itself.
+     * It used to be the EDIT view's, imposed as `scroll-padding-top` under a
+     * native `scrollIntoView` -- two independent typography settings, so the
+     * landing was measured in units the pane it landed in does not use. The
+     * capture half (resolvePreviewSourceAnchorFromContainer) reads its
+     * reference from the same place, because the round trip is only a fixed
+     * point while the two agree.
+     */
     const applyPreviewSourceAnchor = (sourceLine: number) => {
       const container = previewScrollRef.current
       if (!container) return
       const previewTransitionId = beginPreviewRestoreTransition(250)
-
-      container.style.scrollPaddingTop = `${Math.max(0, lineHeightPx)}px`
 
       // Entering a snapshot preview invalidates any earlier "live" preview
       // restore for this note, so returning to present later re-restores.
@@ -2571,88 +2580,33 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
 
       // The block we intend to land on. The scroll listener below compares
       // its own resolved anchor against this, not against "did a scroll
-      // event fire" -- react-virtual's own reconciliation (nearby rows
-      // mounting, real measured heights replacing initial estimates) can
-      // keep generating genuine native scroll events for an unbounded,
-      // unknowable time after we call scrollIntoView, all converging toward
-      // this same block. No duration, however generous, can be trusted to
-      // outlast that; but as long as they all converge here, none of them
-      // represent an actual change worth reacting to. Set before either
-      // call below, so it covers the whole operation regardless of how many
-      // events fire or how long convergence takes.
+      // event fire" -- the pane's own reconciliation (blocks getting their
+      // real measured heights) can keep generating genuine native scroll
+      // events for an unbounded, unknowable time after the landing, all
+      // converging toward this same block. No duration, however generous, can
+      // be trusted to outlast that; but as long as they all converge here,
+      // none of them represent an actual change worth reacting to.
       lastKnownPreviewAnchorLineRef.current = clampedSourceLine
-      previewScrollToSourceLineRef.current?.(clampedSourceLine, { align: 'start' })
 
-      // The anchor element only exists once the block covering it has
-      // actually mounted, which the scrollToSourceLine call above may not
-      // have achieved yet. Rather than burn down a countdown of animation
-      // frames hoping it turned up (the old shape here, and exactly the
-      // "wait N frames and hope" pattern the settle gate exists to remove),
-      // this re-attempts on the preview's own commit notifications: the DOM
-      // can only have gained the element as a result of a commit, so those
-      // are precisely the moments worth re-checking, and no others. The
-      // attempt bound is a safety valve against a line that resolves to no
-      // block at all, not the mechanism.
-      const finishRestore = () => {
-        container.style.scrollBehavior = previousScrollBehavior
-        previewScrollTransitionControllerRef.current.forceComplete(previewTransitionId)
-        // Tell the gate the restore is done EITHER way -- landed or given
-        // up. A restore that can't find its target must still let the
-        // preview become visible; the gate's whole contract is that it
-        // never outlives the operation it's waiting on.
-        if (settleGeneration !== null) {
-          previewSettleGateRef.current?.markRestoreApplied(settleGeneration)
-        }
-      }
+      const landed = previewScrollToSourceLineRef.current?.(clampedSourceLine, {
+        align: 'start',
+        offsetPx: RESTORE_OFFSET_LINES * readPreviewLineHeightPx(container),
+      }) ?? false
 
-      /**
-       * ONE landing, from information that is already in hand.
-       *
-       * This was a scroll-look-RE-AIM loop: scroll on an estimate, look for
-       * the target, and if it had not mounted yet, aim again next frame, up
-       * to ninety of them. Every part of that premise is gone. A continuous
-       * pane mounts every block, so the target is in the DOM before this
-       * runs. A windowed pane settles itself synchronously and reports where
-       * it landed (landOnChar). Neither has to be found by trying.
-       *
-       * The rule this restores is the one the render view is built on: wait
-       * until the information is there, then hit the target by design. An
-       * approximate landing followed by a correction is not a cheaper way of
-       * arriving -- it is a wrong position, and on the windowed pane it was
-       * worse than merely wrong, because the correction re-anchored the
-       * window and the next capture recorded the carried position, walking
-       * the note eight blocks on every switch.
-       */
-      // Read from the DOM rather than threaded through as a flag: the
-      // windowed pane IS its container, so asking whether one is mounted is
-      // asking the thing itself rather than a proxy for it.
-      const isWindowedPane = container.querySelector('.preview-window') !== null
-      if (isWindowedPane) {
-        // Already landed, exactly, by the call above. Looking an element up
-        // here is what broke it: the run mounted around the target is not the
-        // document, and any answer taken from its edge is a different place.
-        traceSettle(() => `restore line=${clampedSourceLine} windowed scrollTop=${container.scrollTop.toFixed(1)}`)
-        finishRestore()
-        return
-      }
+      traceSettle(() => `restore line=${clampedSourceLine} landed=${landed}`
+        + ` scrollTop=${container.scrollTop.toFixed(1)}`
+        + ` offset=${(RESTORE_OFFSET_LINES * readPreviewLineHeightPx(container)).toFixed(1)}`
+        + ` edgePadding=${readPreviewEdgePaddingPx(container).toFixed(1)}`)
 
-      // Continuous: the element exists now and its position is a fact. One
-      // write, landed by scroll-padding-top at the same offset the capture
-      // reads from, so the two agree by construction.
-      const target = findPreviewSourceAnchorElement(container, clampedSourceLine)
-      if (target) {
-        const beforeScrollTop = container.scrollTop
-        target.scrollIntoView({ block: 'start', inline: 'nearest' })
-        traceSettle(() => {
-          const landedTop = target.getBoundingClientRect().top - container.getBoundingClientRect().top
-          return `restore line=${clampedSourceLine}`
-            + ` scrollTop=${beforeScrollTop.toFixed(1)}->${container.scrollTop.toFixed(1)}`
-            + ` landedTop=${landedTop.toFixed(1)} padding=${container.style.scrollPaddingTop || '(none)'}`
-        })
-      } else {
-        traceSettle(() => `restore line=${clampedSourceLine} NO ELEMENT -- nothing to land on`)
+      container.style.scrollBehavior = previousScrollBehavior
+      previewScrollTransitionControllerRef.current.forceComplete(previewTransitionId)
+      // Tell the gate the restore is done EITHER way -- landed or given up. A
+      // restore that can't find its target must still let the preview become
+      // visible; the gate's whole contract is that it never outlives the
+      // operation it's waiting on.
+      if (settleGeneration !== null) {
+        previewSettleGateRef.current?.markRestoreApplied(settleGeneration)
       }
-      finishRestore()
     }
 
     const previewRestoreKey = `${activeNoteId}:${previewedSnapshotId ?? 'live'}`

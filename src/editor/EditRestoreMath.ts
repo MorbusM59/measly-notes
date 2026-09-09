@@ -1,6 +1,5 @@
 import type { PersistedViewportState } from '../shared/appState'
 import type { EditorSelectionState } from './EditorContract'
-import { resolvePreviewSourceAnchorEntry } from './PreviewScrollAnchor'
 import { splitMarkdownIntoPreviewBlocks, type PreviewMarkdownBlock } from './PreviewBlockSplit'
 import { resolveSourceLineForAnchorBlockIndex } from './PreviewBlockIndex'
 
@@ -143,50 +142,6 @@ export function resolveEditSourceAnchorLineFromUiState(
   const resolvedBlocks = blocks ?? splitMarkdownIntoPreviewBlocks(text)
   const sourceLine = resolveSourceLineForAnchorBlockIndex(resolvedBlocks, Math.round(uiState.anchorBlockIndex))
   return Math.min(Math.max(0, sourceLine), totalLines - 1)
-}
-
-export function findPreviewSourceAnchorElement(container: HTMLElement, sourceLine: number): HTMLElement | null {
-  const anchors = Array.from(container.querySelectorAll<HTMLElement>('[data-source-line-start], [data-source-line]'))
-  if (anchors.length === 0) {
-    return null
-  }
-
-  type AnchorEntry = { element: HTMLElement; tagName: string; line: number; lineStart: number; lineEnd: number; text: string | null }
-  const entries: AnchorEntry[] = []
-
-  for (const element of anchors) {
-    const startValue = Number(element.dataset.sourceLineStart)
-    const endValue = Number(element.dataset.sourceLineEnd)
-    const fallbackStartValue = Number(element.dataset.sourceLine)
-    const lineStart = Number.isFinite(startValue)
-      ? Math.max(0, Math.round(startValue))
-      : Number.isFinite(fallbackStartValue)
-        ? Math.max(0, Math.round(fallbackStartValue))
-        : null
-    const lineEnd = Number.isFinite(endValue)
-      ? Math.max(0, Math.round(endValue))
-      : lineStart
-
-    if (lineStart === null) continue
-
-    entries.push({
-      element,
-      tagName: element.tagName,
-      line: lineStart,
-      lineStart,
-      lineEnd: lineEnd ?? lineStart,
-      text: element.textContent?.trim() ?? null,
-    })
-  }
-
-  if (entries.length === 0) return null
-
-  const resolvedEntry = resolvePreviewSourceAnchorEntry(entries, sourceLine)
-  if (!resolvedEntry) {
-    return null
-  }
-
-  return resolvedEntry.element
 }
 
 // Converts a pixel scroll position (e.g. from the legacy per-note SQLite

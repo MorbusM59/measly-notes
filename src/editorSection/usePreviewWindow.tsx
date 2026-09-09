@@ -20,6 +20,7 @@ import {
   resolvePreviewWindowAdjustment,
   type PreviewWindowRange,
 } from './previewWindow'
+import { measurePreviewBlockGeometry, resolvePreviewEdgeBlockClass } from './previewBlockGeometry'
 
 /**
  * The windowed preview: the scroller holds a moving run of blocks, and
@@ -149,6 +150,17 @@ export interface PreviewWindowApi {
    * middle of the document. Only this can tell the two apart.
    */
   isAtDocumentEdge: (direction: -1 | 1) => boolean
+  /**
+   * Whether the mounted run begins at the document's first block.
+   *
+   * Distinct from `isAtDocumentEdge(-1)`, which also asks where the READER is.
+   * This asks only what is mounted, and it exists for one question: how much
+   * document sits above a block, which a landing needs (see previewLanding.ts)
+   * and which is unanswerable from pixels alone on a windowed pane -- the run's
+   * own top pixel looks identical whether the document starts there or a
+   * hundred blocks earlier.
+   */
+  isRunAtDocumentStart: () => boolean
 }
 
 export interface UsePreviewWindowOptions {
@@ -281,24 +293,9 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
       contentHeightRef.current = 0
       return
     }
-    // markdown.css gives every direct child of the scroller `position:
-    // relative`, so this container is its children's offsetParent and their
-    // offsetTop is measured from IT, not from the scroller -- short by the
-    // scroller's own top padding. `scrollTop` is measured from the padding
-    // edge, so without this every landing would sit one --preview-edge-padding
-    // too far down the block it aimed at.
-    const base = container.offsetParent !== null ? container.offsetTop : 0
-    const nodes = container.querySelectorAll<HTMLElement>(':scope > [data-index]')
-    const next: PreviewBlockMeasurement[] = []
-    let total = 0
-    nodes.forEach((node) => {
-      const index = Number(node.getAttribute('data-index'))
-      if (!Number.isFinite(index)) return
-      const size = node.offsetHeight
-      const start = (node.offsetParent === container ? base : 0) + node.offsetTop
-      next.push({ index, start, size })
-      total += size
-    })
+    // Shared with the continuous pane, correction and all -- see
+    // measurePreviewBlockGeometry.
+    const { measurements: next, totalHeightPx: total } = measurePreviewBlockGeometry(container)
     measurementsRef.current = next
     // The scroller's own number, not the container's: it is what `scrollTop`
     // is bounded by, padding included, and the runway is a statement about
@@ -890,6 +887,8 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     return resolveCharOffsetPx(charOffset) ?? previewScrollRef.current?.scrollTop ?? null
   }, [scrollToChar, settleWindow, resolveCharOffsetPx, previewScrollRef])
 
+  const isRunAtDocumentStart = useCallback(() => rangeRef.current.startIndex <= 0, [])
+
   const api = useMemo<PreviewWindowApi>(() => ({
     readCharViewport,
     readMeasurements,
@@ -899,7 +898,8 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     readLastScreenChars,
     readContinuousScrollOffsetPx,
     isAtDocumentEdge,
-  }), [readCharViewport, readMeasurements, scrollToChar, landOnChar, resolveCharOffsetPx, readLastScreenChars, readContinuousScrollOffsetPx, isAtDocumentEdge])
+    isRunAtDocumentStart,
+  }), [readCharViewport, readMeasurements, scrollToChar, landOnChar, resolveCharOffsetPx, readLastScreenChars, readContinuousScrollOffsetPx, isAtDocumentEdge, isRunAtDocumentStart])
 
   const element = useMemo(() => {
     if (!enabled) return null
@@ -911,10 +911,10 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
         <div
           key={index}
           data-index={index}
-          // Marks the document's first block for the leading-margin reset in
+          // Marks the document's own edge blocks for the page-margin rule in
           // markdown.css -- by class rather than by DOM position, because the
           // window's first child is whichever block is mounted, not block 0.
-          className={index === 0 ? 'preview-first-block' : undefined}
+          className={resolvePreviewEdgeBlockClass(index, previewBlocks.length)}
           style={{ display: 'flow-root' }}
         >
           {renderBlock(block, index)}

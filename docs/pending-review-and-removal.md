@@ -332,3 +332,60 @@ half-alive.
 
 **Noticed.** Moving the music volume/reverb sliders out of the options menu
 and into the player's own sound-options row.
+
+### `previewMeasurementPrewarm.ts` is gone but is still cited by five places
+
+**What.** Three live code comments and two perf scripts point at
+`src/editorSection/previewMeasurementPrewarm.ts`, which no longer exists (it
+went with the virtualizer): `usePreviewMarkdownRendering.tsx:89` (a
+`/** Progress of the background block survey */` doc line attached to
+`OpenItemsToggleStore`, which is not that and never was),
+`usePreviewMarkdownRendering.tsx:1207` (a section banner over what is now
+just `spacerRef`/`charRulerRef`), `styles/components/editor.css:773` (the
+"discovery progress" bar's own comment), and
+`scripts/perf/measurePreviewSurveyThroughput.mjs` /
+`scripts/perf/verifyPreviewPrewarmSafety.mjs`, both of which measure a survey
+that no longer runs.
+
+**Why it is suspect.** A survey exists to guess heights for blocks that are
+not mounted. The continuous pane mounts every block and reads the browser's
+own geometry; the windowed pane has no whole-document height for a survey to
+be right about. So the mechanism has no remaining purpose in either pane --
+which raises the real question the comments obscure: is the *discovery
+progress bar* in the timeline slot still reachable at all, and if not, that is
+a piece of UI plus its CSS plus its state that should go with the scripts.
+
+**What would have to be true to remove it.** That nothing still drives the
+discovery-progress UI (trace its state back to a producer that actually
+fires), and that neither perf script measures anything a live pane still does
+-- `measurePreviewSurveyThroughput` in particular is only meaningful if some
+survey still has a throughput. Then delete both scripts, the CSS block, the UI,
+and correct the two code comments. Do NOT merely repoint the comments at
+another file: half of what they describe is the thing that should be deleted.
+
+**Noticed.** Rebuilding the render view's page-margin and landing rules, where
+the same removal had also left a dead `.preview-prewarm-first-block` selector
+in `markdown.css` (deleted in that change).
+
+### `PreviewScrollToSourceLineFn`'s `align` option is never read
+
+**What.** The `align?: 'start' | 'center'` option on
+`PreviewScrollToSourceLineFn` (`usePreviewMarkdownRendering.tsx`) is passed by
+callers -- the restore passes `'start'`, find navigation passes `'center'` --
+and the implementation has never looked at it. Both alignments land the block
+at the same place; find navigation gets its centering from a separate
+`scrollIntoView` correction in `scrollToRenderedElement` afterwards.
+
+**Why it is suspect.** A parameter that changes nothing is worse than absent:
+the restore reads as though it chose start-alignment deliberately, and a future
+caller will reasonably expect `'center'` to centre.
+
+**What would have to be true to remove it.** Either the two callers genuinely
+want the same landing (drop the option, and let find navigation keep owning its
+own centering), or centering belongs in the landing after all -- in which case
+implement it in `previewLanding.ts` rather than re-adding a second corrective
+scroll write. Deciding which is the whole task; the option cannot just be
+deleted without answering it.
+
+**Noticed.** Threading a real `offsetPx` through the same options object while
+rebuilding the landing arithmetic.

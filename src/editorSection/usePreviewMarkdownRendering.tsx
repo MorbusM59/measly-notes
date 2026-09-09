@@ -47,6 +47,12 @@ import {
   resolvePreviewCharViewport,
 } from './previewCharPosition'
 import type { PreviewBlockMeasurement, PreviewCharViewport } from './previewCharPosition'
+import {
+  measurePreviewBlockGeometry,
+  readPreviewEdgePaddingPx,
+  resolvePreviewEdgeBlockClass,
+} from './previewBlockGeometry'
+import { resolvePreviewLandingScrollTop } from './previewLanding'
 
 /**
  * The preview's position in character space, published for the scrollbar.
@@ -145,7 +151,20 @@ function createOpenItemsToggleStore(): OpenItemsToggleStore {
  */
 export type PreviewScrollToSourceLineFn = (
   sourceLine: number,
-  opts?: { align?: 'start' | 'center'; behavior?: 'auto' | 'smooth' },
+  opts?: {
+    align?: 'start' | 'center'
+    behavior?: 'auto' | 'smooth'
+    /**
+     * How far below the pane's top edge to leave the block, in pixels.
+     *
+     * Omitted means flush at the top. A restore passes
+     * `RESTORE_OFFSET_LINES` worth of the RENDER view's line height -- the
+     * convention that a restored anchor sits one line below the border rather
+     * than jammed against it. The offset is honoured against the DOCUMENT's
+     * content, never against its page margin; see previewLanding.ts.
+     */
+    offsetPx?: number
+  },
 ) => boolean
 
 export interface UsePreviewMarkdownRenderingOptions {
@@ -726,6 +745,28 @@ export function usePreviewMarkdownRendering({
     const index = resolvePreviewBlockIndexForSourceLine(previewBlocksRef.current, sourceLine)
     if (index < 0) return false
 
+    const scrollerForLanding = previewScrollRef.current
+    if (!scrollerForLanding) return false
+
+    /**
+     * The one landing arithmetic, applied to whichever pane found the block --
+     * see previewLanding.ts for the rule and what it replaced.
+     *
+     * `offsetPx` is the caller's, not this function's: putting a block at the
+     * top of the pane and putting it one line below the top are two different
+     * intents, and only the restore has the second one. Find navigation asks
+     * for a plain top-aligned travel and then does its own centering.
+     */
+    const land = (blockTopPx: number, contentAbovePx: number) => {
+      const landing = resolvePreviewLandingScrollTop({
+        blockTopPx,
+        contentAbovePx,
+        offsetPx: opts?.offsetPx ?? 0,
+        maxScrollTopPx: scrollerForLanding.scrollHeight - scrollerForLanding.clientHeight,
+      })
+      scrollPreviewTo(landing, opts?.behavior === 'smooth' ? 'smooth' : 'auto')
+    }
+
     // Windowed: there is no document-wide pixel space to scroll into, so the
     // block is mounted and landed on directly. No estimates to populate, no
     // measurement cache to invalidate, and no retry -- the answer is exact on
@@ -751,7 +792,15 @@ export function usePreviewMarkdownRendering({
       // settled answer, is the landing.
       const landedPx = windowApi.landOnChar(offsets[index])
       if (landedPx === null) return false
-      scrollPreviewTo(landedPx)
+      // How much document sits above the block: the run's own top pixel is the
+      // page margin only while the run starts at block 0. Anywhere else there
+      // is at least a window of document above it, which no one-line offset can
+      // exhaust -- so say so rather than measuring a number that would be a
+      // statement about the window instead of about the document.
+      const contentAbovePx = windowApi.isRunAtDocumentStart()
+        ? landedPx - readPreviewEdgePaddingPx(scrollerForLanding)
+        : Number.POSITIVE_INFINITY
+      land(landedPx, contentAbovePx)
       return true
     }
 
@@ -759,9 +808,10 @@ export function usePreviewMarkdownRendering({
     // offset is a fact rather than a projection. One read, one write, no
     // retry -- the same shape the windowed branch above has always had.
     const measurement = continuousMeasurementsRef.current.find((entry) => entry.index === index)
-    const scroller = previewScrollRef.current
-    if (!measurement || !scroller) return false
-    scrollPreviewTo(measurement.start, opts?.behavior === 'smooth' ? 'smooth' : 'auto')
+    if (!measurement) return false
+    // The whole document is in this scroller, so the content above the block is
+    // simply everything between the page margin and it.
+    land(measurement.start, measurement.start - readPreviewEdgePaddingPx(scrollerForLanding))
     return true
   // blockCharOffsetsRef is deliberately absent from the deps: it is declared
   // further down the file, so naming it here would be a temporal dead zone
@@ -1284,13 +1334,10 @@ export function usePreviewMarkdownRendering({
    * no block whose height has to be guessed, because there is no block that
    * is not there.
    *
-   * Deliberately the same shape and the same offsetParent correction the
-   * windowed pane uses (usePreviewWindow's rebuildMeasurements): markdown.css
-   * gives every direct child of the scroller `position: relative`, so this
-   * container is its children's offsetParent and their offsetTop is measured
-   * from IT, short by the scroller's own top padding -- while `scrollTop` is
-   * measured from the padding edge. Without the correction every landing sits
-   * one --preview-edge-padding too far down the block it aimed at.
+   * Literally the same read the windowed pane does, now that it IS the same
+   * read: measurePreviewBlockGeometry, which carries the offsetParent/padding
+   * correction both panes need -- see its own doc comment for what that
+   * correction is and what it cost to have written twice.
    *
    * Cached rather than read per call: `readCharViewport` runs on scroll, and
    * a forced layout per scroll event is exactly the cost this pane cannot
@@ -1304,19 +1351,7 @@ export function usePreviewMarkdownRendering({
       continuousMeasurementsRef.current = []
       return
     }
-    const base = container.offsetParent !== null ? container.offsetTop : 0
-    const nodes = container.querySelectorAll<HTMLElement>(':scope > [data-index]')
-    const next: PreviewBlockMeasurement[] = []
-    nodes.forEach((node) => {
-      const index = Number(node.getAttribute('data-index'))
-      if (!Number.isFinite(index)) return
-      next.push({
-        index,
-        start: (node.offsetParent === container ? base : 0) + node.offsetTop,
-        size: node.offsetHeight,
-      })
-    })
-    continuousMeasurementsRef.current = next
+    continuousMeasurementsRef.current = measurePreviewBlockGeometry(container).measurements
   }, [])
 
   const readBlockMeasurements = useCallback(() => {
@@ -1852,12 +1887,13 @@ export function usePreviewMarkdownRendering({
         <div
           key={index}
           data-index={index}
-          // Marks the document's first block for the leading margin reset in
+          // Marks the document's own edge blocks for the page-margin rule in
           // markdown.css -- by class rather than by DOM position, kept from
           // the virtualized rendering where the two could differ. They cannot
           // any more, but naming the thing you mean still beats relying on
-          // where it happens to sit.
-          className={index === 0 ? 'preview-first-block' : undefined}
+          // where it happens to sit, and the windowed pane next door still
+          // needs the class for real.
+          className={resolvePreviewEdgeBlockClass(index, previewBlocks.length)}
           style={{ display: 'flow-root' }}
         >
           <PreviewMarkdownBlock
