@@ -12,7 +12,7 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
   /** Whether the background measurement survey still owes this document a height commit. Off unless a test turns it on, so every pre-existing case behaves as it did before the gate learned to wait for it. */
   let measurementPending = false
   const container = {
-    style: { visibility: '' },
+    style: { opacity: '', pointerEvents: '', transition: '' },
     scrollTop: 0,
     scrollHeight: 1000,
     firstElementChild: { style: { height: '1000px' } },
@@ -31,7 +31,7 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
   }
 
   /** Stands in for the render view's scrollbar thumb: a real element, outside the scroll container, that must be covered by the same hold. */
-  const companion = { style: { visibility: '' } }
+  const companion = { style: { opacity: '', pointerEvents: '', transition: '' } }
   /** Records what was still hidden at the moment the pre-reveal hook ran -- the ordering is the point, not the call. */
   const beforeRevealVisibility: Array<{ container: string; companion: string }> = []
 
@@ -42,7 +42,7 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
     isMeasurementPending: () => measurementPending,
     getCompanions: () => [companion as unknown as HTMLElement],
     onBeforeReveal: () => {
-      beforeRevealVisibility.push({ container: container.style.visibility, companion: companion.style.visibility })
+      beforeRevealVisibility.push({ container: container.style.opacity, companion: companion.style.opacity })
     },
     scheduler,
   })
@@ -60,7 +60,7 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
     }
   }
 
-  const isHidden = () => container.style.visibility === 'hidden'
+  const isHidden = () => container.style.opacity === '0'
 
   /** Simulates a geometry change of the kind react-virtual's measurement produces. */
   const moveGeometry = (heightPx: number) => {
@@ -77,7 +77,7 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
     moveGeometry,
     companion,
     beforeRevealVisibility,
-    isCompanionHidden: () => companion.style.visibility === 'hidden',
+    isCompanionHidden: () => companion.style.opacity === '0',
     setMeasurementPending: (pending: boolean) => { measurementPending = pending },
     setNow: (ms: number) => { nowMs = ms },
   }
@@ -100,6 +100,45 @@ describe('previewSettleGate', () => {
     for (let i = 0; i < 10; i += 1) advanceFrame()
 
     expect(isHidden()).toBe(true)
+  })
+
+  it('fades the outgoing note out, and reports how long the caller must wait', () => {
+    const { gate, container, companion } = createHarness()
+
+    const durationMs = gate.beginFadeOut()
+
+    expect(durationMs).toBeGreaterThan(0)
+    expect(container.style.opacity).toBe('0')
+    expect(container.style.transition).toContain(`${durationMs}ms`)
+    // The scrollbar leaves with the pane it describes, not after it.
+    expect(companion.style.transition).toContain(`${durationMs}ms`)
+  })
+
+  it('lets an in-flight fade-out finish when the switch commits mid-fade', () => {
+    const { gate, container, setNow } = createHarness()
+    const durationMs = gate.beginFadeOut()
+
+    // The note commits halfway through the fade. Hiding instantly here would
+    // clear the transition and jump the half-faded pane the rest of the way
+    // in one frame -- the snap the fade exists to remove.
+    setNow(durationMs / 2)
+    gate.beginSettle()
+
+    expect(container.style.transition).toContain(`${durationMs / 2}ms`)
+    expect(container.style.opacity).toBe('0')
+  })
+
+  it('comes back up when a fade-out is never followed by a switch', () => {
+    const { gate, isHidden, runDueTimers, setNow } = createHarness()
+    gate.beginFadeOut()
+    expect(isHidden()).toBe(true)
+
+    // The load threw; no settle will ever open, so nothing else would reveal
+    // the pane and it would stay invisible for the rest of the session.
+    setNow(60_000)
+    runDueTimers()
+
+    expect(isHidden()).toBe(false)
   })
 
   it('hides and reveals its companions with the pane, in the same step', () => {
@@ -125,7 +164,7 @@ describe('previewSettleGate', () => {
 
     // The scrollbar redraws itself here, so it is already correct in the very
     // first frame it is seen rather than correcting itself in the second.
-    expect(beforeRevealVisibility).toEqual([{ container: 'hidden', companion: 'hidden' }])
+    expect(beforeRevealVisibility).toEqual([{ container: '0', companion: '0' }])
   })
 
   it('keeps waiting when the geometry is at rest but the measurement survey has not committed', () => {

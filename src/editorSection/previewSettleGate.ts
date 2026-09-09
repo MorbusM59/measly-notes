@@ -43,11 +43,18 @@
  * moment it doesn't, so a trivial note settles in one evaluation and a
  * pathological one takes as many as it genuinely needs.
  *
- * `visibility: hidden` (not `display: none`, not opacity) is what hides it:
- * the subtree stays laid out, so react-virtual's ResizeObserver measurement
- * and the restore's own `scrollIntoView` both behave exactly as they do
- * when visible. The gate changes *when* the user sees the result, never
- * what the mechanism underneath computes.
+ * `opacity: 0` (never `display: none`) is what hides it: the subtree stays
+ * laid out, so react-virtual's ResizeObserver measurement and the restore's
+ * own `scrollIntoView` both behave exactly as they do when visible. The gate
+ * changes *when* the user sees the result, never what the mechanism
+ * underneath computes.
+ *
+ * This was `visibility: hidden` originally, for the same "stays laid out"
+ * reason -- opacity was chosen over it once the outgoing note gained a fade,
+ * because `visibility` cannot be interpolated and so cannot fade. The one
+ * thing `visibility` gave for free is restored explicitly alongside it:
+ * `pointer-events: none`, so a pane the reader cannot see is also one they
+ * cannot click into.
  *
  * The `maxSettleMs` bound is a safety valve, not the mechanism: it exists
  * so a pathological document can never leave the preview permanently
@@ -113,6 +120,50 @@ const DEFAULT_MAX_SETTLE_MS = 600
  * warn.
  */
 const DEFAULT_MAX_MEASUREMENT_WAIT_MS = 250
+
+/**
+ * How long the outgoing note takes to fade away. There is deliberately no
+ * matching fade in.
+ *
+ * The hold is unavoidable -- the incoming note's real geometry cannot be
+ * known without mounting and measuring it -- so the only question is how the
+ * reader meets it. The two ends of that gap are not symmetric, and treating
+ * them as if they were is what a crossfade gets wrong.
+ *
+ * LEAVING is not an event. Nothing the reader wants to look at is happening,
+ * and cutting the old note away in one frame is a flash; a short fade lets it
+ * go without one.
+ *
+ * ARRIVING is the event, and it is the thing the reader asked for. A fade in
+ * is the one part of a crossfade that genuinely delays it -- the note is
+ * finished, measured and correct, and the fade is spent showing it to them
+ * slowly. That is precisely what the interaction doc's note-activation rule
+ * rejects: motion that conveys nothing and only delays arrival. So the reveal
+ * is instantaneous, and the fade is spent only on the half where there is
+ * nothing to wait for.
+ *
+ * The fade-out runs against the OUTGOING note, which means it has to start
+ * before React commits the incoming one -- see beginFadeOut, and the note
+ * switch in EditorSection's activateNote that drives it.
+ */
+export const PREVIEW_FADE_OUT_MS = 90
+
+/**
+ * How long after a fade-out the gate waits for the note switch that is
+ * supposed to follow it, before deciding one never will and coming back up.
+ *
+ * A fade-out is begun by the CALLER, at the top of a switch, and is only
+ * undone by the settle that the same switch opens a moment later. If that
+ * switch dies in between -- the note fails to load, the IPC rejects -- there
+ * is nothing left to reveal the pane, and it stays invisible for the rest of
+ * the session. This is the valve for that, and it covers every abort path
+ * rather than the one or two that happen to be try/caught.
+ *
+ * Generous on purpose: a real load that is merely slow must not trip it and
+ * flash the outgoing note back before the incoming one arrives. Anything past
+ * this is not slow, it is gone.
+ */
+const FADE_OUT_ABANDONED_AFTER_MS = 5000
 
 export interface PreviewSettleGateOptions {
   /** The preview scroll container (`previewScrollRef`'s element). Read lazily -- it isn't mounted yet when the gate is created. */
@@ -194,6 +245,22 @@ export interface PreviewSettleGate {
   notifyCommit: () => void
   /** Subscribe to those same commits -- used by the restore to retry its anchor lookup exactly when the DOM could have changed, instead of polling frames. */
   subscribeToCommit: (listener: () => void) => () => void
+  /**
+   * Start fading the pane out, and answer how long that fade will take.
+   *
+   * Called at the START of a note switch, while the OUTGOING note is still
+   * mounted -- this is the only window in which it exists to be faded. By the
+   * time `beginSettle` runs, React has already replaced the DOM with the
+   * incoming note, so a fade begun there would be fading in the wrong
+   * content.
+   *
+   * The caller's job is to hold off committing the new note until the
+   * returned duration has elapsed, and to do its own loading in the meantime
+   * -- the fade is cover for work, not a delay bolted in front of it. It is
+   * safe to call when a fade is already running (a fast second switch): the
+   * pane is at zero already and there is nothing left to fade.
+   */
+  beginFadeOut: () => number
   /** Reveal immediately and abandon the current generation (leaving preview mode, unmount, no note open). */
   forceReveal: (reason?: string) => void
   /**
@@ -227,26 +294,57 @@ export function createPreviewSettleGate({
   let lastSignature: string | null = null
   /** When the geometry first came to rest while the survey was still pending. Null whenever it is not resting, or nothing is pending. */
   let measurementWaitStartedAtMs: number | null = null
+  /**
+   * When an in-flight fade-out will finish, so a `beginSettle` that lands
+   * mid-fade can let it play out instead of cutting it.
+   *
+   * Without this, hiding instantly (which is what beginSettle wants, the pane
+   * being invisible already by then) clears the transition property and the
+   * half-faded pane jumps the rest of the way in one frame -- the exact snap
+   * the fade exists to remove, produced by the fade's own machinery.
+   */
+  let fadeOutEndsAtMs = 0
+  /** Armed by beginFadeOut, disarmed by the settle that should follow it. See FADE_OUT_ABANDONED_AFTER_MS. */
+  let fadeOutAbandonTimer: number | null = null
   let settleStartedAtMs = 0
   let scheduledFrame: number | null = null
   let safetyTimer: number | null = null
   const commitListeners = new Set<() => void>()
 
-  const setHidden = (hidden: boolean) => {
-    const value = hidden ? 'hidden' : ''
+  /** Every element the hold covers: the pane, plus anything outside it that describes the pane. */
+  const eachCoveredElement = (visit: (element: HTMLElement) => void) => {
     const container = getContainer()
-    // Written directly rather than through React state on purpose: the
-    // settle loop can evaluate several times per switch, and routing that
-    // through a re-render would churn the whole preview subtree (and so
-    // move the very geometry it's trying to observe settle).
-    if (container) container.style.visibility = value
-    // The companions are written even when the container is missing: they are
+    if (container) visit(container)
+    // The companions are visited even when the container is missing: they are
     // separate elements with their own lifetimes, and leaving one hidden
     // because the scroller happened to be gone is how a scrollbar disappears
     // for good.
     for (const companion of getCompanions?.() ?? []) {
-      if (companion) companion.style.visibility = value
+      if (companion) visit(companion)
     }
+  }
+
+  /**
+   * @param transitionMs 0 to change instantly (the default for hiding: the
+   * fade-out is driven separately, against the outgoing note, and by the time
+   * the gate hides there is nothing left worth fading).
+   */
+  const setHidden = (hidden: boolean, transitionMs = 0) => {
+    // Written directly rather than through React state on purpose: the
+    // settle loop can evaluate several times per switch, and routing that
+    // through a re-render would churn the whole preview subtree (and so
+    // move the very geometry it's trying to observe settle).
+    eachCoveredElement((element) => {
+      element.style.transition = transitionMs > 0 ? `opacity ${transitionMs}ms ease-out` : ''
+      element.style.opacity = hidden ? '0' : ''
+      element.style.pointerEvents = hidden ? 'none' : ''
+    })
+  }
+
+  const disarmFadeOutAbandon = () => {
+    if (fadeOutAbandonTimer === null) return
+    scheduler.clearTimer(fadeOutAbandonTimer)
+    fadeOutAbandonTimer = null
   }
 
   const cancelScheduled = () => {
@@ -309,15 +407,22 @@ export function createPreviewSettleGate({
 
   const reveal = (reason: string) => {
     const container = getContainer()
+    // Whether this reveal ends a real hold. A forced one (leaving preview
+    // mode, no note open, startup) ends nothing, and its "heldMs" would be
+    // measured from whenever the last genuine settle began -- a number in the
+    // seconds that means nothing and reads as a stall that never happened.
+    const wasHolding = isHidden
     traceSettle(() => {
-      const heldMs = Math.round(scheduler.now() - settleStartedAtMs)
+      const held = wasHolding ? ` heldMs=${Math.round(scheduler.now() - settleStartedAtMs)}` : ''
       const geometry = container ? readSettleGeometry(container, null) : null
-      return `reveal gen=${generation} reason=${reason} heldMs=${heldMs}`
+      return `reveal gen=${generation} reason=${reason}${held}`
         + (geometry ? ` scrollTop=${geometry.scrollTop} scrollHeight=${geometry.scrollHeight} sizerH=${geometry.sizerHeightPx}` : ' (no container)')
     })
     cancelScheduled()
+    disarmFadeOutAbandon()
     isHidden = false
     lastSignature = null
+    fadeOutEndsAtMs = 0
     // Before the un-hide, deliberately: anything brought up to date here is
     // then correct in the very first frame it is seen, rather than correcting
     // itself in the second one.
@@ -326,6 +431,9 @@ export function createPreviewSettleGate({
     } catch (error) {
       console.warn('[preview-settle-gate] onBeforeReveal threw -- revealing anyway', error)
     }
+    // Instant, with no transition: the note is already final by the time this
+    // runs, so there is nothing a fade could resolve -- only a delay before
+    // the reader gets what they asked for.
     setHidden(false)
     watchAfterReveal()
   }
@@ -422,7 +530,10 @@ export function createPreviewSettleGate({
       measurementWaitStartedAtMs = null
       settleStartedAtMs = scheduler.now()
       stopWatching()
-      setHidden(true)
+      // The switch this fade-out was for has arrived; the settle's own bounds
+      // take over from here.
+      disarmFadeOutAbandon()
+      setHidden(true, Math.max(0, fadeOutEndsAtMs - scheduler.now()))
       traceSettle(() => `begin  gen=${generation} container=${getContainer() ? 'yes' : 'MISSING -- nothing was hidden'}`)
       scheduleEvaluate()
       // A timer, NOT another animation frame, because the whole point of
@@ -475,10 +586,28 @@ export function createPreviewSettleGate({
       reveal(reason ?? 'forced')
     },
 
+    beginFadeOut: () => {
+      traceSettle(() => `fadeout gen=${generation} ${PREVIEW_FADE_OUT_MS}ms (outgoing note still mounted)`)
+      fadeOutEndsAtMs = scheduler.now() + PREVIEW_FADE_OUT_MS
+      setHidden(true, PREVIEW_FADE_OUT_MS)
+
+      disarmFadeOutAbandon()
+      fadeOutAbandonTimer = scheduler.setTimer(() => {
+        fadeOutAbandonTimer = null
+        // A settle took ownership; its own bounds govern from there.
+        if (isHidden) return
+        console.warn('[preview-settle-gate] a fade-out was never followed by a note switch -- revealing so the pane cannot stay invisible')
+        reveal('fade-out-abandoned')
+      }, PREVIEW_FADE_OUT_MS + FADE_OUT_ABANDONED_AFTER_MS)
+
+      return PREVIEW_FADE_OUT_MS
+    },
+
     isHolding: () => isHidden,
 
     dispose: () => {
       cancelScheduled()
+      disarmFadeOutAbandon()
       stopWatching()
       commitListeners.clear()
       setHidden(false)

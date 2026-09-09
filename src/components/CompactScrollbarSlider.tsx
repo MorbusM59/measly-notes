@@ -19,9 +19,28 @@ type CompactScrollbarSliderProps = {
   max: number
   step: number
   trackLabel: string
+  /**
+   * What the tooltip calls the value, when that is not what the rail calls
+   * the control.
+   *
+   * The rail's own label has to fit inside the track, so it names the
+   * setting; the tooltip has room to name the UNIT the number is in, which
+   * is often the more useful of the two ("note size threshold" on the rail,
+   * "characters: 20000" on hover). Defaults to `trackLabel`, which is right
+   * whenever the setting and its unit are the same word.
+   */
+  tooltipLabel?: string
   ariaLabel: string
   reverseScale?: boolean
   defaultValue?: number
+  /**
+   * Greys the control out and ignores every input.
+   *
+   * For a setting that another control has taken out of play -- the value is
+   * still shown, and still stored, because it is what the setting returns to
+   * when that other control lets go of it.
+   */
+  disabled?: boolean
   /**
    * What the tooltip shows, when that is not the stored number itself.
    *
@@ -42,9 +61,11 @@ export function CompactScrollbarSlider({
   max,
   step,
   trackLabel,
+  tooltipLabel,
   ariaLabel,
   reverseScale = false,
   defaultValue,
+  disabled = false,
   formatValue,
   onCommit,
 }: CompactScrollbarSliderProps) {
@@ -94,13 +115,14 @@ export function CompactScrollbarSlider({
   }, [onCommit, snapValue, value])
 
   const handleWheel = useCallback((event: WheelEvent) => {
+    if (disabled) return
     const dominantDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
     if (dominantDelta === 0) return
 
     event.preventDefault()
     event.stopPropagation()
     nudgeBy(dominantDelta > 0 ? -step : step)
-  }, [nudgeBy, step])
+  }, [disabled, nudgeBy, step])
 
   useNonPassiveWheel(shellRef, handleWheel)
 
@@ -108,17 +130,19 @@ export function CompactScrollbarSlider({
     <div
       id={id}
       role="slider"
-      tabIndex={0}
+      tabIndex={disabled ? -1 : 0}
       aria-label={ariaLabel}
       aria-orientation="horizontal"
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={Number(formatCompactSettingNumber(value, step))}
       aria-valuetext={formatValue ? formatValue(value) : undefined}
-      className={`utility-setting-scrollbar-shell${isDragging ? ' is-dragging' : ''}`}
-      data-live-tooltip={`${trackLabel}: ${formatValue ? formatValue(value) : formatCompactSettingNumber(value, step)}`}
+      aria-disabled={disabled || undefined}
+      className={`utility-setting-scrollbar-shell${isDragging ? ' is-dragging' : ''}${disabled ? ' is-disabled' : ''}`}
+      data-live-tooltip={`${tooltipLabel ?? trackLabel}: ${formatValue ? formatValue(value) : formatCompactSettingNumber(value, step)}`}
       ref={shellRef}
       onKeyDown={(event) => {
+        if (disabled) return
         if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
           event.preventDefault()
           nudgeBy(-step)
@@ -150,6 +174,7 @@ export function CompactScrollbarSlider({
         }
       }}
       onPointerDown={(event) => {
+        if (disabled) return
         if (event.button !== 0) return
         event.preventDefault()
         event.currentTarget.setPointerCapture(event.pointerId)
@@ -168,6 +193,7 @@ export function CompactScrollbarSlider({
       onPointerCancel={() => setIsDragging(false)}
       onContextMenu={(event) => {
         event.preventDefault()
+        if (disabled) return
         if (defaultValue !== undefined) onCommit(snapValue(defaultValue))
       }}
     >

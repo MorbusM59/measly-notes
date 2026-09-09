@@ -171,10 +171,18 @@ export function formatSettleSample(
 }
 
 export function sampleDiffers(a: SettleGeometrySample, b: SettleGeometrySample): boolean {
-  return a.scrollTop !== b.scrollTop
+  if (a.scrollTop !== b.scrollTop
     || a.scrollHeight !== b.scrollHeight
-    || a.sizerHeightPx !== b.sizerHeightPx
-    || a.latchedBlockScreenTop !== b.latchedBlockScreenTop
+    || a.sizerHeightPx !== b.sizerHeightPx) return true
+
+  // The latched block LEAVING the mounted range is not movement -- it is the
+  // reader having scrolled past it, or the virtualizer narrowing its range.
+  // Counted as a change, it reported "the reveal was followed by movement" on
+  // traces where all three geometry numbers were flat at zero delta, which is
+  // the opposite of what the watcher exists to say. Only a block that is
+  // mounted in BOTH samples can have moved between them.
+  if (a.latchedBlockScreenTop === null || b.latchedBlockScreenTop === null) return false
+  return a.latchedBlockScreenTop !== b.latchedBlockScreenTop
 }
 
 /** How long the watcher follows the geometry after a reveal. */

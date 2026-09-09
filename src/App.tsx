@@ -44,6 +44,10 @@ import {
 import type { NoteSummary } from './shared/noteLifecycle'
 import { isArchivedNote, isChapterOnlyNote, isDeletedNote, isExternalNote, isSameNoteSummary } from './shared/noteLifecycle'
 import { getNoteListMetaKind } from './shared/noteListMeta'
+import {
+  DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+  clampContinuousDocumentThreshold,
+} from './editor/documentPosition'
 import { resolveIdentityLabel } from './shared/tabLabels'
 import { formatIdWithSigil } from './shared/assignedIds'
 import { NOTE_DRAG_MIME_TYPE, serializeNoteDragPayload } from './shared/noteDrag'
@@ -2390,6 +2394,8 @@ function App() {
   const [reduceVisualEffects, setReduceVisualEffects] = useState(false)
   const [reducedCaretAnimation, setReducedCaretAnimation] = useState(false)
   const [deferPreviewOnRapidInput, setDeferPreviewOnRapidInput] = useState(false)
+  const [noteSizeThresholdChars, setNoteSizeThresholdChars] = useState(DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS)
+  const [forceCharacterScrollbarThumb, setForceCharacterScrollbarThumb] = useState(false)
   const [typingSoundEnabled, setTypingSoundEnabled] = useState(false)
   const [typingSoundSet, setTypingSoundSet] = useState<'A' | 'B' | 'C' | 'D'>(DEFAULT_TYPING_SOUND_SET)
   const [musicVolume, setMusicVolume] = useState(0.8)
@@ -4245,6 +4251,8 @@ function App() {
       reduceVisualEffects,
       reducedCaretAnimation,
       deferPreviewOnRapidInput,
+      noteSizeThresholdChars,
+      forceCharacterScrollbarThumb,
       customCursorEnabled,
     }
   }, [
@@ -4258,6 +4266,8 @@ function App() {
     reduceVisualEffects,
     reducedCaretAnimation,
     deferPreviewOnRapidInput,
+    noteSizeThresholdChars,
+    forceCharacterScrollbarThumb,
     editorFontSize,
     editorGlyphPaddingPx,
     uiFontStyle,
@@ -6412,6 +6422,13 @@ ${markdownHtml}
             setReduceVisualEffects(appState.menu.reduceVisualEffects ?? false)
             setReducedCaretAnimation(appState.menu.reducedCaretAnimation ?? false)
             setDeferPreviewOnRapidInput(appState.menu.deferPreviewOnRapidInput ?? false)
+            // Clamped on the way in as well as on the way out: a stored value
+            // predating a change to the slider's range would otherwise put the
+            // handle off its own track.
+            setNoteSizeThresholdChars(clampContinuousDocumentThreshold(
+              appState.menu.noteSizeThresholdChars ?? DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+            ))
+            setForceCharacterScrollbarThumb(appState.menu.forceCharacterScrollbarThumb ?? false)
             setTypingSoundEnabled(appState.menu.typingSoundEnabled ?? false)
             setTypingSoundSet(appState.menu.typingSoundSet ?? DEFAULT_TYPING_SOUND_SET)
             if (typeof appState.menu.musicVolume === 'number') setMusicVolume(appState.menu.musicVolume)
@@ -9564,6 +9581,10 @@ ${markdownHtml}
                         setReducedCaretAnimation={setReducedCaretAnimation}
                         deferPreviewOnRapidInput={deferPreviewOnRapidInput}
                         setDeferPreviewOnRapidInput={setDeferPreviewOnRapidInput}
+                        noteSizeThresholdChars={noteSizeThresholdChars}
+                        setNoteSizeThresholdChars={setNoteSizeThresholdChars}
+                        forceCharacterScrollbarThumb={forceCharacterScrollbarThumb}
+                        setForceCharacterScrollbarThumb={setForceCharacterScrollbarThumb}
                         borderRadiusRegularPx={borderRadiusRegularPx}
                         setBorderRadiusRegularPx={setBorderRadiusRegularPx}
                         spacingRegularPx={spacingRegularPx}
@@ -10070,6 +10091,8 @@ ${markdownHtml}
                   documentFindCaseSensitiveRef={documentFindCaseSensitiveRef}
                   editorRuntimeMetrics={editorRuntimeMetrics}
                   deferPreviewOnRapidInput={deferPreviewOnRapidInput}
+                  noteSizeThresholdChars={noteSizeThresholdChars}
+                  forceCharacterScrollbarThumb={forceCharacterScrollbarThumb}
                   viewStyle={viewStyle}
                   viewFontSize={viewFontSize}
                   viewSpacing={viewSpacing}

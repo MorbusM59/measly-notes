@@ -2,6 +2,13 @@ import type { MouseEvent, MutableRefObject, PointerEvent } from 'react'
 import type * as React from 'react'
 import { AccordionGroup, AccordionSection } from '../components/AccordionSection'
 import { CompactScrollbarSlider } from '../components/CompactScrollbarSlider'
+import {
+  CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS,
+  CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS,
+  CONTINUOUS_DOCUMENT_THRESHOLD_STEP_CHARS,
+  DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+  clampContinuousDocumentThreshold,
+} from '../editor/documentPosition'
 import { type RgbaColor, type HsvaColor, rgbaToCssColor, hsvaToRgba } from '../shared/colorMath'
 import type { HighlightColorKey, HighlightColors } from '../shared/highlightColors'
 import {
@@ -542,6 +549,10 @@ export interface SidebarOptionsPanelProps {
   setReducedCaretAnimation: (value: boolean) => void
   deferPreviewOnRapidInput: boolean
   setDeferPreviewOnRapidInput: (value: boolean) => void
+  noteSizeThresholdChars: number
+  setNoteSizeThresholdChars: (value: number) => void
+  forceCharacterScrollbarThumb: boolean
+  setForceCharacterScrollbarThumb: (value: boolean) => void
 
   borderRadiusRegularPx: number
   setBorderRadiusRegularPx: (value: number) => void
@@ -817,6 +828,10 @@ export function SidebarOptionsPanel({
   setReducedCaretAnimation,
   deferPreviewOnRapidInput,
   setDeferPreviewOnRapidInput,
+  noteSizeThresholdChars,
+  setNoteSizeThresholdChars,
+  forceCharacterScrollbarThumb,
+  setForceCharacterScrollbarThumb,
   borderRadiusRegularPx,
   setBorderRadiusRegularPx,
   spacingRegularPx,
@@ -3087,6 +3102,48 @@ export function SidebarOptionsPanel({
           >
             <span className="fa-solid fa-square" aria-hidden="true" />
           </button>
+          {/* Puts every note on the character-counting side of the line
+              below, whatever its size -- which is why it also takes the
+              slider out of play rather than sitting beside it as an equal.
+              Deliberately not the same thing as dragging the slider to its
+              floor: this is a standing preference, and the slider keeps its
+              own value underneath it for when this is switched back off. */}
+          <button
+            type="button"
+            className={`btn-icon${forceCharacterScrollbarThumb ? ' is-active' : ''}`}
+            onClick={() => {
+              const next = !forceCharacterScrollbarThumb
+              setForceCharacterScrollbarThumb(next)
+              queueAppStateSave(activeNoteId)
+            }}
+            aria-pressed={forceCharacterScrollbarThumb}
+            data-tooltip="Force character based scrollbar thumb"
+          >
+            <span className="fa-solid fa-text-height" aria-hidden="true" />
+          </button>
+        </div>
+        {/* Where the reader puts the line between a note whose scrollbar is
+            measured in pixels and one whose scrollbar counts characters --
+            see editor/documentPosition.ts for what each side means and why
+            the choice is theirs. The rail names the setting; the tooltip
+            names the unit, which is the more useful of the two on hover. */}
+        <div className="utility-setting-slider-stack is-below-button-row" aria-label="Note size threshold">
+          <CompactScrollbarSlider
+            id="note-size-threshold"
+            min={CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS}
+            max={CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS}
+            step={CONTINUOUS_DOCUMENT_THRESHOLD_STEP_CHARS}
+            value={noteSizeThresholdChars}
+            trackLabel="note size threshold"
+            tooltipLabel="characters"
+            ariaLabel="Note size threshold: how large a note may be before its scrollbar counts characters instead of measuring height."
+            defaultValue={DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS}
+            disabled={forceCharacterScrollbarThumb}
+            onCommit={(value) => {
+              setNoteSizeThresholdChars(clampContinuousDocumentThreshold(value))
+              queueAppStateSave(activeNoteId)
+            }}
+          />
         </div>
       </AccordionSection>
 

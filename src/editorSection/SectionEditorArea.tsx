@@ -582,8 +582,8 @@ export function SectionEditorArea({
             actually waiting on; in edit mode it runs silently.
 
             The tooltip means what it says, and only because of what this bar
-            can still appear for. A CONTINUOUS document (under
-            CONTINUOUS_DOCUMENT_MAX_CHARS) is the only kind that is surveyed at
+            can still appear for. A CONTINUOUS document (under the reader's
+            own note size threshold) is the only kind that is surveyed at
             all now, and it is exactly the kind whose thumb is read off
             `scrollHeight` -- so measuring it really is what makes the scrollbar
             accurate. A chunked document is windowed, never surveyed, and never

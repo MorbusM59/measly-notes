@@ -34,21 +34,59 @@
 // again.
 
 /**
- * The size above which a document is chunked rather than measured.
+ * The size above which a document is chunked rather than measured, when the
+ * reader has not set one.
  *
  * A threshold, not a law of nature: below it, rendering and measuring the
  * whole document is cheap enough that being exact costs less than being
- * clever. Exposed as a constant because it is a plausible thing to want to
- * tune later, and because both the renderer and the scrollbar have to agree
- * on it -- a document rendered one way and described the other would be a
- * scrollbar that lies.
+ * clever. It is the reader's to set (Options > Performance > note size
+ * threshold) because where the line falls is a statement about THEIR notes --
+ * which of them are a workspace being written in, and which are a document
+ * being read -- and only they know that. This is where it sits until they
+ * say otherwise.
  */
-export const CONTINUOUS_DOCUMENT_MAX_CHARS = 50000
+export const DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS = 20000
 
+/**
+ * The range the reader may move that line through, and the granularity.
+ *
+ * The floor is not zero: "measure nothing, ever" is a different decision
+ * rather than an extreme setting of this one, and it has its own control
+ * (see `forceCharacterScrollbarThumb`). Keeping it out of the slider's range
+ * means every position on the slider means the same KIND of thing.
+ *
+ * The step is fine because the quantity being tuned is not a round number --
+ * it is "which of my own notes fall on each side", which lands wherever the
+ * reader's documents happen to land.
+ */
+export const CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS = 5000
+export const CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS = 50000
+export const CONTINUOUS_DOCUMENT_THRESHOLD_STEP_CHARS = 1000
 
-/** Whether a document of this length gets the exact treatment. */
-export function isContinuousDocument(charCount: number): boolean {
-  return charCount < CONTINUOUS_DOCUMENT_MAX_CHARS
+/** Keeps a stored or user-supplied threshold inside the range above. */
+export function clampContinuousDocumentThreshold(charCount: number): number {
+  if (!Number.isFinite(charCount)) return DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS
+  return Math.min(
+    CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS,
+    Math.max(CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS, Math.round(charCount)),
+  )
+}
+
+/**
+ * Whether a document of this length gets the exact treatment.
+ *
+ * `thresholdChars` is passed in rather than read from a module constant
+ * because it is a live setting now. Both the renderer and the scrollbar have
+ * to agree on the answer -- a document rendered one way and described the
+ * other would be a scrollbar that lies -- so callers are expected to resolve
+ * it ONCE per commit and share that answer, not to call this independently
+ * from two places that might read the setting a frame apart.
+ */
+export function isContinuousDocument(
+  charCount: number,
+  thresholdChars: number = DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+): boolean {
+  return charCount < thresholdChars
 }
 
 /**

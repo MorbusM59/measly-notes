@@ -95,6 +95,13 @@
   gap:            var(--spacing-regular);
 }
 
+/* A slider stack that follows a row of toggle buttons in the same section,
+   rather than opening one. Without this the two sit flush and read as one
+   control group; they are a group and a setting the group governs. */
+.utility-setting-slider-stack.is-below-button-row {
+  margin-top: var(--spacing-regular);
+}
+
 /* Custom slider / scrollbar shell */
 .utility-setting-scrollbar-shell {
   position:    relative;
@@ -148,6 +155,14 @@
 
 .utility-setting-scrollbar-shell.is-dragging .utility-setting-scrollbar-thumb {
   border-color: rgba(81, 73, 66, 0.8);
+}
+
+/* A setting another control has taken out of play. It keeps showing its
+   value -- that is what it returns to when the other control lets go -- so
+   this reads as "not in effect", not as "empty". */
+.utility-setting-scrollbar-shell.is-disabled {
+  opacity: 0.4;
+  cursor:  default;
 }
 
 /* App-wide custom tooltip, rendered by TooltipLayer.tsx into one fixed

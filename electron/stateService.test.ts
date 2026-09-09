@@ -91,6 +91,50 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.menu?.wheelStepLines).toBe(2.7)
   })
 
+  it('persists the note size threshold and its override across a save -> fresh-instance load', async () => {
+    // The pair that decides whether a note's scrollbar is measured in pixels
+    // or counts characters (editor/documentPosition.ts). Both halves are
+    // here for the reason the wheel-slider test above records: sanitizeMenu
+    // is a hand-maintained allowlist, and a field missing from it is dropped
+    // on every real read and write however correct the renderer side is.
+    // `false` is asserted explicitly rather than assumed, because a dropped
+    // boolean and a stored `false` are indistinguishable from the renderer.
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date',
+        selectedMonths: [],
+        selectedYears: [],
+        searchQuery: '',
+        noteSizeThresholdChars: 37_000,
+        forceCharacterScrollbarThumb: true,
+      },
+    })
+
+    const reader = new StateService(dataRoot)
+    const loaded = await reader.loadAppState()
+    expect(loaded.menu?.noteSizeThresholdChars).toBe(37_000)
+    expect(loaded.menu?.forceCharacterScrollbarThumb).toBe(true)
+
+    const offWriter = new StateService(dataRoot)
+    await offWriter.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date',
+        selectedMonths: [],
+        selectedYears: [],
+        searchQuery: '',
+        noteSizeThresholdChars: 5_000,
+        forceCharacterScrollbarThumb: false,
+      },
+    })
+    const offReader = new StateService(dataRoot)
+    const offLoaded = await offReader.loadAppState()
+    expect(offLoaded.menu?.noteSizeThresholdChars).toBe(5_000)
+    expect(offLoaded.menu?.forceCharacterScrollbarThumb).toBe(false)
+  })
+
   it('flushAppStateOnClose (the before-quit safety net) also preserves isDoubleSizeMode', async () => {
     const writer = new StateService(dataRoot)
     await writer.saveAppState({

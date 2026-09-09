@@ -169,6 +169,21 @@ export interface PersistedMenuState {
   reduceVisualEffects?: boolean;
   reducedCaretAnimation?: boolean;
   deferPreviewOnRapidInput?: boolean;
+  /**
+   * Where the reader has put the line between a note whose scrollbar is
+   * measured in pixels and one whose scrollbar counts characters. In
+   * characters; see editor/documentPosition.ts for what the two sides mean.
+   */
+  noteSizeThresholdChars?: number;
+  /**
+   * Put every note on the character-counting side, whatever its size.
+   *
+   * Not the same as setting the threshold to zero, which is why it is its own
+   * field: it says "never measure a document for the scrollbar" as a
+   * standing preference, and it survives the reader moving the threshold
+   * slider around underneath it.
+   */
+  forceCharacterScrollbarThumb?: boolean;
   typingSoundEnabled?: boolean;
   typingSoundSet?: 'A' | 'B' | 'C' | 'D';
   /**

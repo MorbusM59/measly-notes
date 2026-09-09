@@ -2529,18 +2529,21 @@ export class DatabaseService {
     anchorBlockIndex?: number | null;
     cursorPos?: number | null;
     previewBlockCache?: string | null;
+    previewBlockHeights?: string | null;
   }): void {
     const db = this.requireDb();
     const hasAnchorBlockIndex = Object.prototype.hasOwnProperty.call(payload, 'anchorBlockIndex');
     const hasCursorPos = Object.prototype.hasOwnProperty.call(payload, 'cursorPos');
     const hasPreviewBlockCache = Object.prototype.hasOwnProperty.call(payload, 'previewBlockCache');
+    const hasPreviewBlockHeights = Object.prototype.hasOwnProperty.call(payload, 'previewBlockHeights');
 
     db.prepare(`
       UPDATE notes
       SET
         anchorBlockIndex = CASE WHEN ? THEN ? ELSE anchorBlockIndex END,
         cursorPos = CASE WHEN ? THEN ? ELSE cursorPos END,
-        previewBlockCache = CASE WHEN ? THEN ? ELSE previewBlockCache END
+        previewBlockCache = CASE WHEN ? THEN ? ELSE previewBlockCache END,
+        previewBlockHeights = CASE WHEN ? THEN ? ELSE previewBlockHeights END
       WHERE id = ?
     `).run(
       hasAnchorBlockIndex ? 1 : 0,
@@ -2549,6 +2552,8 @@ export class DatabaseService {
       payload.cursorPos ?? null,
       hasPreviewBlockCache ? 1 : 0,
       payload.previewBlockCache ?? null,
+      hasPreviewBlockHeights ? 1 : 0,
+      payload.previewBlockHeights ?? null,
       noteId,
     );
   }
@@ -2557,17 +2562,19 @@ export class DatabaseService {
     anchorBlockIndex: number;
     cursorPos: number;
     previewBlockCache: string | null;
+    previewBlockHeights: string | null;
   } {
     const db = this.requireDb();
 
     const row = db.prepare(`
-      SELECT anchorBlockIndex, cursorPos, previewBlockCache
+      SELECT anchorBlockIndex, cursorPos, previewBlockCache, previewBlockHeights
       FROM notes
       WHERE id = ?
     `).get(noteId) as {
       anchorBlockIndex?: number | null;
       cursorPos?: number | null;
       previewBlockCache?: string | null;
+      previewBlockHeights?: string | null;
     } | undefined;
 
     // A note row can sit with these columns at SQL NULL from creation until
@@ -2580,6 +2587,7 @@ export class DatabaseService {
       anchorBlockIndex: row?.anchorBlockIndex ?? 0,
       cursorPos: row?.cursorPos ?? 0,
       previewBlockCache: row?.previewBlockCache ?? null,
+      previewBlockHeights: row?.previewBlockHeights ?? null,
     };
   }
 
@@ -4191,6 +4199,7 @@ export class DatabaseService {
     // re-parsing the whole document. Safe to discard (falls back to full
     // parse) if the text or parser version changes.
     this.ensureNotesColumn('previewBlockCache', 'TEXT');
+    this.ensureNotesColumn('previewBlockHeights', 'TEXT');
     // A note created as a chapter of another note (via the chapter bar's "+"
     // button) -- excluded from every menu view (date/category/archive/trash)
     // since it only exists to be shown through its parent's chapter bar. See

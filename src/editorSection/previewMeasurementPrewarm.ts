@@ -16,8 +16,8 @@
 // document -- so there is no constant to correct it by, and something has to
 // go and look. That is what the sweep is.
 //
-// It now runs on CONTINUOUS documents only -- under
-// CONTINUOUS_DOCUMENT_MAX_CHARS, where every block is measured and
+// It now runs on CONTINUOUS documents only -- under the reader's own note
+// size threshold (Options > Performance), where every block is measured and
 // `scrollHeight` becomes a true total. A chunked document has no
 // whole-document height to be wrong about: it is windowed
 // (editorSection/previewWindow.ts), its scroller holds only the mounted run,

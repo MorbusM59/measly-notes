@@ -150,6 +150,41 @@ export type PersistedPreviewBlockCache = {
   }>;
 };
 
+/**
+ * A completed block-height survey, kept so the next session does not have to
+ * measure the document again.
+ *
+ * These are real measurements the browser produced from real mounted blocks,
+ * not a model -- which is what makes them safe to trust on the way back in,
+ * and also what makes both keys below load-bearing:
+ *
+ *   `textHash`  the heights describe THIS text. One edit invalidates them.
+ *   `signature` the heights describe this text AT THIS GEOMETRY. Width, font,
+ *               size, spacing and letter-spacing all move where text wraps,
+ *               so a block's line count changes and its stored height carries
+ *               no record of what line count produced it. There is no way to
+ *               derive the new heights from the old ones (see
+ *               usePreviewMarkdownRendering's applyCachedSurvey) -- only to
+ *               recognise when they still apply.
+ *
+ * A mismatch on either is a discard, never a correction: a wrong height that
+ * is trusted is worse than no height at all, because nothing downstream would
+ * go looking for the truth afterwards.
+ *
+ * Only ever written for a CONTINUOUS document (editor/documentPosition.ts). A
+ * windowed one is never surveyed, so there is nothing here to store.
+ */
+export type PersistedPreviewBlockHeights = {
+  /** Schema version of this blob. Bumped whenever the shape changes. */
+  v: number;
+  /** SHA-256 hex digest of the normalized note text these heights were measured from. */
+  textHash: string;
+  /** The pane geometry they were measured at -- usePreviewMarkdownRendering's `readGeometrySignature()`. */
+  signature: string;
+  /** One height per block, in block order, in CSS pixels. */
+  heights: number[];
+};
+
 export type NoteUiStatePayload = {
   /** The canonical mode-agnostic BLOCK -- an index into the note's current PreviewMarkdownBlock[] array. Never a pixel offset. */
   anchorBlockIndex?: number | null;
@@ -161,12 +196,15 @@ export type NoteUiStatePayload = {
    * discard (renderer falls back to full parse) if invalid or stale.
    */
   previewBlockCache?: PersistedPreviewBlockCache | null;
+  /** See PersistedPreviewBlockHeights. Lets a re-opened note skip the measurement survey entirely. */
+  previewBlockHeights?: PersistedPreviewBlockHeights | null;
 };
 
 export type NoteUiState = {
   anchorBlockIndex: number;
   cursorPos: number;
   previewBlockCache: PersistedPreviewBlockCache | null;
+  previewBlockHeights: PersistedPreviewBlockHeights | null;
 };
 
 export interface NoteLifecycleApi {

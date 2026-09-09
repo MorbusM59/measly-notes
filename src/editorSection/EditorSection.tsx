@@ -138,6 +138,8 @@ export interface EditorSectionProps extends Omit<SectionEditorAreaProps,
 
   editorRuntimeMetrics: EditorRuntimeMetrics
   deferPreviewOnRapidInput: boolean
+  noteSizeThresholdChars: number
+  forceCharacterScrollbarThumb: boolean
   viewStyle: ViewStyleKey
   viewFontSize: number
   viewSpacing: number
@@ -218,6 +220,8 @@ export function EditorSection({
   documentFindCaseSensitiveRef,
   editorRuntimeMetrics,
   deferPreviewOnRapidInput,
+  noteSizeThresholdChars,
+  forceCharacterScrollbarThumb,
   viewStyle,
   viewFontSize,
   viewSpacing,
@@ -339,6 +343,15 @@ export function EditorSection({
   // user actually had it in.
   const [isForcedPreviewNote, setIsForcedPreviewNote] = useState(false)
   const isPreviewMode = isForcedPreviewNote || persistedIsPreviewMode
+  /**
+   * Read by activateNote, which needs to know whether the render view is the
+   * one being switched (only it crossfades) without taking `isPreviewMode` as
+   * a dependency -- activateNote's identity is registered in the section
+   * registry, and churning it on every mode toggle is not worth a boolean it
+   * only reads at call time.
+   */
+  const isPreviewModeRef = useRef(isPreviewMode)
+  isPreviewModeRef.current = isPreviewMode
   const { activeNoteId, setActiveNoteId } = useActiveNoteId(sectionId)
   const {
     activeNoteText,
@@ -373,6 +386,11 @@ export function EditorSection({
   // useEditorSectionMount share the same preview-block split cache.
   const previewBlockSplitCacheRef = useRef<PreviewBlockSplitCache | null>(null)
   const previewBlocksCacheRef = useRef<{ text: string; blocks: PreviewMarkdownBlock[] } | null>(null)
+  /** The persisted block-height survey, both directions -- see usePreviewMarkdownRendering's own doc on this ref. */
+  const previewBlockHeightsRef = useRef<{
+    read: (() => { signature: string; heights: number[] } | null) | null
+    pending: { signature: string; heights: number[] } | null
+  } | null>(null)
   // Mirrors activeNoteText into a ref so activateNote can read the latest
   // value without taking a reactive dependency that would recreate the
   // callback (and the SectionHandle that contains it) on every keystroke.
@@ -619,6 +637,19 @@ export function EditorSection({
     if (previousNoteId !== noteId) {
       setIsCaretSuspended(true)
     }
+
+    // Start the render view's fade-out HERE -- the top of the switch, before
+    // any of the awaits below -- because this is the last moment the OUTGOING
+    // note is still what is mounted. Everything that follows (the IPC load,
+    // the UI-state round trip, hashing) runs while the fade plays, so the
+    // fade is cover for work already happening rather than a delay added in
+    // front of it. Only a real note change, and only in the render view: edit
+    // mode restores its own way and has no settle to conceal.
+    const isCrossfadingNoteSwitch = isPreviewModeRef.current && previousNoteId !== null && previousNoteId !== noteId
+    const fadeOutStartedAtMs = performance.now()
+    const fadeOutDurationMs = isCrossfadingNoteSwitch
+      ? (editorSectionMountRest.previewSettleGateRef.current?.beginFadeOut() ?? 0)
+      : 0
     const persistOutStart = performance.now()
     if (persistenceReady && previousNoteId && previousNoteId !== noteId) {
       const anchorBlockIndex = captureCurrentAnchorBlockIndex()
@@ -637,7 +668,25 @@ export function EditorSection({
               })),
             }
           : null
-        const payload: { anchorBlockIndex: number; cursorPos?: number; previewBlockCache?: typeof previewBlockCache } = { anchorBlockIndex, previewBlockCache }
+        // The measured block heights ride out on the same write. Leaving is
+        // the right moment for them and costs nothing extra: the survey has
+        // long since finished by the time a note is switched away from, and
+        // this payload is already going to the database.
+        //
+        // Keyed to the same text hash the block cache uses, so the two can
+        // only ever be trusted together -- and refused outright unless the
+        // hash could be computed for THIS text, since heights attributed to
+        // the wrong document would be silently, confidently wrong.
+        const survey = previewBlockHeightsRef.current?.read?.() ?? null
+        const previewBlockHeights = survey && previewBlockCache
+          ? { v: 1, textHash: previewBlockCache.textHash, signature: survey.signature, heights: survey.heights }
+          : null
+        const payload: {
+          anchorBlockIndex: number
+          cursorPos?: number
+          previewBlockCache?: typeof previewBlockCache
+          previewBlockHeights?: typeof previewBlockHeights
+        } = { anchorBlockIndex, previewBlockCache, previewBlockHeights }
         if (cursorPos !== undefined) payload.cursorPos = cursorPos
         await window.thockdownNotes.saveNoteUiState({ id: previousNoteId, payload })
       }
@@ -705,6 +754,22 @@ export function EditorSection({
 
     const cacheRestoreStart = performance.now()
     const hydratedText = normalizeInternalText(loaded.text)
+    /**
+     * Drops any survey left waiting from an earlier activation.
+     *
+     * Every path out of the restore below has to run this or offer a fresh
+     * one, because `pending` is consumed by whichever note happens to render
+     * next -- a survey left behind by note A would be handed to note B, which
+     * would then measure nothing and trust heights taken from a different
+     * document. The block-index keying makes that silent rather than obvious:
+     * the counts can match by coincidence.
+     */
+    const clearPendingPreviewBlockHeights = () => {
+      previewBlockHeightsRef.current = {
+        read: previewBlockHeightsRef.current?.read ?? null,
+        pending: null,
+      }
+    }
     if (nextUiState?.previewBlockCache && nextUiState.previewBlockCache.v === 1) {
       const textHash = await hashNormalizedText(hydratedText)
       const cacheHash = nextUiState.previewBlockCache.textHash
@@ -712,6 +777,22 @@ export function EditorSection({
       if (textHash === cacheHash) {
         previewBlockSplitCacheRef.current = restorePreviewBlockSplitCacheFromRanges(hydratedText, nextUiState.previewBlockCache.ranges)
         previewBlocksCacheRef.current = { text: hydratedText, blocks: previewBlockSplitCacheRef.current.blocks }
+        // Heights are offered only alongside a block cache that matched, and
+        // only against the same hash: they are indexed BY BLOCK, so they mean
+        // nothing without the block list they were measured against. The
+        // pane checks the geometry for itself before using them (see
+        // restartPrewarm) -- that is not knowable here, and guessing it would
+        // be the one mistake that cannot be recovered from later.
+        const storedHeights = nextUiState.previewBlockHeights
+        previewBlockHeightsRef.current = {
+          read: previewBlockHeightsRef.current?.read ?? null,
+          pending: storedHeights
+            && storedHeights.v === 1
+            && storedHeights.textHash === textHash
+            && Array.isArray(storedHeights.heights)
+            ? { signature: storedHeights.signature, heights: storedHeights.heights }
+            : null,
+        }
         if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
           console.log('[preview-block-cache] restored from DB cache', {
             noteId,
@@ -723,6 +804,7 @@ export function EditorSection({
       } else {
         previewBlockSplitCacheRef.current = null
         previewBlocksCacheRef.current = null
+        clearPendingPreviewBlockHeights()
         if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
           console.log('[preview-block-cache] DB cache hash mismatch; will parse', {
             noteId,
@@ -735,6 +817,7 @@ export function EditorSection({
     } else {
       previewBlockSplitCacheRef.current = null
       previewBlocksCacheRef.current = null
+      clearPendingPreviewBlockHeights()
       if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
         console.log('[preview-block-cache] no DB cache found; will parse', {
           noteId,
@@ -830,6 +913,15 @@ export function EditorSection({
     }
     logStep('external note setup', externalStart)
 
+    // Hold the swap until the fade-out has actually finished, so the incoming
+    // note is never committed over a pane the reader can still partly see.
+    // Whatever the loading above already consumed comes off this wait -- on a
+    // slow load it is zero, and the fade cost nothing at all.
+    const fadeOutRemainingMs = fadeOutDurationMs - (performance.now() - fadeOutStartedAtMs)
+    if (fadeOutRemainingMs > 0) {
+      await new Promise<void>((resolve) => { window.setTimeout(resolve, fadeOutRemainingMs) })
+    }
+
     const stateUpdateStart = performance.now()
     latestEditorTextRef.current = hydratedText
     pendingEditRestoreSnapshotRef.current = preloadedSnapshot
@@ -861,6 +953,7 @@ export function EditorSection({
   }, [
     activeNoteId,
     captureCurrentAnchorBlockIndex,
+    editorSectionMountRest.previewSettleGateRef,
     persistenceReady,
     saveSelectedNoteState,
     sectionId,
@@ -1507,6 +1600,9 @@ export function EditorSection({
     isViewingAutoOpenItemsChapter,
     isActiveNoteEditable,
     applyProgrammaticEditorText,
+    previewBlockHeightsRef,
+    noteSizeThresholdChars,
+    forceCharacterScrollbarThumb,
     onPreviewCommitted: notifyPreviewSettleGateOfCommit,
     isPreviewSettleHolding,
     previewMeasurementPendingRef: editorSectionMountRest.previewMeasurementPendingRef,

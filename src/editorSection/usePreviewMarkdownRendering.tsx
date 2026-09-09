@@ -300,6 +300,28 @@ export interface UsePreviewMarkdownRenderingOptions {
   applyProgrammaticEditorText: (nextText: string, selectionStart?: number, selectionEnd?: number) => void
   /** Called in the layout phase after every commit of the preview block subtree, before paint. The settle gate uses it as its "the DOM may have moved" signal -- both to re-evaluate its own geometry fixed point and to let the scroll restore re-attempt its anchor lookup at exactly the moments the element could have appeared, instead of polling animation frames. */
   onPreviewCommitted?: () => void
+  /**
+   * Two-way channel for the persisted block-height survey (see
+   * shared/noteLifecycle.ts's PersistedPreviewBlockHeights).
+   *
+   * `read` is populated here with the survey this pane has completed, if any,
+   * so the component can write it out when the note is left. `pending` is the
+   * one restored from the database on the way in, which this hook consumes
+   * once -- and only if its geometry still matches what the pane is actually
+   * laid out at now.
+   *
+   * A ref rather than props for the same reason previewScrollToSourceLineRef
+   * is one: the survey completes long after any render, and the component
+   * that persists it is not the one that produced it.
+   */
+  previewBlockHeightsRef?: MutableRefObject<{
+    read: (() => { signature: string; heights: number[] } | null) | null
+    pending: { signature: string; heights: number[] } | null
+  } | null>
+  /** Where the reader has put the line between a pixel-measured scrollbar and a character-counting one, in characters (Options > Performance). See editor/documentPosition.ts. */
+  noteSizeThresholdChars: number
+  /** Put every note on the character-counting side, whatever its size -- the reader's standing preference, which overrides the threshold rather than moving it. */
+  forceCharacterScrollbarThumb: boolean
   /** Whether the settle gate is currently holding the preview hidden for a note load. The measurement survey's "stand aside for the reader" rule consults it, because a scroll fired while the pane is hidden is the restore's, not the reader's -- see the scroll listener below, and previewSettleGate.ts's isHolding. */
   isPreviewSettleHolding?: () => boolean
   /** Populated here with "the survey still has heights to commit for the document on screen", which the settle gate reads as geometry that has not finished moving. See useEditorSectionMount's own declaration of this ref. */
@@ -439,6 +461,9 @@ export function usePreviewMarkdownRendering({
   isViewingAutoOpenItemsChapter,
   isActiveNoteEditable,
   applyProgrammaticEditorText,
+  previewBlockHeightsRef,
+  noteSizeThresholdChars,
+  forceCharacterScrollbarThumb,
   onPreviewCommitted,
   isPreviewSettleHolding,
   previewMeasurementPendingRef,
@@ -773,17 +798,6 @@ export function usePreviewMarkdownRendering({
   useEffect(() => {
     previewBlocksRef.current = previewBlocks
   }, [previewBlocks])
-
-  // The document's own length, which is what decides whether it is measured
-  // or modelled (editor/documentPosition.ts). Through a ref because the
-  // position API reads it from inside stable callbacks, and because the
-  // decision has to be the CURRENT one every time it is asked -- latching it
-  // would leave a document that grew past the threshold still described the
-  // old way.
-  const previewBlockTextLengthRef = useRef(renderedDisplayText.length)
-  useEffect(() => {
-    previewBlockTextLengthRef.current = renderedDisplayText.length
-  }, [renderedDisplayText])
 
   // react-virtual's own scroll-correction loop (`reconcileScroll`)
   // re-invokes this whenever a target block's real, measured height
@@ -1534,7 +1548,22 @@ export function usePreviewMarkdownRendering({
   // document is measured outright and scrolled as one piece; over it the pane
   // holds a moving window and never has a whole-document height at all. No
   // switch, no flag: a chunked document is always windowed.
-  const isWindowed = !isContinuousDocument(renderedDisplayText.length)
+  const isWindowed = forceCharacterScrollbarThumb
+    || !isContinuousDocument(renderedDisplayText.length, noteSizeThresholdChars)
+
+  /**
+   * The one place the answer lives once it has been decided for this commit.
+   *
+   * `isWindowed` above is resolved during render; the document-position API
+   * below is called long afterwards, from scroll handlers and the scrollbar.
+   * If that second reader recomputed the answer for itself, the two could
+   * disagree -- the setting can move between them, and so can the document's
+   * own length -- and a document rendered one way while being described the
+   * other is exactly the scrollbar that lies which documentPosition.ts warns
+   * about. So it is computed once and read from here.
+   */
+  const isWindowedRef = useRef(isWindowed)
+  isWindowedRef.current = isWindowed
 
   const renderPreviewBlock = useCallback((block: { text: string; startLine: number }, index: number) => (
     <PreviewMarkdownBlock
@@ -1823,7 +1852,9 @@ export function usePreviewMarkdownRendering({
    * flickering under a reader's hand.
    */
   const documentPosition = useMemo<DocumentPosition>(() => {
-    const isContinuous = () => isContinuousDocument(previewBlockTextLengthRef.current)
+    // Reads the answer the renderer already committed to, rather than asking
+    // the question again -- see isWindowedRef.
+    const isContinuous = () => !isWindowedRef.current
 
     const readContinuousRatios = () => {
       const scroller = previewScrollRef.current
@@ -2125,7 +2156,6 @@ export function usePreviewMarkdownRendering({
     scrollToChar,
     smoothScrollToChar,
     virtualizer,
-    previewBlockTextLengthRef,
     previewBlocksRef,
     isWindowed,
   ])
@@ -2418,6 +2448,31 @@ export function usePreviewMarkdownRendering({
     // height from the first commit rather than a flat guess.
     readLineMetrics()
 
+    // A survey this note carried over from a previous session, restored from
+    // the database on the way in (shared/noteLifecycle.ts's
+    // PersistedPreviewBlockHeights). Folded into the in-memory cache rather
+    // than applied directly, so there is exactly one path that puts measured
+    // heights into the virtualizer and one place that decides they apply.
+    //
+    // Consumed ONCE -- cleared whether or not it was usable. It describes the
+    // document as it was loaded; the moment anything about that changes it is
+    // a claim about a document that no longer exists, and a stale height
+    // trusted here would never be corrected, because a cache hit is precisely
+    // what stops the survey from running and finding the truth.
+    const restored = previewBlockHeightsRef?.current?.pending ?? null
+    if (restored) {
+      if (previewBlockHeightsRef?.current) previewBlockHeightsRef.current.pending = null
+      // The geometry is re-checked HERE, against the pane as it is actually
+      // laid out now, rather than trusted from the stored blob: the reader
+      // may have changed font, spacing or window width since, and the text
+      // hash the caller matched says nothing about any of that.
+      if (restored.signature === signature && restored.heights.length === blockCount) {
+        const sizes = new Map<number, number>()
+        restored.heights.forEach((height, index) => { sizes.set(index, height) })
+        surveyByGeometryRef.current.set(signature, sizes)
+      }
+    }
+
     // Same, for a small document that was measured outright and has been back
     // to this geometry before. Only the continuous path ever fills this cache
     // -- a chunked document is never measured end to end, so there is no
@@ -2447,7 +2502,7 @@ export function usePreviewMarkdownRendering({
     surveyModeRef.current = 'calibrating'
     reportDiscovery(0, targets.length, true)
     queueNextPrewarmBatch()
-  }, [queueNextPrewarmBatch, reportDiscovery, previewBlocksRef, applyCachedSurvey, readGeometrySignature, readLineMetrics, isWindowed])
+  }, [queueNextPrewarmBatch, reportDiscovery, previewBlocksRef, applyCachedSurvey, readGeometrySignature, readLineMetrics, isWindowed, previewBlockHeightsRef])
 
   // Start over whenever the cached heights could no longer be true.
   //
@@ -2597,6 +2652,62 @@ export function usePreviewMarkdownRendering({
       previewMeasurementPendingRef.current = null
     }
   }, [previewMeasurementPendingRef])
+
+  /**
+   * Publishes the heights to persist: what the VIRTUALIZER currently holds,
+   * not what the survey originally measured.
+   *
+   * Those are not the same numbers, and the difference is the whole point.
+   * The survey measures in a hidden host that reproduces the real layout
+   * closely but not exactly; a block that later mounts for real is measured
+   * again by react-virtual itself and can land a pixel off. Reading the
+   * virtualizer here means every block that was ever actually mounted
+   * contributes its REAL height, and only blocks nobody ever saw fall back to
+   * the survey's -- so the stored set is the best this session ever knew, and
+   * it improves every time the note is opened.
+   *
+   * That matters because of what happens on the way back in: whatever is
+   * stored gets re-measured when a block mounts, and any disagreement makes
+   * react-virtual resize the item and compensate scrollTop, which is geometry
+   * moving, which is another frame the settle gate has to wait out. Storing
+   * the mounted truth is what makes that re-measure a no-op. Measured on a
+   * 54-block note, the survey's own numbers disagreed with the mounted ones
+   * by ~5px in total and cost two extra frames of hold.
+   *
+   * Refused outright unless the survey has finished for a continuous
+   * document: a partial set stored as if it were whole is the
+   * confidently-wrong number this whole mechanism exists to avoid.
+   */
+  useEffect(() => {
+    if (!previewBlockHeightsRef) return undefined
+    const channel = previewBlockHeightsRef.current
+      ?? { read: null, pending: null }
+    channel.read = () => {
+      if (isWindowedRef.current || !prewarmDoneRef.current) return null
+      const blockCount = previewBlocksRef.current.length
+      if (blockCount === 0) return null
+
+      const heights: number[] = new Array(blockCount)
+      for (let index = 0; index < blockCount; index += 1) {
+        // Keyed by index because no getItemKey is configured, so react-virtual
+        // uses the index as the key.
+        const height = virtualizer.itemSizeCache.get(index)
+        // A gap means some block has no height at all, which contradicts
+        // "the survey finished" -- so the whole set is discarded rather than
+        // stored with a hole in it.
+        if (!(typeof height === 'number' && height > 0)) return null
+        heights[index] = height
+      }
+      // No rounding on the way out: react-virtual's own measureElement already
+      // takes Math.round of the border box, so these are whole pixels
+      // already, and rounding them again could only move them.
+      return { signature: readGeometrySignature(), heights }
+    }
+    previewBlockHeightsRef.current = channel
+    return () => {
+      channel.read = null
+    }
+  }, [previewBlockHeightsRef, previewBlocksRef, virtualizer, readGeometrySignature])
 
   useEffect(() => cancelPrewarmSchedule, [cancelPrewarmSchedule])
 
