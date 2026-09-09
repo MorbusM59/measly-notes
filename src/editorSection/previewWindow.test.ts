@@ -175,6 +175,159 @@ describe('isPreviewWindowRangeUsable', () => {
   it('accepts a window ending exactly on the last block', () => {
     expect(isPreviewWindowRangeUsable({ startIndex: 300, endIndex: 347 }, 348)).toBe(true)
   })
+
+  /**
+   * The regression this exists for is a CYCLE, so the test has to iterate.
+   * A single-step assertion cannot see one: every individual decision here
+   * was correct, and only running them back to back shows that the two are
+   * unreachable from each other.
+   *
+   * These are the measured numbers from the note it was found on: a 371px
+   * viewport, 171px mean block, and a window flipping between 16 and 24
+   * blocks forever because the 8-block minimum step (1368px) was wider than
+   * the band between growing (3 screenfuls) and trimming (6).
+   */
+  it('reaches a fixed point instead of flipping between two ranges', () => {
+    const clientHeightPx = 371
+    const averageBlockHeightPx = 171
+    const scrollTopPx = 1387
+    const blockCount = 200
+
+    let range = { startIndex: 119, endIndex: 134 }
+    const seen: string[] = []
+
+    for (let pass = 0; pass < 12; pass += 1) {
+      const key = `${range.startIndex}..${range.endIndex}`
+      // Content height follows the window: the mounted run is what exists.
+      const mountedBlocks = range.endIndex - range.startIndex + 1
+      const contentHeightPx = mountedBlocks * averageBlockHeightPx
+      const next = resolvePreviewWindowAdjustment(range, blockCount, {
+        scrollTopPx,
+        clientHeightPx,
+        contentHeightPx,
+        averageBlockHeightPx,
+      })
+      if (!next) {
+        // Settled. That is the whole assertion.
+        expect(seen).not.toContain(key)
+        return
+      }
+      expect(seen).not.toContain(key)
+      seen.push(key)
+      range = next
+    }
+
+    throw new Error(`window never settled, visited: ${seen.join(' -> ')}`)
+  })
+
+  it('never lets a correction land past the threshold it is correcting for', () => {
+    const clientHeightPx = 371
+    const averageBlockHeightPx = 171
+    const growPx = clientHeightPx * 3
+    const trimPx = clientHeightPx * 6
+
+    // Grown from too little runway: must not end up wanting a trim.
+    const grown = resolvePreviewWindowAdjustment({ startIndex: 119, endIndex: 134 }, 200, {
+      scrollTopPx: 1387,
+      clientHeightPx,
+      contentHeightPx: 16 * averageBlockHeightPx,
+      averageBlockHeightPx,
+    })
+    expect(grown).not.toBeNull()
+    const grownRunway = ((grown!.endIndex - grown!.startIndex + 1) * averageBlockHeightPx) - (1387 + clientHeightPx)
+    expect(grownRunway).toBeLessThanOrEqual(trimPx)
+
+    // Trimmed from too much runway: must not end up wanting to grow.
+    const trimmed = resolvePreviewWindowAdjustment({ startIndex: 119, endIndex: 142 }, 200, {
+      scrollTopPx: 1387,
+      clientHeightPx,
+      contentHeightPx: 24 * averageBlockHeightPx,
+      averageBlockHeightPx,
+    })
+    expect(trimmed).not.toBeNull()
+    const trimmedRunway = ((trimmed!.endIndex - trimmed!.startIndex + 1) * averageBlockHeightPx) - (1387 + clientHeightPx)
+    expect(trimmedRunway).toBeGreaterThanOrEqual(growPx)
+  })
+})
+
+/**
+ * Trimming with real heights rather than the window mean.
+ *
+ * The mean is a statement about the window as a whole, and the blocks at an
+ * EDGE are the ones least likely to resemble it -- two images or a code fence
+ * sitting at the front of a run of ordinary paragraphs is the ordinary case,
+ * not a pathological one. A trim planned on the mean then removes far more
+ * pixels than it meant to, and because a front-edge trim is paid for on
+ * `scrollTop`, it removes them from the backward runway itself: the reader is
+ * thrown against the mounted edge by the very pass that was supposed to be
+ * housekeeping. That is what "the note fights the scrolling" looks like from
+ * the inside.
+ *
+ * The blocks being removed are mounted and already measured, so none of this
+ * has to be guessed.
+ *
+ * Geometry below, self-consistent by construction: a 371px viewport (growing
+ * below 1113px of runway, trimming above 2226, aiming at 1484), two 900px
+ * blocks and six 112px ones above the viewport for a backward runway of
+ * exactly 2472px, and enough beyond it that the forward direction has no
+ * opinion.
+ */
+describe('resolvePreviewWindowAdjustment with real block heights', () => {
+  const clientHeightPx = 371
+  const growPx = clientHeightPx * 3
+  const trimPx = clientHeightPx * 6
+  const heightOf = (index: number) => (index === 3782 || index === 3783 ? 900 : 112)
+
+  const geometryFor = (range: { startIndex: number, endIndex: number }, scrollTopPx: number) => {
+    let contentHeightPx = 0
+    for (let index = range.startIndex; index <= range.endIndex; index += 1) contentHeightPx += heightOf(index)
+    const mounted = range.endIndex - range.startIndex + 1
+    return {
+      scrollTopPx,
+      clientHeightPx,
+      contentHeightPx,
+      averageBlockHeightPx: contentHeightPx / mounted,
+      measuredBlockHeightPx: heightOf,
+    }
+  }
+
+  it('sheds what it aimed to shed when the edge blocks dwarf the mean', () => {
+    const range = { startIndex: 3782, endIndex: 3807 }
+    const next = resolvePreviewWindowAdjustment(range, 10_000, geometryFor(range, 2472))
+    expect(next).not.toBeNull()
+    let shedPx = 0
+    for (let index = range.startIndex; index < next!.startIndex; index += 1) shedPx += heightOf(index)
+    // The mean here is 172px against 900px edge blocks, so a modelled trim
+    // sheds five blocks and 2136px -- landing at 336px of runway, which is
+    // not a trim, it is the reader against the edge.
+    expect(2472 - shedPx).toBeGreaterThanOrEqual(growPx)
+    expect(2472 - shedPx).toBeLessThanOrEqual(trimPx)
+  })
+
+  it('never strands the reader below the grow threshold on the way to settling', () => {
+    let range = { startIndex: 3782, endIndex: 3807 }
+    // The reader does not move; only the window does. A front-edge move is
+    // paid for on scrollTop by the carry, which is why the backward runway
+    // the next pass measures is exactly what this pass just changed.
+    let scrollTopPx = 2472
+    const seen: string[] = []
+
+    for (let pass = 0; pass < 12; pass += 1) {
+      const key = `${range.startIndex}..${range.endIndex}@${Math.round(scrollTopPx)}`
+      expect(seen).not.toContain(key)
+      seen.push(key)
+      const next = resolvePreviewWindowAdjustment(range, 10_000, geometryFor(range, scrollTopPx))
+      if (!next) return
+      for (let index = range.startIndex; index < next.startIndex; index += 1) scrollTopPx -= heightOf(index)
+      for (let index = next.startIndex; index < range.startIndex; index += 1) scrollTopPx += heightOf(index)
+      range = next
+      // Every intermediate state is a state the reader is actually in for a
+      // frame, so the band has to hold at each of them, not merely at rest.
+      expect(scrollTopPx).toBeGreaterThanOrEqual(growPx)
+    }
+
+    throw new Error(`window never settled, visited: ${seen.join(' -> ')}`)
+  })
 })
 
 describe('clampPreviewWindowRange', () => {

@@ -10,6 +10,18 @@ One command: `npm run release` (patch bump), or `-- minor` / `-- major` / `-- 0.
 
 ## Read first
 - [docs/guiding-vision.md](docs/guiding-vision.md) — the product's spiritual guideline: why this app exists and who it's for. Written for the AI agent, not for end users; let it inform judgment calls, don't surface it to users.
+- [docs/engineering-doctrine.md](docs/engineering-doctrine.md) — **how work is done here, and the standing division of labour**: the human moves fast and loose, the agent is the deliberate counterweight answerable for the codebase's coherence. **Vet before building** — when an idea arrives, state the concerns before writing code, and let it be refined until it can be built cleanly; an idea implemented faithfully but incoherently is a failure, not a delivery. The rules it carries, each anchored to a real incident:
+  1. **Find the bone, never splint the limb.** Ask whether this is where the fault IS or where it SHOWS.
+  2. **When pieces will not fit, step up a level.** A change that needs a special case to coexist is being made at the wrong level.
+  3. **Never converge by retrying.** Wait until the information is there, then hit the target by design. No loop-until-timeout, no try-look-try-again.
+  4. **A rule stated once must hold everywhere it applies.** This codebase's characteristic failure is correct reasoning applied to one caller and not its sibling.
+  5. **Understand the system before measuring it.** Questions about the CODE (what does this do, why, what calls it, does its original reasoning still hold) are answered by READING — the answer is already written down. Only questions about the WORLD (how long, does it drop frames, what did the browser actually do) are answered by MEASURING. Reaching for a measurement on a code question is the characteristic error: it is slow and it produces confident false positives that send a fix one layer above the fault. Before running anything, state the question, what would refute the hypothesis, and why this instrument can discriminate — including what it cannot see.
+  6. **Test the property, not the step.** A walk, drift or oscillation needs an iterating test that asserts the fixed point.
+  7. **Delete what the fix makes dead, in the same change** — tests, constants, plumbing, and the docs that describe it.
+  8. **No workarounds, ever.** Pre-alpha: there is no user to shield and no release to protect.
+  9. **A document that describes the code is part of the code.** Mark a superseded section superseded; a stale description is believed.
+
+  It also carries **the order of work**, which is front-loaded onto understanding on purpose: read the docs → analyse the code → understand the components AND their interactions → understand why things are the way they are → check whether that reasoning still holds → draft a plan in which the idea places cleanly → **discuss the plan before building, naming what could not be determined by reading** → measure only what reading cannot answer → execute with a sanity check at each step → hand over for user testing. **When a check contradicts the plan, stop and return to the analysis — never fix forward.**
 
 ## Living documents (update these, not README, when things change)
 - [electron/help/helpNoteContent.ts](electron/help/helpNoteContent.ts) — the welcome note seeded into an empty database.

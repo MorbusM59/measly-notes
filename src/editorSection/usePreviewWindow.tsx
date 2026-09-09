@@ -307,6 +307,23 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
     averageBlockHeightRef.current = next.length > 0 ? total / next.length : 0
   }, [previewScrollRef])
 
+  /**
+   * The browser's own height for a mounted block, by document block index.
+   *
+   * The planner trims with this rather than with the mean, so a trim lands
+   * where it aimed -- see `measuredBlockHeightPx` in `previewWindow.ts`. The
+   * mounted blocks are a contiguous run in document order, so their position
+   * in the measurement array is pure arithmetic; the index is still checked,
+   * because a stale measurement array during a re-anchor would otherwise
+   * silently answer with a neighbour's height.
+   */
+  const readMeasuredBlockHeight = useCallback((blockIndex: number): number | undefined => {
+    const measurements = measurementsRef.current
+    if (measurements.length === 0) return undefined
+    const entry = measurements[blockIndex - measurements[0].index]
+    return entry !== undefined && entry.index === blockIndex ? entry.size : undefined
+  }, [])
+
   /** The block at the top of the viewport, and where its own top sits. */
   const readAnchor = useCallback((): PreviewWindowAnchor | null => {
     const scroller = previewScrollRef.current
@@ -646,6 +663,7 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
       clientHeightPx: scroller.clientHeight,
       contentHeightPx: contentHeightRef.current,
       averageBlockHeightPx: averageBlockHeightRef.current,
+      measuredBlockHeightPx: readMeasuredBlockHeight,
     })
     if (next) {
       moveWindow(next, { synchronous: settlingRef.current })
@@ -663,7 +681,7 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
         + ` headroom=${Math.round(maxTop - scroller.scrollTop)}/${Math.round(maxTop)}`
         + ` win=${rangeRef.current.startIndex}..${rangeRef.current.endIndex}/${blockCount}`
     })
-  }, [enabled, previewScrollRef, moveWindow])
+  }, [enabled, previewScrollRef, moveWindow, readMeasuredBlockHeight])
 
   const adjustRef = useRef(adjust)
   adjustRef.current = adjust
