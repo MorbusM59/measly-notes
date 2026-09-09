@@ -49,6 +49,7 @@ import {
   resolveNextPrewarmBatchSize,
 } from './previewMeasurementPrewarm'
 import { traceSettle } from './previewSettleTrace'
+import { noteFrameCostScroll } from './previewFrameCostTrace'
 import { usePreviewWindow, type PreviewWindowApi } from './usePreviewWindow'
 import { countWrappedLines } from '../editor/scrollThumbMetrics'
 import {
@@ -318,8 +319,8 @@ export interface UsePreviewMarkdownRenderingOptions {
     read: (() => { signature: string; heights: number[] } | null) | null
     pending: { signature: string; heights: number[] } | null
   } | null>
-  /** Where the reader has put the line between a pixel-measured scrollbar and a character-counting one, in characters (Options > Performance). See editor/documentPosition.ts. */
-  noteSizeThresholdChars: number
+  /** Where the reader has put the line between a pixel-measured scrollbar and a character-counting one, in BLOCKS -- shown to them as paragraphs (Options > Performance). See editor/documentPosition.ts for why blocks are the unit. */
+  noteSizeThresholdBlocks: number
   /** Put every note on the character-counting side, whatever its size -- the reader's standing preference, which overrides the threshold rather than moving it. */
   forceCharacterScrollbarThumb: boolean
   /** Whether the settle gate is currently holding the preview hidden for a note load. The measurement survey's "stand aside for the reader" rule consults it, because a scroll fired while the pane is hidden is the restore's, not the reader's -- see the scroll listener below, and previewSettleGate.ts's isHolding. */
@@ -462,7 +463,7 @@ export function usePreviewMarkdownRendering({
   isActiveNoteEditable,
   applyProgrammaticEditorText,
   previewBlockHeightsRef,
-  noteSizeThresholdChars,
+  noteSizeThresholdBlocks,
   forceCharacterScrollbarThumb,
   onPreviewCommitted,
   isPreviewSettleHolding,
@@ -843,6 +844,16 @@ export function usePreviewMarkdownRendering({
     scroller.style.scrollBehavior = previousScrollBehavior
   }, [])
 
+  /** See the `overscan` option below. Latched once, so toggling needs a reload. */
+  const [mountAllBlocks] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      return window.localStorage.getItem('thockdown:debug-mount-all') === '1'
+    } catch {
+      return false
+    }
+  })
+
   const virtualizer = useVirtualizer({
     count: previewBlocks.length,
     getScrollElement: () => previewScrollRef.current,
@@ -858,7 +869,19 @@ export function usePreviewMarkdownRendering({
       const estimated = byLines && index < byLines.length ? byLines[index] : 0
       return estimated > 0 ? estimated : PREVIEW_BLOCK_ESTIMATED_HEIGHT_PX
     },
-    overscan: PREVIEW_BLOCK_OVERSCAN,
+    // An overscan of "the whole document" mounts every block, which is the
+    // experiment `thockdown:debug-mount-all` exists to run: it isolates DOM
+    // SIZE from everything else, leaving the geometry model, the offsets and
+    // the measurement path exactly as they are. That matters because the
+    // question it answers -- can the continuous path stop virtualizing, and
+    // take the survey, the estimates and the progress bar with it -- is
+    // really a question about how much mounted markdown this pane can carry
+    // while still scrolling smoothly, and nothing else.
+    //
+    // Latched at mount rather than read live, so a run cannot change shape
+    // half way through; toggling it needs a reload, which a clean before/after
+    // comparison wants anyway.
+    overscan: mountAllBlocks ? previewBlocks.length : PREVIEW_BLOCK_OVERSCAN,
     scrollToFn,
   })
 
@@ -1549,7 +1572,7 @@ export function usePreviewMarkdownRendering({
   // holds a moving window and never has a whole-document height at all. No
   // switch, no flag: a chunked document is always windowed.
   const isWindowed = forceCharacterScrollbarThumb
-    || !isContinuousDocument(renderedDisplayText.length, noteSizeThresholdChars)
+    || !isContinuousDocument(previewBlocks.length, noteSizeThresholdBlocks)
 
   /**
    * The one place the answer lives once it has been decided for this commit.
@@ -2621,10 +2644,21 @@ export function usePreviewMarkdownRendering({
     const onScroll = () => {
       if (isPreviewSettleHolding?.()) return
       lastPreviewScrollAtRef.current = performance.now()
+      // Deliberately AFTER the hold check: a scroll fired while the pane is
+      // hidden is the restore's, and timing frames the reader never saw would
+      // describe a scroll nobody performed.
+      noteFrameCostScroll(() => ({
+        mountedBlocks: virtualizer.getVirtualItems().length,
+        totalBlocks: previewBlocksRef.current.length,
+        // The cumulative block offsets already end at the document's own
+        // length, so this costs a read rather than a pass over the text.
+        chars: blockCharOffsetsRef.current?.at(-1) ?? 0,
+        mountAll: mountAllBlocks,
+      }))
     }
     scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => scroller.removeEventListener('scroll', onScroll)
-  }, [previewScrollRef, spacerReady, isPreviewSettleHolding])
+  }, [previewScrollRef, spacerReady, isPreviewSettleHolding, virtualizer, previewBlocksRef, mountAllBlocks, blockCharOffsetsRef])
 
   /**
    * Publishes "the survey still owes this document a height commit" to the

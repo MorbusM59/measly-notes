@@ -14,11 +14,11 @@
 // So there are two strategies, chosen by document size, and the scrollbar is
 // told neither of them:
 //
-//   CONTINUOUS  (below CONTINUOUS_DOCUMENT_MAX_CHARS)
+//   CONTINUOUS  (up to the reader's block threshold)
 //     Every block is measured, so scrollHeight is the truth and the standard
 //     scrollbar identity is exact. Nothing is estimated and nothing settles.
 //
-//   CHUNKED     (at or above it)
+//   CHUNKED     (above it)
 //     Blocks are rendered on demand and their heights are modelled, never
 //     surveyed. Position is a CHARACTER OFFSET -- a location in the source,
 //     which no layout can move -- and the pixel substrate underneath is only
@@ -34,48 +34,69 @@
 // again.
 
 /**
- * The size above which a document is chunked rather than measured, when the
- * reader has not set one.
+ * The size above which a document is windowed rather than measured, when the
+ * reader has not set one. Counted in BLOCKS.
  *
- * A threshold, not a law of nature: below it, rendering and measuring the
- * whole document is cheap enough that being exact costs less than being
- * clever. It is the reader's to set (Options > Performance > note size
- * threshold) because where the line falls is a statement about THEIR notes --
- * which of them are a workspace being written in, and which are a document
- * being read -- and only they know that. This is where it sits until they
- * say otherwise.
+ * ## Why blocks and not characters
+ *
+ * Because blocks are what cost. Measured on the real app: a note of 50,420
+ * characters in 6 blocks scrolls with every block mounted and never drops a
+ * frame, while 793 mounted blocks drops 3.5% of them -- on a fast machine,
+ * unthrottled. Half a megabyte of text in the DOM is free; the element count
+ * is not. A character threshold prices the wrong thing.
+ *
+ * It is also the better unit for the reader, which matters more: people know
+ * roughly how many paragraphs they have written and essays are counted in
+ * words, so a character count is a mental conversion away from anything
+ * anyone actually knows. The UI therefore calls these PARAGRAPHS, which is
+ * true of ordinary prose -- with one honest simplification worth knowing when
+ * reading this code: a whole list is ONE block however many items it holds
+ * (PreviewBlockSplit splits at remark's top-level boundaries, never inside a
+ * construct), as is a table or a code fence. Verified, not assumed: a
+ * 200-item checklist measures as a single block.
+ *
+ * ## Where 100 comes from
+ *
+ * Measurement, not taste. 100 and 200 mounted blocks dropped zero frames in
+ * 445 unthrottled frames, and at 6x CPU throttle were indistinguishable from
+ * the virtualized baseline (~25% dropped either way -- a property of
+ * scrolling under throttle, not of mounting). Trouble only appears somewhere
+ * between 200 and 793. So 100 is not a compromise at the edge of what works;
+ * it has roughly a factor of two in hand.
  */
-export const DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS = 20000
+export const DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS = 100
 
 /**
  * The range the reader may move that line through, and the granularity.
  *
- * The floor is not zero: "measure nothing, ever" is a different decision
- * rather than an extreme setting of this one, and it has its own control
- * (see `forceCharacterScrollbarThumb`). Keeping it out of the slider's range
- * means every position on the slider means the same KIND of thing.
+ * The floor is not zero: "never measure a document, whatever its size" is a
+ * different decision rather than an extreme setting of this one, and it has
+ * its own control (see `forceCharacterScrollbarThumb`). Keeping it out of the
+ * slider's range means every position on the slider means the same KIND of
+ * thing.
  *
- * The step is fine because the quantity being tuned is not a round number --
- * it is "which of my own notes fall on each side", which lands wherever the
- * reader's documents happen to land.
+ * A step of one because the quantity being tuned is not a round number -- it
+ * is "which of my own notes fall on each side", which lands wherever the
+ * reader's documents happen to land, and a paragraph is already a unit small
+ * enough to count.
  */
-export const CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS = 5000
-export const CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS = 50000
-export const CONTINUOUS_DOCUMENT_THRESHOLD_STEP_CHARS = 1000
+export const CONTINUOUS_DOCUMENT_MIN_THRESHOLD_BLOCKS = 10
+export const CONTINUOUS_DOCUMENT_MAX_THRESHOLD_BLOCKS = 100
+export const CONTINUOUS_DOCUMENT_THRESHOLD_STEP_BLOCKS = 1
 
 /** Keeps a stored or user-supplied threshold inside the range above. */
-export function clampContinuousDocumentThreshold(charCount: number): number {
-  if (!Number.isFinite(charCount)) return DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS
+export function clampContinuousDocumentThreshold(blockCount: number): number {
+  if (!Number.isFinite(blockCount)) return DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS
   return Math.min(
-    CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS,
-    Math.max(CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS, Math.round(charCount)),
+    CONTINUOUS_DOCUMENT_MAX_THRESHOLD_BLOCKS,
+    Math.max(CONTINUOUS_DOCUMENT_MIN_THRESHOLD_BLOCKS, Math.round(blockCount)),
   )
 }
 
 /**
- * Whether a document of this length gets the exact treatment.
+ * Whether a document of this many blocks gets the exact treatment.
  *
- * `thresholdChars` is passed in rather than read from a module constant
+ * `thresholdBlocks` is passed in rather than read from a module constant
  * because it is a live setting now. Both the renderer and the scrollbar have
  * to agree on the answer -- a document rendered one way and described the
  * other would be a scrollbar that lies -- so callers are expected to resolve
@@ -83,10 +104,10 @@ export function clampContinuousDocumentThreshold(charCount: number): number {
  * from two places that might read the setting a frame apart.
  */
 export function isContinuousDocument(
-  charCount: number,
-  thresholdChars: number = DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+  blockCount: number,
+  thresholdBlocks: number = DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS,
 ): boolean {
-  return charCount < thresholdChars
+  return blockCount <= thresholdBlocks
 }
 
 /**

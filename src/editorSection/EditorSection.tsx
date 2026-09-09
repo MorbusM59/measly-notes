@@ -138,7 +138,7 @@ export interface EditorSectionProps extends Omit<SectionEditorAreaProps,
 
   editorRuntimeMetrics: EditorRuntimeMetrics
   deferPreviewOnRapidInput: boolean
-  noteSizeThresholdChars: number
+  noteSizeThresholdBlocks: number
   forceCharacterScrollbarThumb: boolean
   viewStyle: ViewStyleKey
   viewFontSize: number
@@ -220,7 +220,7 @@ export function EditorSection({
   documentFindCaseSensitiveRef,
   editorRuntimeMetrics,
   deferPreviewOnRapidInput,
-  noteSizeThresholdChars,
+  noteSizeThresholdBlocks,
   forceCharacterScrollbarThumb,
   viewStyle,
   viewFontSize,
@@ -1601,7 +1601,7 @@ export function EditorSection({
     isActiveNoteEditable,
     applyProgrammaticEditorText,
     previewBlockHeightsRef,
-    noteSizeThresholdChars,
+    noteSizeThresholdBlocks,
     forceCharacterScrollbarThumb,
     onPreviewCommitted: notifyPreviewSettleGateOfCommit,
     isPreviewSettleHolding,

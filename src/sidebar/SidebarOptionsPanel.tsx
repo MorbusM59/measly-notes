@@ -3,10 +3,10 @@ import type * as React from 'react'
 import { AccordionGroup, AccordionSection } from '../components/AccordionSection'
 import { CompactScrollbarSlider } from '../components/CompactScrollbarSlider'
 import {
-  CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS,
-  CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS,
-  CONTINUOUS_DOCUMENT_THRESHOLD_STEP_CHARS,
-  DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+  CONTINUOUS_DOCUMENT_MAX_THRESHOLD_BLOCKS,
+  CONTINUOUS_DOCUMENT_MIN_THRESHOLD_BLOCKS,
+  CONTINUOUS_DOCUMENT_THRESHOLD_STEP_BLOCKS,
+  DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS,
   clampContinuousDocumentThreshold,
 } from '../editor/documentPosition'
 import { type RgbaColor, type HsvaColor, rgbaToCssColor, hsvaToRgba } from '../shared/colorMath'
@@ -549,8 +549,8 @@ export interface SidebarOptionsPanelProps {
   setReducedCaretAnimation: (value: boolean) => void
   deferPreviewOnRapidInput: boolean
   setDeferPreviewOnRapidInput: (value: boolean) => void
-  noteSizeThresholdChars: number
-  setNoteSizeThresholdChars: (value: number) => void
+  noteSizeThresholdBlocks: number
+  setNoteSizeThresholdBlocks: (value: number) => void
   forceCharacterScrollbarThumb: boolean
   setForceCharacterScrollbarThumb: (value: boolean) => void
 
@@ -828,8 +828,8 @@ export function SidebarOptionsPanel({
   setReducedCaretAnimation,
   deferPreviewOnRapidInput,
   setDeferPreviewOnRapidInput,
-  noteSizeThresholdChars,
-  setNoteSizeThresholdChars,
+  noteSizeThresholdBlocks,
+  setNoteSizeThresholdBlocks,
   forceCharacterScrollbarThumb,
   setForceCharacterScrollbarThumb,
   borderRadiusRegularPx,
@@ -3130,17 +3130,17 @@ export function SidebarOptionsPanel({
         <div className="utility-setting-slider-stack is-below-button-row" aria-label="Note size threshold">
           <CompactScrollbarSlider
             id="note-size-threshold"
-            min={CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS}
-            max={CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS}
-            step={CONTINUOUS_DOCUMENT_THRESHOLD_STEP_CHARS}
-            value={noteSizeThresholdChars}
+            min={CONTINUOUS_DOCUMENT_MIN_THRESHOLD_BLOCKS}
+            max={CONTINUOUS_DOCUMENT_MAX_THRESHOLD_BLOCKS}
+            step={CONTINUOUS_DOCUMENT_THRESHOLD_STEP_BLOCKS}
+            value={noteSizeThresholdBlocks}
             trackLabel="note size threshold"
-            tooltipLabel="characters"
-            ariaLabel="Note size threshold: how large a note may be before its scrollbar counts characters instead of measuring height."
-            defaultValue={DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS}
+            tooltipLabel="paragraphs"
+            ariaLabel="Note size threshold: how many paragraphs a note may have before its scrollbar counts characters instead of measuring height."
+            defaultValue={DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS}
             disabled={forceCharacterScrollbarThumb}
             onCommit={(value) => {
-              setNoteSizeThresholdChars(clampContinuousDocumentThreshold(value))
+              setNoteSizeThresholdBlocks(clampContinuousDocumentThreshold(value))
               queueAppStateSave(activeNoteId)
             }}
           />

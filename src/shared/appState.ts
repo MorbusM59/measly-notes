@@ -171,10 +171,11 @@ export interface PersistedMenuState {
   deferPreviewOnRapidInput?: boolean;
   /**
    * Where the reader has put the line between a note whose scrollbar is
-   * measured in pixels and one whose scrollbar counts characters. In
-   * characters; see editor/documentPosition.ts for what the two sides mean.
+   * measured in pixels and one whose scrollbar counts characters. In BLOCKS
+   * (shown to the reader as paragraphs); see editor/documentPosition.ts for
+   * what the two sides mean and why blocks are the unit.
    */
-  noteSizeThresholdChars?: number;
+  noteSizeThresholdBlocks?: number;
   /**
    * Put every note on the character-counting side, whatever its size.
    *

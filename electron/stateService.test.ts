@@ -107,14 +107,14 @@ describe('StateService app-state field round-trip', () => {
         selectedMonths: [],
         selectedYears: [],
         searchQuery: '',
-        noteSizeThresholdChars: 37_000,
+        noteSizeThresholdBlocks: 73,
         forceCharacterScrollbarThumb: true,
       },
     })
 
     const reader = new StateService(dataRoot)
     const loaded = await reader.loadAppState()
-    expect(loaded.menu?.noteSizeThresholdChars).toBe(37_000)
+    expect(loaded.menu?.noteSizeThresholdBlocks).toBe(73)
     expect(loaded.menu?.forceCharacterScrollbarThumb).toBe(true)
 
     const offWriter = new StateService(dataRoot)
@@ -125,13 +125,13 @@ describe('StateService app-state field round-trip', () => {
         selectedMonths: [],
         selectedYears: [],
         searchQuery: '',
-        noteSizeThresholdChars: 5_000,
+        noteSizeThresholdBlocks: 10,
         forceCharacterScrollbarThumb: false,
       },
     })
     const offReader = new StateService(dataRoot)
     const offLoaded = await offReader.loadAppState()
-    expect(offLoaded.menu?.noteSizeThresholdChars).toBe(5_000)
+    expect(offLoaded.menu?.noteSizeThresholdBlocks).toBe(10)
     expect(offLoaded.menu?.forceCharacterScrollbarThumb).toBe(false)
   })
 

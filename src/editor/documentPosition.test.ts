@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS,
-  CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS,
-  DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+  CONTINUOUS_DOCUMENT_MAX_THRESHOLD_BLOCKS,
+  CONTINUOUS_DOCUMENT_MIN_THRESHOLD_BLOCKS,
+  DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS,
   clampContinuousDocumentThreshold,
   isContinuousDocument,
   resolveChunkedCharTarget,
@@ -15,29 +15,37 @@ import {
 describe('isContinuousDocument', () => {
   it('splits at the default threshold when none is given', () => {
     expect(isContinuousDocument(0)).toBe(true)
-    expect(isContinuousDocument(DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS - 1)).toBe(true)
-    expect(isContinuousDocument(DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS)).toBe(false)
+    // Inclusive: a threshold of N paragraphs means a note of N paragraphs is
+    // still on the measured side. "Up to 100" is how the slider reads, and a
+    // note that lands exactly on the number the reader chose should not fall
+    // off the side they chose it for.
+    expect(isContinuousDocument(DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS)).toBe(true)
+    expect(isContinuousDocument(DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS + 1)).toBe(false)
   })
 
   it('splits at whatever threshold the reader set', () => {
-    expect(isContinuousDocument(9_999, 10_000)).toBe(true)
-    expect(isContinuousDocument(10_000, 10_000)).toBe(false)
+    expect(isContinuousDocument(40, 40)).toBe(true)
+    expect(isContinuousDocument(41, 40)).toBe(false)
     // The same document, on either side of the line, purely because the line
     // moved -- which is the whole point of the setting.
-    expect(isContinuousDocument(30_000, 50_000)).toBe(true)
-    expect(isContinuousDocument(30_000, 20_000)).toBe(false)
+    expect(isContinuousDocument(60, 100)).toBe(true)
+    expect(isContinuousDocument(60, 20)).toBe(false)
   })
 })
 
 describe('clampContinuousDocumentThreshold', () => {
   it('holds a stored value inside the slider range', () => {
-    expect(clampContinuousDocumentThreshold(1_000)).toBe(CONTINUOUS_DOCUMENT_MIN_THRESHOLD_CHARS)
-    expect(clampContinuousDocumentThreshold(999_999)).toBe(CONTINUOUS_DOCUMENT_MAX_THRESHOLD_CHARS)
-    expect(clampContinuousDocumentThreshold(23_000)).toBe(23_000)
+    expect(clampContinuousDocumentThreshold(2)).toBe(CONTINUOUS_DOCUMENT_MIN_THRESHOLD_BLOCKS)
+    expect(clampContinuousDocumentThreshold(5_000)).toBe(CONTINUOUS_DOCUMENT_MAX_THRESHOLD_BLOCKS)
+    expect(clampContinuousDocumentThreshold(37)).toBe(37)
+  })
+
+  it('rounds a fractional value onto a whole paragraph', () => {
+    expect(clampContinuousDocumentThreshold(42.4)).toBe(42)
   })
 
   it('falls back to the default for a value that is not a number', () => {
-    expect(clampContinuousDocumentThreshold(Number.NaN)).toBe(DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS)
+    expect(clampContinuousDocumentThreshold(Number.NaN)).toBe(DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS)
   })
 })
 

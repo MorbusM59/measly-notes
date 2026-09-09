@@ -523,7 +523,7 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     reduceVisualEffects: Boolean(input?.reduceVisualEffects),
     reducedCaretAnimation: Boolean(input?.reducedCaretAnimation),
     deferPreviewOnRapidInput: Boolean(input?.deferPreviewOnRapidInput),
-    noteSizeThresholdChars: sanitizeOptionalNumber(input?.noteSizeThresholdChars),
+    noteSizeThresholdBlocks: sanitizeOptionalNumber(input?.noteSizeThresholdBlocks),
     forceCharacterScrollbarThumb: Boolean(input?.forceCharacterScrollbarThumb),
     typingSoundEnabled: Boolean(input?.typingSoundEnabled),
     typingSoundSet: sanitizeTypingSoundSet(input?.typingSoundSet),

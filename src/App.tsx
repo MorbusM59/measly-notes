@@ -45,7 +45,7 @@ import type { NoteSummary } from './shared/noteLifecycle'
 import { isArchivedNote, isChapterOnlyNote, isDeletedNote, isExternalNote, isSameNoteSummary } from './shared/noteLifecycle'
 import { getNoteListMetaKind } from './shared/noteListMeta'
 import {
-  DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+  DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS,
   clampContinuousDocumentThreshold,
 } from './editor/documentPosition'
 import { resolveIdentityLabel } from './shared/tabLabels'
@@ -2394,7 +2394,7 @@ function App() {
   const [reduceVisualEffects, setReduceVisualEffects] = useState(false)
   const [reducedCaretAnimation, setReducedCaretAnimation] = useState(false)
   const [deferPreviewOnRapidInput, setDeferPreviewOnRapidInput] = useState(false)
-  const [noteSizeThresholdChars, setNoteSizeThresholdChars] = useState(DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS)
+  const [noteSizeThresholdBlocks, setNoteSizeThresholdBlocks] = useState(DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS)
   const [forceCharacterScrollbarThumb, setForceCharacterScrollbarThumb] = useState(false)
   const [typingSoundEnabled, setTypingSoundEnabled] = useState(false)
   const [typingSoundSet, setTypingSoundSet] = useState<'A' | 'B' | 'C' | 'D'>(DEFAULT_TYPING_SOUND_SET)
@@ -4251,7 +4251,7 @@ function App() {
       reduceVisualEffects,
       reducedCaretAnimation,
       deferPreviewOnRapidInput,
-      noteSizeThresholdChars,
+      noteSizeThresholdBlocks,
       forceCharacterScrollbarThumb,
       customCursorEnabled,
     }
@@ -4266,7 +4266,7 @@ function App() {
     reduceVisualEffects,
     reducedCaretAnimation,
     deferPreviewOnRapidInput,
-    noteSizeThresholdChars,
+    noteSizeThresholdBlocks,
     forceCharacterScrollbarThumb,
     editorFontSize,
     editorGlyphPaddingPx,
@@ -6425,8 +6425,8 @@ ${markdownHtml}
             // Clamped on the way in as well as on the way out: a stored value
             // predating a change to the slider's range would otherwise put the
             // handle off its own track.
-            setNoteSizeThresholdChars(clampContinuousDocumentThreshold(
-              appState.menu.noteSizeThresholdChars ?? DEFAULT_CONTINUOUS_DOCUMENT_MAX_CHARS,
+            setNoteSizeThresholdBlocks(clampContinuousDocumentThreshold(
+              appState.menu.noteSizeThresholdBlocks ?? DEFAULT_CONTINUOUS_DOCUMENT_MAX_BLOCKS,
             ))
             setForceCharacterScrollbarThumb(appState.menu.forceCharacterScrollbarThumb ?? false)
             setTypingSoundEnabled(appState.menu.typingSoundEnabled ?? false)
@@ -9581,8 +9581,8 @@ ${markdownHtml}
                         setReducedCaretAnimation={setReducedCaretAnimation}
                         deferPreviewOnRapidInput={deferPreviewOnRapidInput}
                         setDeferPreviewOnRapidInput={setDeferPreviewOnRapidInput}
-                        noteSizeThresholdChars={noteSizeThresholdChars}
-                        setNoteSizeThresholdChars={setNoteSizeThresholdChars}
+                        noteSizeThresholdBlocks={noteSizeThresholdBlocks}
+                        setNoteSizeThresholdBlocks={setNoteSizeThresholdBlocks}
                         forceCharacterScrollbarThumb={forceCharacterScrollbarThumb}
                         setForceCharacterScrollbarThumb={setForceCharacterScrollbarThumb}
                         borderRadiusRegularPx={borderRadiusRegularPx}
@@ -10091,7 +10091,7 @@ ${markdownHtml}
                   documentFindCaseSensitiveRef={documentFindCaseSensitiveRef}
                   editorRuntimeMetrics={editorRuntimeMetrics}
                   deferPreviewOnRapidInput={deferPreviewOnRapidInput}
-                  noteSizeThresholdChars={noteSizeThresholdChars}
+                  noteSizeThresholdBlocks={noteSizeThresholdBlocks}
                   forceCharacterScrollbarThumb={forceCharacterScrollbarThumb}
                   viewStyle={viewStyle}
                   viewFontSize={viewFontSize}
