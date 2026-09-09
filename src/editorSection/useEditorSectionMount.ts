@@ -189,13 +189,6 @@ export interface UseEditorSectionMountResult {
    */
   previewSettleGateRef: MutableRefObject<PreviewSettleGate | null>
   /**
-   * Set by usePreviewMarkdownRendering to "the measurement survey still owes
-   * this document a height commit", which the settle gate treats as geometry
-   * that has not finished moving. Same forwarding reason as the gate ref
-   * above -- see the declaration in the hook body.
-   */
-  previewMeasurementPendingRef: MutableRefObject<(() => boolean) | null>
-  /**
    * Set by the component from usePreviewScrollbar, so the settle gate can
    * hide the render view's scrollbar along with the pane and redraw it from
    * the settled geometry just before both reappear. See the declaration in
@@ -337,15 +330,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
   // geometry fixed point instead of waiting a fixed number of frames.
   const previewSettleGateRef = useRef<PreviewSettleGate | null>(null)
   /**
-   * Published by usePreviewMarkdownRendering (which owns the measurement
-   * survey) and read by the settle gate, which treats a survey that still has
-   * heights to commit as geometry that has not finished moving. Through a ref
-   * for the same reason previewScrollToSourceLineRef is: the gate is created
-   * here, the survey lives in a hook EditorSection calls further down, and
-   * neither can name the other directly.
-   */
-  const previewMeasurementPendingRef = useRef<(() => boolean) | null>(null)
-  /**
    * The render view's scrollbar, published by usePreviewScrollbar so the gate
    * can cover it too. Same forwarding reason as the refs either side of this
    * one: the gate is created here, the scrollbar is a hook EditorSection
@@ -356,7 +340,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
   if (previewSettleGateRef.current === null) {
     previewSettleGateRef.current = createPreviewSettleGate({
       getContainer: () => previewScrollRef.current,
-      isMeasurementPending: () => previewMeasurementPendingRef.current?.() ?? false,
       getCompanions: () => [previewSettleScrollbarRef.current?.getThumb() ?? null],
       onBeforeReveal: () => previewSettleScrollbarRef.current?.sync(),
     })
@@ -3028,7 +3011,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     adapterRef,
     previewScrollRef,
     previewSettleGateRef,
-    previewMeasurementPendingRef,
     previewSettleScrollbarRef,
     previewScrollToSourceLineRef,
     editModeSnapshotByNoteIdRef,

@@ -195,6 +195,10 @@ unavoidable first full parse). Root-caused (in a since-deleted, now-folded-in ha
 `docs/preview-virtualization-handover.md`) to the preview pane mounting every markdown block's
 `ReactMarkdown` output unconditionally on first render, regardless of viewport.
 
+> **SUPERSEDED — see "the preview stopped virtualizing" at the end of this document.** The
+> render view is no longer virtualized and `@tanstack/react-virtual` is no longer a dependency.
+> Everything from here to the end of this section is history, not description.
+
 Fixed by virtualizing the preview pane with `@tanstack/react-virtual` (`useVirtualizer` in
 `src/editorSection/usePreviewMarkdownRendering.tsx`): only blocks near the viewport (plus a
 small overscan buffer) ever mount real `ReactMarkdown` output now, with per-block height
@@ -3828,3 +3832,80 @@ not a tweak. It is the next thing to do and has not been done.
 `measureTypeLatency.mjs --shape=realistic` is the shape to measure against.
 Prefer it to `--shape=indented`, which exists now only to show what the extreme
 looks like.
+
+## This round: the preview stopped virtualizing, and most of this document's preview machinery went with it
+
+**Read this before trusting any earlier section about the preview pane.** Several rounds above
+describe a virtualized render view -- "Fixed by virtualizing the preview pane with
+`@tanstack/react-virtual`", the estimate/survey/prewarm apparatus, the discovery progress bar,
+`invalidatePreviewVirtualizerMeasurementsAfterIndex`. Those are accurate as history and are now
+false as description. **None of it exists any more.**
+
+### What the render view is now
+
+Exactly two strategies, both estimation-free, chosen by the reader's own paragraph threshold
+(Options > Performance, `editor/documentPosition.ts`):
+
+- **CONTINUOUS** (up to the threshold, default 100 blocks): every block is mounted, in normal
+  flow. `scrollHeight` is true from the first frame because every block contributing to it is
+  present. Block geometry is read from the DOM (`rebuildContinuousMeasurements`), mirroring the
+  windowed pane's own reader including its `offsetParent` correction.
+- **WINDOWED** (above it): unchanged. A moving run of mounted blocks, position expressed as a
+  character offset, no whole-document height to be wrong about.
+
+Neither estimates a height. Nothing surveys. Nothing settles.
+
+### Why it was safe to remove, measured rather than assumed
+
+The whole apparatus existed for one reason, which `previewMeasurementPrewarm.ts` stated
+outright: a virtualizer positions blocks at a running sum of heights, so it needs a height for
+every block including ones nobody has scrolled to. Mount everything and the requirement
+disappears -- provided the mounting is affordable. It is:
+
+| Mounted blocks | Frames | Dropped |
+|---|---|---|
+| 100 | 321 | **0** |
+| 200 | 124 | **0** |
+| 793 | 1,176 | 41 (3.5%) |
+
+Unthrottled, on the real app, via `thockdown:debug-frame-cost`. At 6x CPU throttle, 100 and 200
+mounted blocks were **indistinguishable from the virtualized baseline** (~25% dropped either
+way -- a property of scrolling under throttle, not of mounting). Trouble only appears somewhere
+between 200 and 793, and the reader's threshold caps the continuous path at 100.
+
+Two findings worth keeping:
+
+- **Characters are not the cost; elements are.** A 50,420-character note in 6 blocks is fully
+  mounted in both configurations and never drops a frame. Half a megabyte of text in the DOM is
+  free. 793 elements is not. This is why the threshold counts blocks.
+- **A whole list is ONE block.** `PreviewBlockSplit` splits at remark's top-level boundaries, so
+  a 200-item checklist measures as a single block, as does a table or a code fence. Verified,
+  not assumed. It is why "paragraphs" is an honest label for the setting, and why a block count
+  alone cannot see a very large list.
+
+### What was deleted
+
+`useVirtualizer` and the `@tanstack/react-virtual` dependency; `previewMeasurementPrewarm.ts`
+and its test; the survey engine (`commitPrewarmedSizes`, `queueNextPrewarmBatch`,
+`finishCalibration`, `restartPrewarm`, the slice scheduler, the per-geometry survey cache); the
+estimate tiers (`estimateSize`, `readLineMetrics`, the wrap probe, the flat fallback, the
+overscan constant); the hidden measurement host; the discovery progress bar and
+`PreviewDiscoveryState`; `invalidatePreviewVirtualizerMeasurementsAfterIndex`; and the settle
+gate's measurement wait. Net -1,729 lines;
+`usePreviewMarkdownRendering.tsx` went from 2,843 lines to ~1,500.
+
+A short-lived persisted block-height cache (a `previewBlockHeights` column plus its wiring) was
+built earlier in the same session to make the survey survive a restart, and removed with the
+survey. The column is left in place unmigrated, matching this table's existing precedent for
+retiring columns without a drop.
+
+### What remains open
+
+- **Scroll cost under throttle is its own problem.** Both configurations dropped ~25% of frames
+  at 6x, which is not a flattering number against this document's own "page 1 must feel
+  identical to page 1,000" benchmark. It is pre-existing, it was not introduced by any of this,
+  and nobody has investigated it. `thockdown:debug-frame-cost` is the instrument.
+- **Open/mount cost was never measured**, only scroll cost. How long a 100-block note takes to
+  render on first open is unknown, and it is the axis a full mount most plausibly made worse.
+- The block ceiling's exact safe maximum is bracketed (somewhere between 200 and 793) but not
+  pinned down.

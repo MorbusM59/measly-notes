@@ -1117,9 +1117,6 @@ export class NoteLifecycleService {
       previewBlockCache: input.payload.previewBlockCache
         ? JSON.stringify(input.payload.previewBlockCache)
         : input.payload.previewBlockCache,
-      previewBlockHeights: input.payload.previewBlockHeights
-        ? JSON.stringify(input.payload.previewBlockHeights)
-        : input.payload.previewBlockHeights,
     };
     this.databaseService.saveNoteUiState(input.id, payload);
   }
@@ -1134,19 +1131,10 @@ export class NoteLifecycleService {
         previewBlockCache = null;
       }
     }
-    let previewBlockHeights: NoteUiState['previewBlockHeights'] = null;
-    if (uiState.previewBlockHeights) {
-      try {
-        previewBlockHeights = JSON.parse(uiState.previewBlockHeights) as NoteUiState['previewBlockHeights'];
-      } catch {
-        previewBlockHeights = null;
-      }
-    }
     return {
       anchorBlockIndex: uiState.anchorBlockIndex,
       cursorPos: uiState.cursorPos,
       previewBlockCache,
-      previewBlockHeights,
     };
   }
 

@@ -1710,7 +1710,9 @@ one -- ArrowUp's `reconcileCagedScroll` -- covered by prior rounds):
 
 The preview pane has its own, structurally near-identical PageUp/PageDown continuous-scroll
 implementation (`usePreviewScrollbar.ts`'s `startPreviewContinuousScroll`/
-`startPreviewReleaseRampDown`), and virtualizes content via `@tanstack/react-virtual`
+`startPreviewReleaseRampDown`), and — **at the time of this round; no longer true, see
+`large-document-performance-handover.md`'s "the preview stopped virtualizing"** — virtualized
+content via `@tanstack/react-virtual`
 (`usePreviewMarkdownRendering.tsx`) with `estimateSize: () => 56` (a fixed px estimate for
 not-yet-rendered blocks) corrected by `measureElement` once a block actually renders, plus
 `overscan: 6` -- the react-virtual-native version of the same estimate-vs-measured pattern that

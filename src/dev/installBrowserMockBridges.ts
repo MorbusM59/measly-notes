@@ -281,7 +281,6 @@ function loadStore(): BrowserMockStore {
               anchorBlockIndex: value?.anchorBlockIndex ?? 0,
               cursorPos: value?.cursorPos ?? 0,
               previewBlockCache: value?.previewBlockCache ?? null,
-              previewBlockHeights: value?.previewBlockHeights ?? null,
             }]),
         )
       : {}
@@ -529,7 +528,6 @@ function buildNotesBridge(storeRef: { current: BrowserMockStore }): NoteLifecycl
             anchorBlockIndex: 0,
             cursorPos: 0,
             previewBlockCache: null,
-            previewBlockHeights: null,
           }
           store.noteUiStates[input.id] = {
             ...previousState,
@@ -548,7 +546,6 @@ function buildNotesBridge(storeRef: { current: BrowserMockStore }): NoteLifecycl
           anchorBlockIndex: 0,
           cursorPos: 0,
           previewBlockCache: null,
-          previewBlockHeights: null,
         }
 
         const nextState: NoteUiState = {
@@ -556,7 +553,6 @@ function buildNotesBridge(storeRef: { current: BrowserMockStore }): NoteLifecycl
           anchorBlockIndex: Object.prototype.hasOwnProperty.call(input.payload, 'anchorBlockIndex') ? input.payload.anchorBlockIndex ?? 0 : previousState.anchorBlockIndex,
           cursorPos: Object.prototype.hasOwnProperty.call(input.payload, 'cursorPos') ? input.payload.cursorPos ?? 0 : previousState.cursorPos,
           previewBlockCache: Object.prototype.hasOwnProperty.call(input.payload, 'previewBlockCache') ? input.payload.previewBlockCache ?? null : previousState.previewBlockCache,
-          previewBlockHeights: Object.prototype.hasOwnProperty.call(input.payload, 'previewBlockHeights') ? input.payload.previewBlockHeights ?? null : previousState.previewBlockHeights,
         }
 
         store.noteUiStates[input.id] = nextState
@@ -568,7 +564,6 @@ function buildNotesBridge(storeRef: { current: BrowserMockStore }): NoteLifecycl
         anchorBlockIndex: 0,
         cursorPos: 0,
         previewBlockCache: null,
-        previewBlockHeights: null,
       }
     },
 

@@ -8,9 +8,7 @@ import { createPreviewSettleGate, type PreviewSettleGateScheduler } from './prev
  * moving, not after N frames", and that's only checkable if the test owns
  * both the geometry and the clock.
  */
-function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
-  /** Whether the background measurement survey still owes this document a height commit. Off unless a test turns it on, so every pre-existing case behaves as it did before the gate learned to wait for it. */
-  let measurementPending = false
+function createHarness(maxSettleMs = 600) {
   const container = {
     style: { opacity: '', pointerEvents: '', transition: '' },
     scrollTop: 0,
@@ -38,8 +36,6 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
   const gate = createPreviewSettleGate({
     getContainer: () => container as unknown as HTMLElement,
     maxSettleMs,
-    maxMeasurementWaitMs,
-    isMeasurementPending: () => measurementPending,
     getCompanions: () => [companion as unknown as HTMLElement],
     onBeforeReveal: () => {
       beforeRevealVisibility.push({ container: container.style.opacity, companion: companion.style.opacity })
@@ -62,7 +58,7 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
 
   const isHidden = () => container.style.opacity === '0'
 
-  /** Simulates a geometry change of the kind react-virtual's measurement produces. */
+  /** Simulates a geometry change of the kind a late-arriving block produces. */
   const moveGeometry = (heightPx: number) => {
     container.scrollHeight = heightPx
     container.firstElementChild.style.height = `${heightPx}px`
@@ -78,7 +74,6 @@ function createHarness(maxSettleMs = 600, maxMeasurementWaitMs = 250) {
     companion,
     beforeRevealVisibility,
     isCompanionHidden: () => companion.style.opacity === '0',
-    setMeasurementPending: (pending: boolean) => { measurementPending = pending },
     setNow: (ms: number) => { nowMs = ms },
   }
 }
@@ -114,18 +109,19 @@ describe('previewSettleGate', () => {
     expect(companion.style.transition).toContain(`${durationMs}ms`)
   })
 
-  it('lets an in-flight fade-out finish when the switch commits mid-fade', () => {
+  it('cuts an in-flight fade-out short rather than holding the new note back', () => {
     const { gate, container, setNow } = createHarness()
     const durationMs = gate.beginFadeOut()
 
-    // The note commits halfway through the fade. Hiding instantly here would
-    // clear the transition and jump the half-faded pane the rest of the way
-    // in one frame -- the snap the fade exists to remove.
+    // The load finished before the fade did, so the switch commits mid-fade.
+    // The remaining fade must NOT play out: by this point React has already
+    // swapped in the incoming note, so continuing it would fade the wrong
+    // note in front of the reader. Instant, with no transition left running.
     setNow(durationMs / 2)
     gate.beginSettle()
 
-    expect(container.style.transition).toContain(`${durationMs / 2}ms`)
     expect(container.style.opacity).toBe('0')
+    expect(container.style.transition).toBe('')
   })
 
   it('comes back up when a fade-out is never followed by a switch', () => {
@@ -167,59 +163,7 @@ describe('previewSettleGate', () => {
     expect(beforeRevealVisibility).toEqual([{ container: '0', companion: '0' }])
   })
 
-  it('keeps waiting when the geometry is at rest but the measurement survey has not committed', () => {
-    const { gate, advanceFrame, isHidden, setMeasurementPending } = createHarness()
-    setMeasurementPending(true)
-    const generation = gate.beginSettle()
-    gate.markRestoreApplied(generation)
-
-    // A resting geometry is not a finished one: the survey commits every
-    // height it has gathered in one go, and that commit moves things again.
-    for (let i = 0; i < 5; i += 1) advanceFrame()
-
-    expect(isHidden()).toBe(true)
-  })
-
-  it('reveals once the survey has committed and the geometry has come to rest again', () => {
-    const { gate, advanceFrame, isHidden, moveGeometry, setMeasurementPending } = createHarness()
-    setMeasurementPending(true)
-    const generation = gate.beginSettle()
-    gate.markRestoreApplied(generation)
-
-    advanceFrame()
-    advanceFrame()
-    expect(isHidden()).toBe(true)
-
-    // The survey lands its heights: the document's total height changes, and
-    // only then is there a final layout to show.
-    moveGeometry(880)
-    setMeasurementPending(false)
-
-    advanceFrame() // sees the commit's movement
-    expect(isHidden()).toBe(true)
-
-    advanceFrame() // still at the new geometry => settled, for real this time
-    expect(isHidden()).toBe(false)
-  })
-
-  it('gives up waiting for a slow survey rather than holding the pane blank', () => {
-    const { gate, advanceFrame, isHidden, setMeasurementPending } = createHarness(600, 250)
-    setMeasurementPending(true)
-    const generation = gate.beginSettle()
-    gate.markRestoreApplied(generation)
-
-    advanceFrame(16)
-    advanceFrame(16) // at rest -- the wait starts here
-    expect(isHidden()).toBe(true)
-
-    // A survey that is still going well past its budget is a slow survey, not
-    // a stuck pane, so the reveal happens on the tighter measurement bound
-    // and well inside maxSettleMs.
-    advanceFrame(260)
-    expect(isHidden()).toBe(false)
-  })
-
-  it('does not wait at all when nothing is pending -- a windowed or already-surveyed document', () => {
+  it('reveals on a fixed point with nothing else to wait for', () => {
     const { gate, advanceFrame, isHidden } = createHarness()
     const generation = gate.beginSettle()
     gate.markRestoreApplied(generation)

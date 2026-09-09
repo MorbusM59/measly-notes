@@ -4,10 +4,8 @@
    own comment below); it isn't part of this module's public API, so
    there's nothing here for Fast Refresh to preserve identity of. */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { MutableRefObject, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { useVirtualizer, type VirtualizerOptions } from '@tanstack/react-virtual'
 import type { NoteSummary } from '../shared/noteLifecycle'
 import { resolveLinkedChapterId, resolveLinkedNoteId } from '../shared/assignedIds'
 import type { EditorAdapter } from '../editor/EditorContract'
@@ -39,19 +37,8 @@ import {
   resolveContinuousRatios,
   type DocumentPosition,
 } from '../editor/documentPosition'
-import {
-  PREVIEW_PREWARM_GEOMETRY_CACHE_SIZE,
-  PREVIEW_PREWARM_INITIAL_BATCH,
-  PREVIEW_PREWARM_RESIZE_SETTLE_MS,
-  PREVIEW_PREWARM_SCROLL_QUIET_MS,
-  PREVIEW_PREWARM_SLICE_BUDGET_MS,
-  PREVIEW_PREWARM_IDLE_TIMEOUT_MS,
-  resolveNextPrewarmBatchSize,
-} from './previewMeasurementPrewarm'
-import { traceSettle } from './previewSettleTrace'
 import { noteFrameCostScroll } from './previewFrameCostTrace'
 import { usePreviewWindow, type PreviewWindowApi } from './usePreviewWindow'
-import { countWrappedLines } from '../editor/scrollThumbMetrics'
 import {
   buildBlockCharOffsets,
   findBlockAtPixel,
@@ -59,7 +46,7 @@ import {
   resolvePreviewCharScrollOffset,
   resolvePreviewCharViewport,
 } from './previewCharPosition'
-import type { PreviewCharViewport } from './previewCharPosition'
+import type { PreviewBlockMeasurement, PreviewCharViewport } from './previewCharPosition'
 
 /**
  * The preview's position in character space, published for the scrollbar.
@@ -79,58 +66,7 @@ import type { PreviewCharViewport } from './previewCharPosition'
  */
 export type PreviewDocumentPositionApi = DocumentPosition
 
-// Initial guess only -- corrected as soon as each block actually mounts and
-// reports its real height (react-virtual's estimate-then-correct model, via
-// ResizeObserver under the hood). Precision doesn't matter here, it only
-// needs to be in the right order of magnitude so the first layout pass
-// isn't wildly wrong before real measurements start arriving.
-const PREVIEW_BLOCK_ESTIMATED_HEIGHT_PX = 56
 
-/**
- * How long discovery must run before its progress bar is worth showing.
- *
- * Raised from 600ms once the sweep got shorter. The bar's own rule is that a
- * progress indicator which appears and vanishes inside a third of a second
- * reads as a glitch rather than an explanation -- and with the end-to-end
- * survey gone, 600ms put it exactly there. Measured from page load, watching
- * for the element itself:
- *
- *                          fast machine      6x CPU throttle
- *   48k chars, 667 blocks   276ms  (flash)   2.8s
- *   400k chars, 768 blocks  305ms  (flash)   2.2s
- *
- * At this delay neither of those appears on a fast machine at all, and both
- * still appear for over two seconds on a slow one -- which is the only case
- * the bar was ever for.
- */
-const PREVIEW_DISCOVERY_BAR_DELAY_MS = 1200
-
-/** Once the bar is up, the shortest time it may stay up. See reportDiscovery. */
-const PREVIEW_DISCOVERY_BAR_MIN_VISIBLE_MS = 500
-
-/**
- * Whether to log the background survey's own throughput.
- *
- * Turn on with `localStorage['thockdown:debug-preview-survey'] = '1'` and
- * reload. This exists because a slow survey has three completely different
- * causes that look identical from outside -- expensive blocks (big `slice` at
- * a small `batch`), a main thread that never goes idle (big `wait`), and
- * competition with the reader (a high `yields`) -- and only one of them is
- * fixable by tuning. Read live, one line a second, from the machine actually
- * being slow; it is the difference between a diagnosis and a guess.
- */
-let previewSurveyDebugFlag: boolean | null = null
-function isPreviewSurveyDebugOn(): boolean {
-  if (previewSurveyDebugFlag === null) {
-    try {
-      previewSurveyDebugFlag = typeof window !== 'undefined'
-        && window.localStorage.getItem('thockdown:debug-preview-survey') === '1'
-    } catch {
-      previewSurveyDebugFlag = false
-    }
-  }
-  return previewSurveyDebugFlag
-}
 
 /**
  * What the character ruler measures.
@@ -142,20 +78,9 @@ function isPreviewSurveyDebugOn(): boolean {
  */
 const PREVIEW_CHAR_RULER_TEXT = 'the quick brown fox jumps over the lazy dog and then keeps going for a while longer so that one glyph cannot move the average'
 
-// A modest buffer of blocks mounted above/below the visible window so
-// scrolling doesn't visibly pop content in at the viewport edge.
-const PREVIEW_BLOCK_OVERSCAN = 6
 
 
 /** Progress of the background block survey -- see previewMeasurementPrewarm.ts. */
-export interface PreviewDiscoveryState {
-  isSurveying: boolean
-  /** 0-100, whole numbers. */
-  percent: number
-  measured: number
-  total: number
-}
-
 interface OpenItemsToggleStore {
   isChecked: (sourceLine: number) => boolean
   subscribeToLine: (sourceLine: number, listener: () => void) => () => void
@@ -331,7 +256,6 @@ export interface UsePreviewMarkdownRenderingOptions {
 
 export interface UsePreviewMarkdownRenderingResult {
   previewMarkdownElement: ReactNode
-  previewDiscovery: PreviewDiscoveryState
 }
 
 interface PreviewMarkdownBlockProps {
@@ -341,67 +265,6 @@ interface PreviewMarkdownBlockProps {
   components: ReturnType<typeof createPreviewMarkdownComponents>
 }
 
-/**
- * The shape of the react-virtual internals this function clears.
- *
- * Hand-written rather than imported because these are the library's own
- * private fields -- `laneAssignments` is literally declared `private`, which
- * no structural type can match, and `itemSizeCache` is keyed by a type that
- * includes `bigint`. Describing them accurately in TypeScript is not
- * possible; reaching for them is the whole point of this function.
- */
-interface PreviewVirtualizerInternals {
-  itemSizeCache?: Map<unknown, number>
-  laneAssignments?: Map<number, number>
-  measurementsCache?: Array<{ index?: number } | undefined>
-  pendingMin?: number | null
-}
-
-/**
- * Takes `unknown` so the one unavoidable cast lives here, in the function
- * that knowingly pokes at library internals, rather than at each call site.
- *
- * A narrower parameter type was tried and is why `tsc` -- and therefore
- * `npm run build` -- failed: a real virtualizer could not be assigned to it,
- * even though every call site was passing exactly the right object.
- */
-export function invalidatePreviewVirtualizerMeasurementsAfterIndex(
-  virtualizer: unknown,
-  index: number,
-): void {
-  const internals = virtualizer as PreviewVirtualizerInternals | null | undefined
-  if (!internals || !Number.isFinite(index) || index < 0) return
-
-  const itemSizeCache = internals.itemSizeCache
-  if (itemSizeCache instanceof Map) {
-    for (const key of Array.from(itemSizeCache.keys())) {
-      if (typeof key === 'number' && key >= index) {
-        itemSizeCache.delete(key)
-      }
-    }
-  }
-
-  const laneAssignments = internals.laneAssignments
-  if (laneAssignments instanceof Map) {
-    for (const laneIndex of Array.from(laneAssignments.keys())) {
-      if (laneIndex >= index) laneAssignments.delete(laneIndex)
-    }
-  }
-
-  const measurementsCache = internals.measurementsCache
-  if (Array.isArray(measurementsCache)) {
-    for (let i = index; i < measurementsCache.length; i += 1) {
-      if (measurementsCache[i]?.index !== undefined) {
-        measurementsCache[i] = undefined
-      }
-    }
-  }
-
-  const pendingMin = internals.pendingMin
-  if (pendingMin === null || pendingMin === undefined || pendingMin > index) {
-    internals.pendingMin = index
-  }
-}
 
 // Memoized on (text, lineOffset, searchHighlightPlugin, components) -- all
 // either primitives or stable-until-actually-different references -- so a
@@ -462,12 +325,10 @@ export function usePreviewMarkdownRendering({
   isViewingAutoOpenItemsChapter,
   isActiveNoteEditable,
   applyProgrammaticEditorText,
-  previewBlockHeightsRef,
   noteSizeThresholdBlocks,
   forceCharacterScrollbarThumb,
   onPreviewCommitted,
   isPreviewSettleHolding,
-  previewMeasurementPendingRef,
 }: UsePreviewMarkdownRenderingOptions): UsePreviewMarkdownRenderingResult {
   // Mirrors `notes`/`activeNoteText` for navigateToInternalPreviewLink's
   // call-time-only reads below, so that callback's identity -- and in turn
@@ -805,10 +666,19 @@ export function usePreviewMarkdownRendering({
   // replaces its initial estimate mid-scroll -- both branches below must
   // stay correct when called repeatedly, with an updated offset, for what
   // is logically still the same scroll operation.
-  const scrollToFn = useCallback<VirtualizerOptions<HTMLDivElement, HTMLDivElement>['scrollToFn']>((offset, { adjustments = 0, behavior }, instance) => {
-    const scroller = instance.scrollElement
+  /**
+   * The one place this hook moves the continuous pane.
+   *
+   * Was react-virtual's `scrollToFn`, which received the scroller from the
+   * virtualizer; it now takes it directly, because there is no virtualizer to
+   * receive it from. Everything below the signature is unchanged, including
+   * the reason it exists at all: both branches are things the browser's own
+   * scrolling would do differently.
+   */
+  const scrollPreviewTo = useCallback((offset: number, behavior?: 'auto' | 'smooth') => {
+    const scroller = previewScrollRef.current
     if (!scroller) return
-    const target = offset + adjustments
+    const target = offset
 
     if (behavior === 'smooth') {
       // This app's own curve-based motion (see NonQuantizedSmoothScroll.ts),
@@ -842,53 +712,9 @@ export function usePreviewMarkdownRendering({
     scroller.style.scrollBehavior = 'auto'
     scroller.scrollTop = target
     scroller.style.scrollBehavior = previousScrollBehavior
-  }, [])
+  }, [previewScrollRef])
 
-  /** See the `overscan` option below. Latched once, so toggling needs a reload. */
-  const [mountAllBlocks] = useState(() => {
-    if (typeof window === 'undefined') return false
-    try {
-      return window.localStorage.getItem('thockdown:debug-mount-all') === '1'
-    } catch {
-      return false
-    }
-  })
 
-  const virtualizer = useVirtualizer({
-    count: previewBlocks.length,
-    getScrollElement: () => previewScrollRef.current,
-    // Only ever asked about a CONTINUOUS document: a chunked one is windowed
-    // (editorSection/previewWindow.ts) and never reaches this virtualizer at
-    // all. So this covers the moment between the first commit and the survey
-    // measuring each block for real -- lines x line height, known as soon as
-    // the text and typography are, and short only by the block margins it does
-    // not model. The flat guess below is the last resort, for the one commit
-    // before the probe has been read.
-    estimateSize: (index) => {
-      const byLines = lineHeightEstimatesRef.current
-      const estimated = byLines && index < byLines.length ? byLines[index] : 0
-      return estimated > 0 ? estimated : PREVIEW_BLOCK_ESTIMATED_HEIGHT_PX
-    },
-    // An overscan of "the whole document" mounts every block, which is the
-    // experiment `thockdown:debug-mount-all` exists to run: it isolates DOM
-    // SIZE from everything else, leaving the geometry model, the offsets and
-    // the measurement path exactly as they are. That matters because the
-    // question it answers -- can the continuous path stop virtualizing, and
-    // take the survey, the estimates and the progress bar with it -- is
-    // really a question about how much mounted markdown this pane can carry
-    // while still scrolling smoothly, and nothing else.
-    //
-    // Latched at mount rather than read live, so a run cannot change shape
-    // half way through; toggling it needs a reload, which a clean before/after
-    // comparison wants anyway.
-    overscan: mountAllBlocks ? previewBlocks.length : PREVIEW_BLOCK_OVERSCAN,
-    scrollToFn,
-  })
-
-  // readLineMetrics is defined further down (it depends on refs declared
-  // between here and there), so it is reached through a ref rather than
-  // moved -- a direct reference is a temporal dead zone error.
-  const readLineMetricsRef = useRef<(() => { lineHeightPx: number } | null) | null>(null)
 
   // The windowed preview is created further down (it needs refs declared
   // between here and there), so callers up here reach it through a ref -- the
@@ -913,52 +739,13 @@ export function usePreviewMarkdownRendering({
       return true
     }
 
-    // Ask for the line estimates BEFORE asking for an offset.
-    //
-    // `estimateSize` has three tiers -- the fitted model, lines x line
-    // height, and a flat per-block guess as a last resort -- and the offset
-    // this scroll lands on is only as good as the tier in force when it is
-    // computed. Toggling INTO render view is precisely the moment the top two
-    // are empty: the probe those estimates are measured from has only just
-    // mounted. So the flat guess answered, and it is not close. Measured
-    // entering render view on a 200k-character note, aimed at block 47:
-    // 47 blocks x 56px flat = 2632px, and the pane duly landed at 2607px --
-    // 8% of a document the reader was 45% through. Every symptom of the
-    // mode-toggle round trip followed from that one number.
-    //
-    // readLineMetrics populates the per-block estimates as a side effect and
-    // costs one pass over blocks it has already cached, so this is cheap. If
-    // the probe is not measurable yet it answers null, and refusing to scroll
-    // on a guess is the point: callers retry, and one frame later the answer
-    // is real.
-    if (!readLineMetricsRef.current?.()) return false
-
-    // Populating the estimates is not enough on its own: react-virtual has
-    // already cached the measurements it computed from whatever `estimateSize`
-    // said at the time, and improving what that function returns does not
-    // invalidate that cache. `measure()` is what makes it ask again.
-    //
-    // ONLY WHILE THE SURVEY IS STILL RUNNING, though, and this guard is the
-    // whole fix for a defect that had been live on every note under 50,000
-    // characters. `measure()` clears the SIZE cache -- every height the survey
-    // measured for real, not just the estimate-derived entries this wanted to
-    // refresh. The restore path retries across frames, so it reliably landed
-    // AFTER the survey finished: 166 blocks measured and committed correctly
-    // ([0->30, 1->43, 2->43, 3->43]), then wiped one frame later, leaving the
-    // pane on `countWrappedLines` estimates for the rest of the session. Those
-    // placed one-line paragraphs 76.8px apart against a true 43px, so every
-    // gap in the document was ~33.6px too wide.
-    //
-    // It hid behind the chunked path for as long as that existed: a chunked
-    // document's heights came from `estimateSize` (the fitted model), which
-    // `measure()` does not touch, so only the continuous path ever lost
-    // anything -- and the continuous path is the common case.
-    //
-    // Once the survey is done there is nothing left for a re-ask to improve:
-    // measured beats estimated, always.
-    if (!prewarmDoneRef.current) virtualizer.measure()
-
-    virtualizer.scrollToIndex(index, { align: opts?.align ?? 'start', behavior: opts?.behavior })
+    // Continuous: every block is mounted, so the block IS in the DOM and its
+    // offset is a fact rather than a projection. One read, one write, no
+    // retry -- the same shape the windowed branch above has always had.
+    const measurement = continuousMeasurementsRef.current.find((entry) => entry.index === index)
+    const scroller = previewScrollRef.current
+    if (!measurement || !scroller) return false
+    scrollPreviewTo(measurement.start, opts?.behavior === 'smooth' ? 'smooth' : 'auto')
     return true
   // blockCharOffsetsRef is deliberately absent from the deps: it is declared
   // further down the file, so naming it here would be a temporal dead zone
@@ -966,7 +753,7 @@ export function usePreviewMarkdownRendering({
   // time. exhaustive-deps exempts refs, so this needs no suppression -- an
   // eslint-disable that sat here was reported as unused by the project's own
   // --report-unused-disable-directives lint run.
-  }, [virtualizer])
+  }, [scrollPreviewTo, previewScrollRef])
 
   // See UsePreviewMarkdownRenderingOptions.previewScrollToSourceLineRef --
   // useEditorSectionMount's scroll-restore effect calls this via the ref, at
@@ -1010,7 +797,8 @@ export function usePreviewMarkdownRendering({
           // normally already been restored straight onto this block anyway
           // (activateNote's overrideSourceAnchorLine), so this resolves to no
           // movement at all rather than a travel across the document.
-          virtualizer.scrollToIndex(index, { align, behavior: instant ? 'auto' : 'smooth' })
+          const measurement = continuousMeasurementsRef.current.find((entry) => entry.index === index)
+          if (measurement) scrollPreviewTo(measurement.start, instant ? 'auto' : 'smooth')
         }
       }
 
@@ -1020,19 +808,14 @@ export function usePreviewMarkdownRendering({
       // is a curve animation that recomputes scrollTop from its own captured
       // start/target on every frame -- so correcting while it's still in
       // flight is erased on the animation's next frame, and it lands on the
-      // *estimated* block offset it planned for instead of on the element.
-      // That estimate is `estimateSize` x block count for anything the
-      // virtualizer hasn't measured yet, i.e. arbitrarily wrong on a large
-      // document, which is exactly what made anchor and TOC links land in
-      // the wrong place -- worst of all *when the element was found*, since
-      // that is the case whose correction got thrown away. Waiting for the
+      // block offset it planned for instead of on the element. Waiting for the
       // travel to settle is not a failed attempt, so it doesn't consume the
       // retry budget either; only a genuinely missing element does.
       const scroller = previewScrollRef.current
       const isTravelling = scroller !== null && isNonQuantizedSmoothScrollActive(scroller)
 
       if (target && !isTravelling) {
-        // Instant, not smooth -- the virtualizer scroll above already did
+        // Instant, not smooth -- the travel above already did
         // the (smooth) traveling; this is just a small, exact centering
         // correction within the target's own block, not a second hop.
         target.scrollIntoView({ block: align, inline: 'nearest' })
@@ -1067,7 +850,7 @@ export function usePreviewMarkdownRendering({
     } else {
       attemptScroll(30)
     }
-  }, [virtualizer, previewScrollRef])
+  }, [scrollPreviewTo, previewScrollRef])
 
   // Scrolls to a manual `[Anchor Text](#anchor-id)` definition, rendered as
   // an inert `.note-anchor-marker` span carrying the id verbatim.
@@ -1367,200 +1150,12 @@ export function usePreviewMarkdownRendering({
   // ---------------------------------------------------------------------
   const spacerRef = useRef<HTMLDivElement | null>(null)
   const [spacerReady, setSpacerReady] = useState(false)
-  const prewarmHostRef = useRef<HTMLDivElement | null>(null)
-  const prewarmProbeRef = useRef<HTMLDivElement | null>(null)
   const charRulerRef = useRef<HTMLDivElement | null>(null)
-  const [probeReady, setProbeReady] = useState(false)
-  const [prewarmBatch, setPrewarmBatch] = useState<readonly number[]>([])
-  const prewarmedRef = useRef<Set<number>>(new Set())
-  const prewarmBufferRef = useRef<Map<number, number>>(new Map())
-  const prewarmBatchSizeRef = useRef(PREVIEW_PREWARM_INITIAL_BATCH)
-  const prewarmStartedAtRef = useRef(0)
-  const prewarmScheduleRef = useRef<number | null>(null)
-  const prewarmDoneRef = useRef(false)
-  const lastPreviewScrollAtRef = useRef(0)
-  const prewarmBatchRef = useRef<readonly number[]>([])
-  const prewarmWaitMsRef = useRef(0)
-  const minSliceMsRef = useRef(Number.POSITIVE_INFINITY)
-  // One mode. A continuous document is measured outright; a chunked one is
-  // windowed and never surveyed at all, so there is nothing left to fit or to
-  // fall back to.
-  const surveyModeRef = useRef<'idle' | 'calibrating'>('idle')
-  const calibrationQueueRef = useRef<number[]>([])
-  const calibrationTotalRef = useRef(0)
-  const surveyStatsRef = useRef({ windowStartedAt: 0, blocks: 0, slices: 0, sliceMs: 0, maxSliceMs: 0, waitMs: 0, maxWaitMs: 0, yields: 0 })
-  // Completed surveys, keyed by the geometry they were taken at. Returning to
-  // a geometry already surveyed -- toggling the sidebar back, undoing a font
-  // size, dragging a split divider back -- then costs nothing at all instead
-  // of a whole re-survey. Cleared whenever the block list changes, since the
-  // heights are only valid for the text they were measured from.
-  const surveyByGeometryRef = useRef<Map<string, Map<number, number>>>(new Map())
-  // Reported out so the UI can be honest about the wait -- see the discovery
-  // bar in SectionEditorArea. Updated only when the whole integer percent
-  // moves, so a thousand-block survey costs at most a hundred re-renders of
-  // the section rather than one per batch.
-  const [previewDiscovery, setPreviewDiscovery] = useState<PreviewDiscoveryState>({ isSurveying: false, percent: 0, measured: 0, total: 0 })
-  const discoveryPercentRef = useRef(-1)
-  const discoveryStartedAtRef = useRef(0)
-  const discoveryShownAtRef = useRef(0)
-  const discoveryHideTimerRef = useRef<number | null>(null)
-
-  const reportDiscovery = useCallback((measured: number, total: number, isSurveying: boolean) => {
-    const percent = total > 0 ? Math.min(100, Math.floor((measured / total) * 100)) : 0
-    if (!isSurveying) discoveryStartedAtRef.current = 0
-    else if (discoveryStartedAtRef.current === 0) discoveryStartedAtRef.current = performance.now()
-
-    // Held back for a moment before it appears at all, so a sweep that is over
-    // quickly is never explained to anybody.
-    //
-    // The delay alone cannot be the whole answer, though, and tuning it harder
-    // will not make it one. Whatever the threshold, there is always some
-    // machine on which the sweep finishes just after it -- and on that machine
-    // the bar appears and vanishes, which is precisely the glitch the delay
-    // exists to prevent. Measured here at 1200ms: a fast machine showed the
-    // chunked sweep's bar for 131ms.
-    //
-    // So once it has appeared it stays for a minimum, at 100%. Holding a
-    // finished bar for a fraction of a second reads as completion; blinking
-    // reads as a fault.
-    const now = performance.now()
-    const wantsVisible = isSurveying
-      && now - discoveryStartedAtRef.current >= PREVIEW_DISCOVERY_BAR_DELAY_MS
-
-    if (wantsVisible && discoveryShownAtRef.current === 0) discoveryShownAtRef.current = now
-
-    const heldForMs = discoveryShownAtRef.current > 0 ? now - discoveryShownAtRef.current : 0
-    const owesTimeMs = discoveryShownAtRef.current > 0
-      ? PREVIEW_DISCOVERY_BAR_MIN_VISIBLE_MS - heldForMs
-      : 0
-
-    if (!wantsVisible && owesTimeMs > 0) {
-      if (discoveryHideTimerRef.current === null) {
-        discoveryHideTimerRef.current = window.setTimeout(() => {
-          discoveryHideTimerRef.current = null
-          discoveryShownAtRef.current = 0
-          discoveryPercentRef.current = -1
-          setPreviewDiscovery({ isSurveying: false, percent: 100, measured: total, total })
-        }, owesTimeMs)
-      }
-      setPreviewDiscovery({ isSurveying: true, percent: 100, measured: total, total })
-      return
-    }
-
-    if (!wantsVisible) discoveryShownAtRef.current = 0
-    if (wantsVisible && percent === discoveryPercentRef.current) return
-    discoveryPercentRef.current = wantsVisible ? percent : -1
-    setPreviewDiscovery({ isSurveying: wantsVisible, percent, measured, total })
-  }, [])
-
-  const cancelPrewarmSchedule = useCallback(() => {
-    if (prewarmScheduleRef.current === null) return
-    const cancel = window.cancelIdleCallback ?? window.clearTimeout
-    cancel(prewarmScheduleRef.current)
-    prewarmScheduleRef.current = null
-  }, [])
-
-  // requestIdleCallback is the right primitive here -- the whole point is to
-  // use time the main thread isn't using. It is NOT universally available
-  // (Safari shipped it only recently), so fall back to a timeout; the slice
-  // budget below bounds the damage either way.
-  const schedulePrewarmSlice = useCallback((run: () => void) => {
-    cancelPrewarmSchedule()
-    const scheduledAt = performance.now()
-    const start = () => {
-      prewarmWaitMsRef.current = performance.now() - scheduledAt
-      run()
-    }
-    if (typeof window.requestIdleCallback === 'function') {
-      prewarmScheduleRef.current = window.requestIdleCallback(start, { timeout: PREVIEW_PREWARM_IDLE_TIMEOUT_MS })
-      return
-    }
-    prewarmScheduleRef.current = window.setTimeout(start, 16)
-  }, [cancelPrewarmSchedule])
-
-  const readGeometrySignature = useCallback(() => {
-    const probe = prewarmProbeRef.current
-    return probe ? `${probe.offsetWidth}x${probe.offsetHeight}` : ''
-  }, [])
-
-  /**
-   * Applies a previously completed survey for this exact geometry, if there is
-   * one. Returns whether it did.
-   *
-   * There is no way to *derive* the new heights from the old ones: width, font
-   * size, letter spacing and padding all change where text WRAPS, so a block's
-   * line count changes, and a stored height carries no record of its line
-   * count. Only a pure line-height change would be a linear transform, and
-   * only if the fixed (margin/padding) part had been stored separately. What
-   * can be done is remember: geometries repeat far more often than they are
-   * novel.
-   */
-  const applyCachedSurvey = useCallback((signature: string) => {
-    const cached = signature ? surveyByGeometryRef.current.get(signature) : undefined
-    if (!cached || cached.size === 0) return false
-
-    // Refresh its recency -- this Map is in insertion order, which is what the
-    // eviction below relies on.
-    surveyByGeometryRef.current.delete(signature)
-    surveyByGeometryRef.current.set(signature, cached)
-
-    for (const index of [...cached.keys()].sort((a, b) => a - b)) {
-      virtualizer.resizeItem(index, cached.get(index)!)
-      prewarmedRef.current.add(index)
-    }
-    return true
-  }, [virtualizer])
-
-  const rememberCompletedSurvey = useCallback((signature: string, sizes: Map<number, number>) => {
-    if (!signature || sizes.size === 0) return
-    const store = surveyByGeometryRef.current
-    store.delete(signature)
-    store.set(signature, sizes)
-    while (store.size > PREVIEW_PREWARM_GEOMETRY_CACHE_SIZE) {
-      const oldest = store.keys().next().value
-      if (oldest === undefined) break
-      store.delete(oldest)
-    }
-  }, [])
 
   // ---------------------------------------------------------------------
   // Position in character space -- see previewCharPosition.ts.
   // ---------------------------------------------------------------------
   const blockCharOffsetsRef = useRef<Float64Array | null>(null)
-  const lineMetricsCacheRef = useRef<{
-    blocks: readonly { text: string }[]
-    charsPerLine: number
-  } | null>(null)
-  /**
-   * Per-block heights derived from line counts alone -- no fitting, no
-   * measuring, available the moment the text and the typography are known.
-   *
-   * This is what `estimateSize` uses before the fitted model lands.
-   *
-   * MEASURED, and much worse than it once looked. This was recorded as
-   * running "~28% LONG", and described as a roughly constant SCALE factor --
-   * wrong in a predictable direction, one constant away from being right,
-   * which was the stated reason for keeping it. Re-measured across four
-   * documents against the settled truth:
-   *
-   *   48k chars, 667 small blocks    +29%
-   *   45k chars, 150 normal blocks   -35%
-   *   400k chars, 768 blocks         +94%
-   *   1.5M chars                    +102%
-   *
-   * Wrong in both directions, by a factor that swings with the shape of the
-   * document. There is no constant to divide out. What it is good for is
-   * exactly what a first commit needs and no more: a per-block number that at
-   * least varies with the content, so the virtualizer has somewhere to put
-   * blocks before anything has been measured.
-   *
-   * The error is the two things this deliberately does not model: per-block
-   * margins, and a characters-per-line derived from the probe that under-reads
-   * the real wrap width. Both are what the sweep learns within the second.
-   * This is why the sweep is not optional on either path -- see the
-   * measurement in that commit for the full comparison.
-   */
-  const lineHeightEstimatesRef = useRef<Float64Array | null>(null)
   useLayoutEffect(() => {
     blockCharOffsetsRef.current = buildBlockCharOffsets(previewBlocks)
   }, [previewBlocks])
@@ -1613,18 +1208,6 @@ export function usePreviewMarkdownRendering({
       aria-hidden="true"
       style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 0, visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }}
     >
-      {/* Deliberately long enough to wrap at any sane width -- see the copy of
-          this probe on the virtualized path for why it must never be shortened
-          to a single line. */}
-      <div
-        ref={(node) => { prewarmProbeRef.current = node; if (node) setProbeReady(true) }}
-        data-prewarm-probe=""
-        style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}
-      >
-        The quick brown fox jumps over the lazy dog, and keeps on jumping for
-        long enough that this sentence has to wrap onto a second line at any
-        reasonable width, which is the entire point of it being this long.
-      </div>
       {/* The character ruler.
           A fixed string that is not allowed to wrap, so its width divided by
           its length is the average advance of a character at this font, size
@@ -1676,11 +1259,74 @@ export function usePreviewMarkdownRendering({
    * calling it here is a cache read on all but the first call after an
    * invalidation), which is why it is called first and its result discarded.
    */
+  /**
+   * The continuous pane's block geometry, read from the DOM.
+   *
+   * A continuous document mounts every block, so its geometry is not modelled
+   * anywhere -- it is simply what the browser laid out, and this reads it.
+   * That is the whole reason the estimate/survey apparatus is gone: there is
+   * no block whose height has to be guessed, because there is no block that
+   * is not there.
+   *
+   * Deliberately the same shape and the same offsetParent correction the
+   * windowed pane uses (usePreviewWindow's rebuildMeasurements): markdown.css
+   * gives every direct child of the scroller `position: relative`, so this
+   * container is its children's offsetParent and their offsetTop is measured
+   * from IT, short by the scroller's own top padding -- while `scrollTop` is
+   * measured from the padding edge. Without the correction every landing sits
+   * one --preview-edge-padding too far down the block it aimed at.
+   *
+   * Cached rather than read per call: `readCharViewport` runs on scroll, and
+   * a forced layout per scroll event is exactly the cost this pane cannot
+   * afford. Rebuilt when the blocks change or the container resizes, which is
+   * when it can actually be wrong.
+   */
+  const continuousMeasurementsRef = useRef<readonly PreviewBlockMeasurement[]>([])
+  const rebuildContinuousMeasurements = useCallback(() => {
+    const container = spacerRef.current
+    if (!container) {
+      continuousMeasurementsRef.current = []
+      return
+    }
+    const base = container.offsetParent !== null ? container.offsetTop : 0
+    const nodes = container.querySelectorAll<HTMLElement>(':scope > [data-index]')
+    const next: PreviewBlockMeasurement[] = []
+    nodes.forEach((node) => {
+      const index = Number(node.getAttribute('data-index'))
+      if (!Number.isFinite(index)) return
+      next.push({
+        index,
+        start: (node.offsetParent === container ? base : 0) + node.offsetTop,
+        size: node.offsetHeight,
+      })
+    })
+    continuousMeasurementsRef.current = next
+  }, [])
+
   const readBlockMeasurements = useCallback(() => {
     if (isWindowed) return previewWindow.api.readMeasurements()
-    virtualizer.getVirtualItems()
-    return virtualizer.measurementsCache
-  }, [virtualizer, isWindowed, previewWindow.api])
+    return continuousMeasurementsRef.current
+  }, [isWindowed, previewWindow.api])
+
+  /**
+   * Rebuilt when the layout can actually have changed: a different block
+   * list, or the container's own box moving under a resize or a typography
+   * change. In the layout phase, before paint, so nothing ever reads the
+   * previous document's geometry against this document's DOM.
+   */
+  useLayoutEffect(() => {
+    if (isWindowed) return undefined
+    rebuildContinuousMeasurements()
+
+    const container = spacerRef.current
+    if (!container || typeof ResizeObserver === 'undefined') return undefined
+    // On the container rather than the scroller: a font or spacing change
+    // re-wraps the text and moves every block without the scroller's own box
+    // changing at all, and that is the case a scroller-width observer misses.
+    const observer = new ResizeObserver(() => rebuildContinuousMeasurements())
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [isWindowed, previewBlocks, rebuildContinuousMeasurements, spacerReady])
 
   const readCharViewport = useCallback((): PreviewCharViewport | null => {
     if (isWindowed) return previewWindow.api.readCharViewport()
@@ -1702,11 +1348,11 @@ export function usePreviewMarkdownRendering({
       charOffset,
     })
     if (offset === null) return
-    // Through the virtualizer rather than straight onto scrollTop, so this
-    // goes via the same scrollToFn every other programmatic scroll in this
-    // hook uses (instant snap, native smooth-scroll suppressed).
-    virtualizer.scrollToOffset(offset)
-  }, [virtualizer, readBlockMeasurements, isWindowed, previewWindow.api])
+    // Through scrollPreviewTo rather than straight onto scrollTop, so this
+    // gets the same instant snap with native smooth-scroll suppressed that
+    // every other programmatic scroll in this hook does.
+    scrollPreviewTo(offset)
+  }, [scrollPreviewTo, readBlockMeasurements, isWindowed, previewWindow.api])
 
   /**
    * Travels to a character position, re-aiming as the document's geometry
@@ -1744,44 +1390,6 @@ export function usePreviewMarkdownRendering({
    * Cached against the block list's own identity, which changes only when the
    * text does.
    */
-  const readLineMetrics = useCallback(() => {
-    const probe = prewarmProbeRef.current
-    if (!probe) return null
-
-    const style = window.getComputedStyle(probe)
-    const lineHeightPx = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.5)
-    if (!(lineHeightPx > 0)) return null
-
-    const probeText = (probe.textContent ?? '').replace(/\s+/g, ' ').trim()
-    const probeLines = Math.max(1, Math.round(probe.offsetHeight / lineHeightPx))
-    const charsPerLine = probeText.length > 0 ? Math.max(1, probeText.length / probeLines) : 0
-    if (!(charsPerLine > 0)) return null
-
-    const blocks = previewBlocksRef.current
-    const cached = lineMetricsCacheRef.current
-    if (cached && cached.blocks === blocks && cached.charsPerLine === charsPerLine) {
-      return { lineHeightPx }
-    }
-
-    // One pass, two consumers: the document's length in lines (the thumb) and
-    // each block's height in pixels (the virtualizer's estimates). Splitting
-    // these into two passes would mean scanning the document twice for the
-    // same information.
-    const perBlock = new Float64Array(blocks.length)
-    for (let index = 0; index < blocks.length; index += 1) {
-      perBlock[index] = countWrappedLines(blocks[index].text, charsPerLine) * lineHeightPx
-    }
-    lineMetricsCacheRef.current = { blocks, charsPerLine }
-    lineHeightEstimatesRef.current = perBlock
-    return { lineHeightPx }
-  }, [previewBlocksRef])
-
-  // Published for scrollPreviewToSourceLine, which needs the per-block line
-  // estimates populated before it asks the virtualizer for an offset and is
-  // declared above this.
-  useLayoutEffect(() => {
-    readLineMetricsRef.current = readLineMetrics
-  }, [readLineMetrics])
 
   /**
    * Travels to a character position. Plans once; never re-aims.
@@ -1998,23 +1606,12 @@ export function usePreviewMarkdownRendering({
       const charOffset = charForSourceLine(sourceLine)
       if (!scroller || charOffset === null) return null
 
-      // The same preparation scrollPreviewToSourceLine documents at length,
-      // and for the same reason: every offset read below is only as good as
-      // the estimate tier in force when it is read, and entering render view
-      // is exactly the moment the good tiers are empty. Populate them, make
-      // the virtualizer ask again, and refuse to answer on a guess -- callers
-      // retry, and one frame later the answer is real.
-      // Continuous only. The estimates this populates are what the virtualizer
-      // reads, and a windowed pane resolves the line through its own measured
-      // blocks instead -- so on that path this was a full-document scan whose
-      // result was discarded, run every time a search hit was aimed at.
-      if (!isWindowed) {
-        if (!readLineMetricsRef.current?.()) return null
-        // Same guard, same reason as scrollPreviewToSourceLine's: re-asking for
-        // estimates is an improvement before the survey lands and pure loss
-        // after it.
-        if (!prewarmDoneRef.current) virtualizer.measure()
-      }
+      // Nothing to prepare any more. This used to populate estimates and make
+      // the virtualizer re-ask for them, because the offsets read below were
+      // only as good as whichever estimate tier happened to be in force --
+      // and entering render view was precisely the moment the good tiers were
+      // empty. A continuous pane now mounts every block, so the offsets are
+      // read from the DOM and are simply true on the first attempt.
 
       // Both strategies back the target off by the same fraction of a screen,
       // each in its own units -- the whole point of doing it here rather than
@@ -2138,10 +1735,12 @@ export function usePreviewMarkdownRendering({
 
       ratioForScrollOffsetPx,
 
-      // Chunked ratios are line-based and final from the first answer.
-      // Continuous ones are read off a scrollHeight that is only true once
-      // the prewarm has measured every block and committed the real heights.
-      isThumbRatioSettled: () => (isContinuous() ? prewarmDoneRef.current : true),
+      // Both strategies are final from their first answer now: a chunked
+      // ratio is line-based, and a continuous one is read off a scrollHeight
+      // that is true the moment the pane has laid out, because every block
+      // that contributes to it is mounted. Kept on the interface because the
+      // scrollbar still asks, and the honest answer is "yes, always".
+      isThumbRatioSettled: () => true,
 
       // Only a windowed pane has an end that is not the document's, and only a
       // windowed pane's scrollTop stops counting at a window boundary.
@@ -2154,7 +1753,7 @@ export function usePreviewMarkdownRendering({
         if (!scroller) return
         if (isContinuous()) {
           const maxScrollTopPx = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-          virtualizer.scrollToOffset(ratio * maxScrollTopPx)
+          scrollPreviewTo(ratio * maxScrollTopPx)
           return
         }
         const charTarget = resolveChunkedTarget(ratio)
@@ -2178,7 +1777,7 @@ export function usePreviewMarkdownRendering({
     readCharViewport,
     scrollToChar,
     smoothScrollToChar,
-    virtualizer,
+    scrollPreviewTo,
     previewBlocksRef,
     isWindowed,
   ])
@@ -2189,669 +1788,73 @@ export function usePreviewMarkdownRendering({
     return () => { previewDocumentPositionRef.current = null }
   }, [previewDocumentPositionRef, documentPosition])
 
-  /**
-   * Hands every buffered height to the virtualizer at once, when the survey is
-   * complete.
-   *
-   * One commit, not a stream of them: this is the difference between a
-   * scrollbar that crawls for the whole survey and one that sits still and
-   * then corrects once. react-virtual compensates scrollTop per item for
-   * anything above the fold, so the reader's content stays where it is -- what
-   * moves is the thumb, once, which is honest and is what the discovery
-   * progress bar has been explaining while this ran.
-   */
-  const commitPrewarmedSizes = useCallback(() => {
-    const buffered = prewarmBufferRef.current
-    if (buffered.size === 0) return
-    // Into the settle trace's buffer, not a separate one: this commit is the
-    // prime suspect whenever the render view visibly reflows AFTER the gate
-    // revealed it, and the two events are only legible together -- a reflow
-    // line and a commit line in the same frame answers the question outright,
-    // where two buffers would leave it to be reconstructed by eye. See
-    // previewSettleTrace.ts.
-    traceSettle(() => `survey commit blocks=${buffered.size}`)
-    prewarmBufferRef.current = new Map()
-    // Only a COMPLETED survey is worth remembering; a partial one (geometry
-    // changed mid-sweep) would be a cache entry that silently under-describes
-    // the document.
-    rememberCompletedSurvey(readGeometrySignature(), new Map(buffered))
-
-    // Materialize the measurements before handing heights back. `resizeItem`
-    // reads react-virtual's measurements array to find the entry it is
-    // replacing and returns early when there is none, and that array is only
-    // rebuilt when something reads it. Cheap (it is memoized, so this is a
-    // cache read on all but the first call after an invalidation) and it
-    // removes a way for a whole survey to land on nothing.
-    //
-    // Through getVirtualItems rather than getMeasurements, which react-virtual
-    // keeps private; reading the items recomputes the measurements the same way.
-    virtualizer.getVirtualItems()
-
-    // Ascending, so react-virtual's own above-the-fold compensation sees each
-    // item in document order rather than jumping around the offset map.
-    for (const index of [...buffered.keys()].sort((a, b) => a - b)) {
-      virtualizer.resizeItem(index, buffered.get(index)!)
-    }
-  }, [virtualizer, rememberCompletedSurvey, readGeometrySignature])
-
-  const queueNextPrewarmBatch = useCallback(() => {
-    schedulePrewarmSlice(() => {
-      const blockCount = previewBlocksRef.current.length
-      if (blockCount === 0 || prewarmDoneRef.current) return
-
-      // Never compete with the reader. Two separate cases, both measured:
-      // an animated scroll in flight (the app's own travel), and the reader
-      // simply scrolling by hand -- requestIdleCallback's timeout means a
-      // batch runs eventually whether the thread is idle or not, so without
-      // this the survey works straight through a scroll. At 6x CPU throttle
-      // that cost ~36% median frame time while reading. The survey has no
-      // deadline; the reader does.
-      const scroller = previewScrollRef.current
-      const travelling = scroller !== null && isNonQuantizedSmoothScrollActive(scroller)
-      // A travel animation fires scroll events of its own, so "the reader
-      // scrolled recently" only means anything while nothing is travelling.
-      const readerScrolling = !travelling
-        && performance.now() - lastPreviewScrollAtRef.current < PREVIEW_PREWARM_SCROLL_QUIET_MS
-      // A travel animation is waiting on the sweep rather than competing with
-      // it: its destination is a character position, and until the heights
-      // land the pixel that maps to is a flat-estimate guess. Yielding to it
-      // would keep the journey pointed at the wrong place for its whole
-      // duration -- measured at 18s on a large note. The reader's own
-      // scrolling still wins.
-      const shouldYieldToScrolling = readerScrolling
-      if (shouldYieldToScrolling) {
-        // Yielding means unmounting, not just declining to start a new batch.
-        // The previous batch's blocks are real rendered markdown; left in the
-        // DOM they keep costing layout on every frame of the reader's scroll.
-        // Measured: without this the host was present on 253 of 253 frames
-        // during a continuous scroll, i.e. the "pause" paused nothing the
-        // reader could feel.
-        if (prewarmBatchRef.current.length > 0) {
-          // A batch unmounted before it was measured goes back in the queue --
-          // silently dropping it would shrink the sample the model is fitted
-          // from, or leave a small document with blocks nobody measured, every
-          // time the reader scrolls.
-          calibrationQueueRef.current = [...prewarmBatchRef.current, ...calibrationQueueRef.current]
-          prewarmBatchRef.current = []
-          setPrewarmBatch([])
-        }
-        surveyStatsRef.current.yields += 1
-        queueNextPrewarmBatch()
-        return
-      }
-
-      // One mode left: measure the planned targets and stop. The document is
-      // either small enough to have every block on that list, or large enough
-      // that a fitted model is the last word on it -- there is no third case
-      // where an untrusted model sends the whole document to be surveyed
-      // block by block, so there is no rolling "what have we not measured
-      // yet" scan any more either.
-      const queue = calibrationQueueRef.current
-      const take = Math.max(1, Math.min(prewarmBatchSizeRef.current, queue.length))
-      const batch = queue.slice(0, take)
-      calibrationQueueRef.current = queue.slice(take)
-      if (batch.length === 0) return
-      prewarmStartedAtRef.current = performance.now()
-      prewarmBatchRef.current = batch
-      setPrewarmBatch(batch)
-    })
-  }, [schedulePrewarmSlice, previewBlocksRef, previewScrollRef])
-
-  /**
-   * Fits the model from the calibration sample and decides whether to use it.
-   *
-   * The decision is the honest part of this feature. A document whose heights
-   * really are a function of its text gets a model and an accurate scrollbar
-   * within a second of opening; one whose heights are not -- images, embeds,
-   * anything sized from outside the markdown -- gets measured block by block
-   * exactly as it used to be. What it must never do is hold a confident wrong
-   * number, which is worse than the flat estimate this replaced: that one at
-   * least corrected itself as the reader scrolled.
-   */
-  const finishCalibration = useCallback(() => {
-    const blockCount = previewBlocksRef.current.length
-    // Unmount the last calibration batch. Without this the measurement host
-    // keeps ~90 fully rendered markdown blocks in the DOM for the rest of the
-    // session, costing layout on every frame the reader scrolls -- the exact
-    // cost the scroll-yield path exists to avoid. Found by instrumenting:
-    // `[data-prewarm-index]` was still in the document minutes later.
-    prewarmBatchRef.current = []
-    setPrewarmBatch([])
-
-    // One case left. Only a CONTINUOUS document is ever surveyed now -- a
-    // chunked one is windowed and has no whole-document height to be right
-    // about -- so every target on the list was measured for real and there is
-    // nothing to model. Handing the real heights over is what makes
-    // `scrollHeight` a true total rather than a running sum of estimates,
-    // which is the whole premise the continuous strategy rests on.
-    commitPrewarmedSizes()
-    surveyModeRef.current = 'idle'
-    prewarmDoneRef.current = true
-    prewarmBufferRef.current = new Map()
-    reportDiscovery(blockCount, blockCount, false)
-    if (isPreviewSurveyDebugOn()) {
-      console.log('[preview-survey] measured outright', { blocks: blockCount })
-    }
-  }, [previewBlocksRef, reportDiscovery, commitPrewarmedSizes])
-
-  // Measure whatever the host just rendered and hand the real heights to the
-  // virtualizer. useLayoutEffect so this reads geometry in the same frame the
-  // batch was committed, before the browser paints -- the host is hidden, so
-  // there is nothing to see, but measuring after a paint would let an
-  // interleaved style change land between render and read.
-  useLayoutEffect(() => {
-    if (prewarmBatch.length === 0) return
-    const host = prewarmHostRef.current
-    if (!host) return
-
-    for (const index of prewarmBatch) {
-      const el = host.querySelector<HTMLElement>(`[data-prewarm-index="${index}"]`)
-      if (!el) continue
-      // Rounded, because react-virtual rounds: its own measureElement takes
-      // Math.round of the border box, so a block measured here at 68.78 and
-      // later re-measured on mount at 69 shifts everything below it by the
-      // difference. Individually invisible; across a document it is the total
-      // size drifting while the reader scrolls toward it, which is precisely
-      // what a measured document is supposed to be free of.
-      const height = Math.round(el.getBoundingClientRect().height)
-      prewarmedRef.current.add(index)
-      // BUFFERED, not applied. Handing each height to the virtualizer as it is
-      // measured is what made this feature miserable on slow hardware: every
-      // resizeItem changes the total size (the thumb crawls) and, for any block
-      // above the fold, compensates scrollTop (the text vibrates). Measured at
-      // 6x CPU throttle, parked mid-document with no input: 115 size changes
-      // and 96 scrollTop moves totalling 25,280px of drag over 12 seconds,
-      // against 1 change and 0 moves with the sweep disabled entirely. On a
-      // fast machine the same churn is over in ~1.3s and reads as a settle,
-      // which is exactly why it survived review here. See the single commit in
-      // commitPrewarmedSizes below.
-      // Zero included, deliberately. A block that renders to nothing at all
-      // -- the Open Items chapter's own `[open-items-group:...]` marker lines
-      // are rendered as null (PreviewMarkdown.tsx) -- really is 0px tall, and
-      // skipping it left the height model's guess (~60px) standing as a
-      // phantom gap above every group in that chapter. The measurement is
-      // taken from a real rendered block in a `visibility: hidden` host, so a
-      // zero here means "renders nothing", never "not laid out yet".
-      prewarmBufferRef.current.set(index, height)
-    }
-
-    // Progress is against the PLANNED TARGETS, not the document. On a large
-    // note that list is a hundred blocks and the whole job; reporting it as a
-    // fraction of eighteen thousand would show a bar that never leaves zero
-    // before vanishing. On a small one the two are the same list anyway.
-    //
-    // Counted by what was measured rather than by what was sampled: a block
-    // that renders to nothing is measured but contributes no sample, so
-    // counting samples would stall the bar short of the end on any document
-    // that has one.
-    reportDiscovery(prewarmedRef.current.size, calibrationTotalRef.current, true)
-
-    const sliceMs = performance.now() - prewarmStartedAtRef.current
-    if (isPreviewSurveyDebugOn()) {
-      const stats = surveyStatsRef.current
-      if (stats.windowStartedAt === 0) stats.windowStartedAt = performance.now()
-      stats.blocks += prewarmBatch.length
-      stats.slices += 1
-      stats.sliceMs += sliceMs
-      stats.maxSliceMs = Math.max(stats.maxSliceMs, sliceMs)
-      stats.waitMs += prewarmWaitMsRef.current
-      stats.maxWaitMs = Math.max(stats.maxWaitMs, prewarmWaitMsRef.current)
-      const windowMs = performance.now() - stats.windowStartedAt
-      if (windowMs >= 1000) {
-        const round = (value: number) => Math.round(value * 10) / 10
-        console.log('[preview-survey]', {
-          measured: prewarmedRef.current.size,
-          total: previewBlocksRef.current.length,
-          blocksPerSecond: Math.round((stats.blocks / windowMs) * 1000),
-          batch: Math.round(stats.blocks / stats.slices),
-          sliceMs: round(stats.sliceMs / stats.slices),
-          worstSliceMs: round(stats.maxSliceMs),
-          // How long a scheduled slice waited to run. Large here means the
-          // main thread never went idle, not that measuring is slow.
-          waitMs: round(stats.waitMs / stats.slices),
-          worstWaitMs: round(stats.maxWaitMs),
-          // Slices skipped because the reader was scrolling.
-          yields: stats.yields,
-        })
-        surveyStatsRef.current = { windowStartedAt: performance.now(), blocks: 0, slices: 0, sliceMs: 0, maxSliceMs: 0, waitMs: 0, maxWaitMs: 0, yields: 0 }
-      }
-    }
-
-    // The cheapest slice seen so far is mostly fixed cost (a React commit plus
-    // a forced layout of the whole preview), which is what the sizer needs in
-    // order to know how much of its budget is actually available for blocks.
-    minSliceMsRef.current = Math.min(minSliceMsRef.current, sliceMs)
-    prewarmBatchSizeRef.current = resolveNextPrewarmBatchSize(
-      prewarmBatch.length,
-      sliceMs,
-      PREVIEW_PREWARM_SLICE_BUDGET_MS,
-      minSliceMsRef.current,
-    )
-
-    if (calibrationQueueRef.current.length === 0) {
-      finishCalibration()
-      return
-    }
-    queueNextPrewarmBatch()
-  }, [prewarmBatch, virtualizer, queueNextPrewarmBatch, finishCalibration, reportDiscovery, previewBlocksRef])
-
-  const restartPrewarm = useCallback(() => {
-    prewarmedRef.current = new Set()
-    prewarmBufferRef.current = new Map()
-    prewarmDoneRef.current = false
-    prewarmBatchSizeRef.current = PREVIEW_PREWARM_INITIAL_BATCH
-    minSliceMsRef.current = Number.POSITIVE_INFINITY
-    prewarmBatchRef.current = []
-    setPrewarmBatch([])
-    discoveryPercentRef.current = -1
-    calibrationQueueRef.current = []
-    calibrationTotalRef.current = 0
-    surveyModeRef.current = 'idle'
-
-    const blocks = previewBlocksRef.current
-    const blockCount = blocks.length
-    const signature = readGeometrySignature()
-    // A chunked document is windowed (editorSection/previewWindow.ts): it has
-    // no whole-document height, so there is nothing here to survey. Everything
-    // downstream is reached from queueNextPrewarmBatch below, so stopping here
-    // stops all of it.
-    //
-    // Before the line estimates, deliberately. Those exist for `estimateSize`,
-    // which belongs to the virtualizer -- and a windowed pane does not use the
-    // virtualizer at all. Computing them here meant a full-document pass over
-    // every block on every note switch, on precisely the documents where that
-    // pass is most expensive, for a number nothing on this path would read.
-    if (isWindowed) {
-      prewarmDoneRef.current = true
-      reportDiscovery(blockCount, blockCount, false)
-      return
-    }
-
-    // Fills lineHeightEstimatesRef, so the virtualizer has a sane per-block
-    // height from the first commit rather than a flat guess.
-    readLineMetrics()
-
-    // A survey this note carried over from a previous session, restored from
-    // the database on the way in (shared/noteLifecycle.ts's
-    // PersistedPreviewBlockHeights). Folded into the in-memory cache rather
-    // than applied directly, so there is exactly one path that puts measured
-    // heights into the virtualizer and one place that decides they apply.
-    //
-    // Consumed ONCE -- cleared whether or not it was usable. It describes the
-    // document as it was loaded; the moment anything about that changes it is
-    // a claim about a document that no longer exists, and a stale height
-    // trusted here would never be corrected, because a cache hit is precisely
-    // what stops the survey from running and finding the truth.
-    const restored = previewBlockHeightsRef?.current?.pending ?? null
-    if (restored) {
-      if (previewBlockHeightsRef?.current) previewBlockHeightsRef.current.pending = null
-      // The geometry is re-checked HERE, against the pane as it is actually
-      // laid out now, rather than trusted from the stored blob: the reader
-      // may have changed font, spacing or window width since, and the text
-      // hash the caller matched says nothing about any of that.
-      if (restored.signature === signature && restored.heights.length === blockCount) {
-        const sizes = new Map<number, number>()
-        restored.heights.forEach((height, index) => { sizes.set(index, height) })
-        surveyByGeometryRef.current.set(signature, sizes)
-      }
-    }
-
-    // Same, for a small document that was measured outright and has been back
-    // to this geometry before. Only the continuous path ever fills this cache
-    // -- a chunked document is never measured end to end, so there is no
-    // survey of one to remember.
-    if (applyCachedSurvey(signature)) {
-      prewarmDoneRef.current = true
-      reportDiscovery(blockCount, blockCount, false)
-      return
-    }
-
-    if (blockCount === 0) {
-      prewarmDoneRef.current = true
-      reportDiscovery(0, 0, false)
-      return
-    }
-
-    // Below the threshold the document is small enough to measure outright,
-    // and measuring it is the whole point: it is what makes `scrollHeight` a
-    // real total rather than a running sum of estimates, which is what lets
-    // the scrollbar use the plain pixel identity and be exact
-    // (editor/documentPosition.ts). Every index, explicitly, rather than
-    // asking the sampler for "all of them" and trusting its proportional
-    // share-out to round in our favour.
-    const targets = Array.from({ length: blockCount }, (_, index) => index)
-    calibrationQueueRef.current = targets
-    calibrationTotalRef.current = targets.length
-    surveyModeRef.current = 'calibrating'
-    reportDiscovery(0, targets.length, true)
-    queueNextPrewarmBatch()
-  }, [queueNextPrewarmBatch, reportDiscovery, previewBlocksRef, applyCachedSurvey, readGeometrySignature, readLineMetrics, isWindowed, previewBlockHeightsRef])
-
-  // Start over whenever the cached heights could no longer be true.
-  //
-  // A new note (a new block list) is the obvious trigger. The subtle one is
-  // TYPOGRAPHY: preview font size, line height, letter spacing and edge padding
-  // all arrive as inline styles on the scroller, set by SectionEditorArea from
-  // the reader's own view settings. None of them changes this hook's inputs,
-  // and none of them changes the scroller's clientWidth either -- padding lives
-  // *inside* clientWidth -- so an earlier version of this effect that watched
-  // the scroller's width missed every one of them. Measured cost of that miss:
-  // after a font-size change, jumping to the bottom of the scrollbar landed
-  // 2,590px short; after a line-height change, 2,014px. Confidently wrong,
-  // which is worse than the flat estimate this feature replaced.
-  //
-  // Rather than enumerate the settings -- a list that would silently rot the
-  // first time a new one is added -- this watches a PROBE: a hidden element
-  // inside the spacer holding fixed text, inheriting exactly what the real
-  // blocks inherit. Anything that would re-wrap or re-space a block changes the
-  // probe's own box, and a ResizeObserver on it restarts the sweep. That also
-  // catches changes driven from an ancestor (double-size mode, a root font
-  // scale) which no observer on the scroller's own attributes would see.
-  const previousRenderedDisplayTextRef = useRef<string | null>(null)
-  const previousPreviewNoteIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    const previousText = previousRenderedDisplayTextRef.current
-    const previousNoteId = previousPreviewNoteIdRef.current
-    previousRenderedDisplayTextRef.current = renderedDisplayText
-    previousPreviewNoteIdRef.current = activeNoteId
-
-    if (previousText === null || previousText === renderedDisplayText) return
-
-    // A local edit leaves the earlier geometry intact. Only the blocks that
-    // follow the first changed line need to be re-estimated, and the reader's
-    // current scroll target is already known to stay in view for the replace
-    // case this path exists for. Clearing the whole survey here would force a
-    // full-document remeasure on a change that only altered the tail.
-    if (previousNoteId === activeNoteId) {
-      const previousLines = previousText.split('\n')
-      const nextLines = renderedDisplayText.split('\n')
-      const maxCommon = Math.min(previousLines.length, nextLines.length)
-      let prefixLines = 0
-      while (prefixLines < maxCommon && previousLines[prefixLines] === nextLines[prefixLines]) {
-        prefixLines += 1
-      }
-
-      const startLine = prefixLines
-      const firstChangedBlockIndex = resolvePreviewBlockIndexForSourceLine(previewBlocksRef.current, startLine)
-      if (firstChangedBlockIndex >= 0) {
-        surveyByGeometryRef.current = new Map()
-        invalidatePreviewVirtualizerMeasurementsAfterIndex(virtualizer, firstChangedBlockIndex)
-        return
-      }
-    }
-
-    // For a note switch or a broader structural edit, the old survey no longer
-    // applies and the prewarm has to start over on the new document.
-    surveyByGeometryRef.current = new Map()
-    restartPrewarm()
-  }, [activeNoteId, renderedDisplayText, previewBlocks, restartPrewarm, virtualizer])
-
-  useEffect(() => {
-    const probe = prewarmProbeRef.current
-    if (!probe) return undefined
-
-    let last = `${probe.offsetWidth}x${probe.offsetHeight}`
-    let settleTimer: number | null = null
-
-    const observer = new ResizeObserver(() => {
-      const next = `${probe.offsetWidth}x${probe.offsetHeight}`
-      if (next === last) return
-      last = next
-      // Debounced, because a window or split-view drag fires this on every
-      // frame of the drag. Restarting per frame means a survey that never
-      // finishes while the reader is still dragging, on exactly the hardware
-      // where it is already slowest. Wait for the geometry to hold still, then
-      // survey once against the size it actually settled on.
-      if (settleTimer !== null) window.clearTimeout(settleTimer)
-      settleTimer = window.setTimeout(() => {
-        settleTimer = null
-        restartPrewarm()
-      }, PREVIEW_PREWARM_RESIZE_SETTLE_MS)
-    })
-    observer.observe(probe)
-
-    return () => {
-      observer.disconnect()
-      if (settleTimer !== null) window.clearTimeout(settleTimer)
-    }
-  }, [probeReady, restartPrewarm])
-
   useEffect(() => {
     const scroller = previewScrollRef.current
     if (!scroller) return undefined
-    /**
-     * Stamps "the reader moved" -- but ONLY when it was the reader.
-     *
-     * A note load lands its restored position by scrolling, and that fires
-     * ordinary native scroll events indistinguishable from a wheel. Counted
-     * as the reader's, they made the survey stand aside for the whole
-     * PREVIEW_PREWARM_SCROLL_QUIET_MS window at precisely the moment it most
-     * needed to run: the blocks have just mounted on estimates, and until the
-     * survey replaces them the document's height is wrong. Measured from the
-     * settle trace on three ordinary notes, the survey committed 235-269ms
-     * AFTER the gate had already revealed the note -- and that commit moved
-     * the total height by up to 271px of 2837 (~10%), which is the reflow and
-     * the scrollbar jump the reader sees. When the same commit happened to
-     * land while the gate was still holding, the gate absorbed it and the
-     * reveal was final: the mechanism was already right, it was just being
-     * asked to run too late.
-     *
-     * Nobody scrolls a pane they cannot see, so the gate's own hold is the
-     * signal. The same reasoning the yield rule already applies to travel
-     * animations ("a travel animation fires scroll events of its own"), for
-     * the same reason -- the restore had simply never been added to it.
-     */
+    // Frame timings are recorded only for scrolls the READER made: one fired
+    // while the settle gate has the pane hidden is the restore's, and timing
+    // frames nobody saw would describe a scroll nobody performed.
     const onScroll = () => {
       if (isPreviewSettleHolding?.()) return
-      lastPreviewScrollAtRef.current = performance.now()
-      // Deliberately AFTER the hold check: a scroll fired while the pane is
-      // hidden is the restore's, and timing frames the reader never saw would
-      // describe a scroll nobody performed.
       noteFrameCostScroll(() => ({
-        mountedBlocks: virtualizer.getVirtualItems().length,
-        totalBlocks: previewBlocksRef.current.length,
+        blocks: previewBlocksRef.current.length,
         // The cumulative block offsets already end at the document's own
         // length, so this costs a read rather than a pass over the text.
         chars: blockCharOffsetsRef.current?.at(-1) ?? 0,
-        mountAll: mountAllBlocks,
       }))
     }
     scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => scroller.removeEventListener('scroll', onScroll)
-  }, [previewScrollRef, spacerReady, isPreviewSettleHolding, virtualizer, previewBlocksRef, mountAllBlocks, blockCharOffsetsRef])
+  }, [previewScrollRef, spacerReady, isPreviewSettleHolding, previewBlocksRef, blockCharOffsetsRef])
+
+
+
 
   /**
-   * Publishes "the survey still owes this document a height commit" to the
-   * settle gate.
+   * The continuous pane: every block, in normal flow.
    *
-   * `prewarmDoneRef` is the whole answer, including for the cases where there
-   * is nothing to survey: restartPrewarm sets it true immediately for a
-   * windowed document, for a geometry whose survey is already cached, and for
-   * an empty one -- so those never make the gate wait.
+   * Nothing here is positioned, offset or sized by this code. The document is
+   * small enough to mount outright -- that is what the reader's paragraph
+   * threshold guarantees -- so the browser lays it out and the layout IS the
+   * geometry. There is no total size to compute, no estimate to correct, and
+   * no measurement to survey; `scrollHeight` is true from the first frame
+   * because every block that contributes to it is present.
    *
-   * A note switch clears it in restartPrewarm, which is a passive effect,
-   * while the gate opens its generation in the layout phase of the same
-   * commit. In the window between the two this can still be reporting the
-   * PREVIOUS document's completed survey. It cannot mislead the gate in
-   * practice -- the gate only evaluates from an animation frame, which is
-   * after passive effects have flushed -- and if it ever did, the cost is one
-   * reveal at the moment the gate would have chosen before any of this
-   * existed. This can make the gate hold too briefly; it can never make it
-   * hold too long.
+   * `display: flow-root` on each wrapper, exactly as the windowed pane does
+   * it, and it is load-bearing rather than cosmetic: in plain normal flow
+   * adjacent block margins COLLAPSE into each other, which the previous
+   * absolutely-positioned rendering never did. Without it the whole document
+   * would re-space itself the moment this changed.
+   *
+   * Memoized so that per-frame App re-renders (scroll thumb state and the
+   * like) don't walk the block list unless something that affects its output
+   * actually changed.
    */
-  useEffect(() => {
-    if (!previewMeasurementPendingRef) return undefined
-    previewMeasurementPendingRef.current = () => !prewarmDoneRef.current
-    return () => {
-      previewMeasurementPendingRef.current = null
-    }
-  }, [previewMeasurementPendingRef])
-
-  /**
-   * Publishes the heights to persist: what the VIRTUALIZER currently holds,
-   * not what the survey originally measured.
-   *
-   * Those are not the same numbers, and the difference is the whole point.
-   * The survey measures in a hidden host that reproduces the real layout
-   * closely but not exactly; a block that later mounts for real is measured
-   * again by react-virtual itself and can land a pixel off. Reading the
-   * virtualizer here means every block that was ever actually mounted
-   * contributes its REAL height, and only blocks nobody ever saw fall back to
-   * the survey's -- so the stored set is the best this session ever knew, and
-   * it improves every time the note is opened.
-   *
-   * That matters because of what happens on the way back in: whatever is
-   * stored gets re-measured when a block mounts, and any disagreement makes
-   * react-virtual resize the item and compensate scrollTop, which is geometry
-   * moving, which is another frame the settle gate has to wait out. Storing
-   * the mounted truth is what makes that re-measure a no-op. Measured on a
-   * 54-block note, the survey's own numbers disagreed with the mounted ones
-   * by ~5px in total and cost two extra frames of hold.
-   *
-   * Refused outright unless the survey has finished for a continuous
-   * document: a partial set stored as if it were whole is the
-   * confidently-wrong number this whole mechanism exists to avoid.
-   */
-  useEffect(() => {
-    if (!previewBlockHeightsRef) return undefined
-    const channel = previewBlockHeightsRef.current
-      ?? { read: null, pending: null }
-    channel.read = () => {
-      if (isWindowedRef.current || !prewarmDoneRef.current) return null
-      const blockCount = previewBlocksRef.current.length
-      if (blockCount === 0) return null
-
-      const heights: number[] = new Array(blockCount)
-      for (let index = 0; index < blockCount; index += 1) {
-        // Keyed by index because no getItemKey is configured, so react-virtual
-        // uses the index as the key.
-        const height = virtualizer.itemSizeCache.get(index)
-        // A gap means some block has no height at all, which contradicts
-        // "the survey finished" -- so the whole set is discarded rather than
-        // stored with a hole in it.
-        if (!(typeof height === 'number' && height > 0)) return null
-        heights[index] = height
-      }
-      // No rounding on the way out: react-virtual's own measureElement already
-      // takes Math.round of the border box, so these are whole pixels
-      // already, and rounding them again could only move them.
-      return { signature: readGeometrySignature(), heights }
-    }
-    previewBlockHeightsRef.current = channel
-    return () => {
-      channel.read = null
-    }
-  }, [previewBlockHeightsRef, previewBlocksRef, virtualizer, readGeometrySignature])
-
-  useEffect(() => cancelPrewarmSchedule, [cancelPrewarmSchedule])
-
-  useEffect(() => () => {
-    if (discoveryHideTimerRef.current !== null) window.clearTimeout(discoveryHideTimerRef.current)
-  }, [])
-
-  const virtualItems = virtualizer.getVirtualItems()
-
-  // Memoized so per-frame App re-renders (scroll thumb state, etc.) don't
-  // even walk the visible-block list unless something that actually affects
-  // its output changed. `virtualItems` is itself stable (same array
-  // reference) whenever react-virtual's own visible range/measurements
-  // haven't changed, so this reproduces the gating this memo always had --
-  // just scoped to the *visible* subset now, which is all this loop ever
-  // builds regardless.
   const previewMarkdownElement = useMemo(() => (
-    <div
-      ref={(node) => { spacerRef.current = node; if (node) setSpacerReady(true) }}
-      style={{ position: 'relative', width: '100%', height: virtualizer.getTotalSize() }}
-    >
-      {virtualItems.map((virtualItem) => {
-        const block = previewBlocks[virtualItem.index]
-        if (!block) return null
-        return (
-          <div
-            key={virtualItem.key}
-            ref={virtualizer.measureElement}
-            data-index={virtualItem.index}
-            // Marks block 0 as the document's first block for the leading
-            // margin reset in markdown.css. By class rather than by DOM
-            // position: virtualization means the spacer's first child is
-            // whichever block is mounted right now, not block 0.
-            className={virtualItem.index === 0 ? 'preview-first-block' : undefined}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${virtualItem.start}px)`,
-            }}
-          >
-            <PreviewMarkdownBlock
-              text={block.text}
-              lineOffset={block.startLine}
-              searchHighlightPlugin={previewSearchHighlightPlugin}
-              components={previewMarkdownComponents}
-            />
-          </div>
-        )
-      })}
-    </div>
-  ), [virtualizer, virtualItems, previewBlocks, previewSearchHighlightPlugin, previewMarkdownComponents])
-
-  // Portalled into the spacer rather than rendered inside the memo above, for
-  // two independent reasons. Correctness: the spacer is the in-flow box the
-  // real blocks are positioned against, and measuring anywhere else resolves
-  // width:100% against a box 36px wider (see previewMeasurementPrewarm.ts).
-  // Cost: a batch lands every few milliseconds, and rendering it inside the
-  // memo would re-render every visible block along with it.
-  const prewarmHostElement = useMemo(() => {
-    if (!spacerReady || !spacerRef.current) return null
-    return createPortal(
-      <div
-        ref={prewarmHostRef}
-        aria-hidden="true"
-        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 0, visibility: 'hidden', pointerEvents: 'none', zIndex: -1 }}
-      >
-        {/* The typography probe -- always mounted, never measured into the
-            cache. Its only job is to change size when anything that would
-            re-wrap a real block changes, so the ResizeObserver above can
-            invalidate the sweep. The text is deliberately long enough to wrap
-            at any sane width: that makes letter-spacing and content-width
-            changes move its HEIGHT, not just its width, so a single observer
-            catches every case. Never shorten it to a single line. */}
+    <div ref={(node) => { spacerRef.current = node; if (node) setSpacerReady(true) }}>
+      {previewBlocks.map((block, index) => (
         <div
-          ref={(node) => { prewarmProbeRef.current = node; if (node) setProbeReady(true) }}
-          data-prewarm-probe=""
-          style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}
+          key={index}
+          data-index={index}
+          // Marks the document's first block for the leading margin reset in
+          // markdown.css -- by class rather than by DOM position, kept from
+          // the virtualized rendering where the two could differ. They cannot
+          // any more, but naming the thing you mean still beats relying on
+          // where it happens to sit.
+          className={index === 0 ? 'preview-first-block' : undefined}
+          style={{ display: 'flow-root' }}
         >
-          The quick brown fox jumps over the lazy dog, and keeps on jumping for
-          long enough that this sentence has to wrap onto a second line at any
-          reasonable width, which is the entire point of it being this long.
+          <PreviewMarkdownBlock
+            text={block.text}
+            lineOffset={block.startLine}
+            searchHighlightPlugin={previewSearchHighlightPlugin}
+            components={previewMarkdownComponents}
+          />
         </div>
-        {prewarmBatch.map((index) => {
-          const block = previewBlocks[index]
-          if (!block) return null
-          return (
-            <div
-              key={index}
-              data-prewarm-index={index}
-              // Absolutely positioned exactly like a real block wrapper.
-              // Normal flow would let adjacent blocks collapse margins with
-              // each other, which the real list never does.
-              className={index === 0 ? 'preview-prewarm-first-block' : undefined}
-              style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}
-            >
-              <PreviewMarkdownBlock
-                text={block.text}
-                lineOffset={block.startLine}
-                searchHighlightPlugin={previewSearchHighlightPlugin}
-                components={previewMarkdownComponents}
-              />
-            </div>
-          )
-        })}
-      </div>,
-      spacerRef.current,
-    )
-  }, [spacerReady, prewarmBatch, previewBlocks, previewSearchHighlightPlugin, previewMarkdownComponents])
+      ))}
+    </div>
+  ), [previewBlocks, previewSearchHighlightPlugin, previewMarkdownComponents])
+
 
   // Deliberately dependency-free: this must fire after EVERY commit of this
   // hook's output, not only when some tracked value changed -- react-virtual
@@ -2864,14 +1867,9 @@ export function usePreviewMarkdownRendering({
   })
 
   return {
-    // The windowed path renders its own content and has no survey, so it needs
-    // neither the virtualizer's spacer nor the prewarm's measurement host.
-    previewMarkdownElement: isWindowed ? previewWindow.element : (
-      <>
-        {previewMarkdownElement}
-        {prewarmHostElement}
-      </>
-    ),
-    previewDiscovery,
+    // Two renderings of the same document, chosen by size: the windowed pane
+    // mounts a moving run of it, the continuous pane mounts all of it. Neither
+    // estimates anything.
+    previewMarkdownElement: isWindowed ? previewWindow.element : previewMarkdownElement,
   }
 }

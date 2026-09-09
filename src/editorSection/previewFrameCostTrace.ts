@@ -5,19 +5,14 @@
 //
 // ## What this is for
 //
-// One decision: whether the preview can stop virtualizing and simply mount
-// the whole note. The continuous path exists to be exact, and almost all of
-// the machinery around it -- estimates, the measurement survey, the
-// progress bar, persisted heights -- exists only because blocks that are not
-// mounted still need a height. Mount everything and all of it becomes
-// unnecessary.
-//
-// The one thing standing in the way is a measured note already in this
-// codebase: leaving ~90 rendered markdown blocks in the DOM was found to cost
-// "layout on every frame the reader scrolls", and unmounting them was the fix
-// (usePreviewMarkdownRendering's calibration teardown). A full mount is
-// several hundred. So the question is not "is a bigger DOM slower" -- it is
-// "by how much, on the slowest machine this app promises to serve".
+// Scroll cost, as the reader experiences it. It was built to answer one
+// question -- whether the continuous pane could stop virtualizing and mount
+// the whole note -- and it did: 100 and 200 mounted blocks dropped zero
+// frames in 445 unthrottled frames, and at 6x CPU throttle were
+// indistinguishable from the virtualized baseline. The virtualizer, the
+// survey and the estimates are gone as a result. It stays because "scrolling
+// feels wrong" is a recurring report and this is the only instrument that
+// answers it in the units the complaint is made in.
 //
 // ## Why frame intervals, and not a timer around anything
 //
@@ -72,10 +67,8 @@ function appendFrameCost(line: string): void {
 
 /** What the run should say about the document it was measured on. */
 export interface FrameCostContext {
-  mountedBlocks: number
-  totalBlocks: number
+  blocks: number
   chars: number
-  mountAll: boolean
 }
 
 export function summarizeFrameIntervals(intervalsMs: readonly number[]): {
@@ -121,8 +114,7 @@ const stop = () => {
   if (summary.frames < 10) return
 
   appendFrameCost(
-    `scroll ${context.mountAll ? 'MOUNT-ALL' : 'virtualized'}`
-    + ` mounted=${context.mountedBlocks}/${context.totalBlocks} blocks chars=${context.chars}`
+    `scroll blocks=${context.blocks} chars=${context.chars}`
     + ` frames=${summary.frames} median=${summary.medianMs}ms p95=${summary.p95Ms}ms max=${summary.maxMs}ms`
     + ` dropped(>${DROPPED_FRAME_MS}ms)=${summary.dropped}`,
   )

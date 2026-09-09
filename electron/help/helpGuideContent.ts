@@ -168,7 +168,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - Hold the right click down to keep paging continuously, just like holding \`Page Up\`/\`Page Down\` on the keyboard. It stops when you release the button, or as soon as the thumb reaches your cursor.
 - **What the thumb measures depends on the size of the note.** On a smaller note it represents actual screen space, the way a scrollbar normally does, so you keep the familiar sense of orientation as you write. On a larger one — which in practice usually means an external file — it represents character count instead, to give you an exact idea of how much information is left in the document regardless of that note's internal geometry.
 - That second reading is why, on a large note in render view, your position means the same thing whatever your view settings are: changing the font size or the pane width can re-flow every line without moving the thumb, and dragging it to the bottom of the track lands at the end of the note whether or not you've read your way down there before.
-- On a longer note you may briefly see the slider beneath the editor fill up like a scrollbar handle instead of showing the [Time Machine Timeline]($HELP§TIME-MACHINE#time-machine-timeline) — that's the note being measured, and it goes away on its own.
+- **Where that line falls is yours to move.** The **note size threshold** slider in [Performance]($#performance) sets how many paragraphs a note may have before it switches to the second reading, and a toggle beside it puts every note on the character reading regardless of size.
 
 ### [Word and Character Count](#word-and-character-count)
 
@@ -835,11 +835,13 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 > **Where?**
 > Settings panel → Performance.
 
-*Toggles for easing load on constrained machines, plus the custom cursor switch.*
+*Toggles for easing load on constrained machines, the custom cursor switch, and where a note stops being small.*
 
 - **Reduce visual effects** forces [Glaze]($#glaze), [Filters]($#filters), and the colorize filter off, without discarding your slider positions (Invert is kept, since it's often load-bearing for dark layouts).
 - **Reduce caret animation** stops the idle caret blink, easing compositor load.
 - **Defer preview on rapid input** coalesces preview updates onto one frame during fast key-repeat (e.g. held Backspace).
+- **Force character based scrollbar thumb** puts every note on the character reading described under [Scrollbar Navigation]($HELP§EDITOR#scrollbar-navigation), however short it is.
+- **Note size threshold** is where that switch happens when the toggle above is off: how many paragraphs a note may have before its scrollbar starts counting characters instead of measuring height. A whole list counts as one paragraph, as does a table or a code block. Hover the slider to read the current number.
 - The cursor button toggles the [custom cursor]($#mouse-options) on/off; while on, the native cursor is hidden everywhere in the app, not just the editor — sidebar, toolbar, dialogs, all of it. This toggle always starts on for a fresh install and isn't part of a layout — it stays as you left it across layout switches and app restarts until you flip it again.
 
 ### [Debugging](#debugging)

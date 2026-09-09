@@ -60,29 +60,15 @@
  * so a pathological document can never leave the preview permanently
  * invisible, and reaching it is a bug worth the console warning it emits.
  *
- * ## The second condition: a movement we know is coming
+ * ## What it no longer has to wait for
  *
- * A geometry fixed point turned out not to be sufficient on its own. The
- * preview's background measurement survey buffers every height it measures
- * and lands them in ONE commit at the end, and the gate would routinely
- * reach its fixed point BEFORE that commit -- so the note was revealed at
- * heights we already knew were about to be replaced, and the reader watched
- * it settle anyway. Measured on three ordinary notes (see the settle trace,
- * `thockdown:debug-preview-settle`), the commit landed 51-85ms after the
- * reveal and moved the document's total height by up to 271px of 2837, which
- * is both the reflow and the scrollbar-thumb jump that were reported.
- *
- * So "at rest" is only a reveal signal once `isMeasurementPending` says the
- * survey has nothing left to commit. Its bound is deliberately much tighter
- * than `maxSettleMs` and deliberately silent -- see
- * DEFAULT_MAX_MEASUREMENT_WAIT_MS for why those two failures are not the
- * same kind of thing.
- *
- * Both of those measurements were taken after a related fix on the other
- * side of the same interaction: the survey used to treat the restore's own
- * scroll as the reader scrolling and stand aside for the full quiet window,
- * which pushed its commit out to ~250ms after the reveal. See
- * usePreviewMarkdownRendering's scroll listener.
+ * This gate once carried a second condition: a background survey measured
+ * every block's height and committed them in one batch, and the geometry
+ * would reach its fixed point BEFORE that commit -- so the note was revealed
+ * at heights already known to be about to change. That whole apparatus is
+ * gone. The continuous pane mounts every block, so its geometry is the
+ * browser's own layout and is right the first time it is asked. A fixed
+ * point is sufficient again, which is what it was originally meant to be.
  */
 
 import {
@@ -100,35 +86,11 @@ import {
 const DEFAULT_MAX_SETTLE_MS = 600
 
 /**
- * How long the gate will keep waiting for the measurement survey AFTER the
- * geometry itself has come to rest.
+ * How long the outgoing note takes to fade away, when it is given the time.
+ * There is deliberately no matching fade in, and it never delays anything.
  *
- * A resting geometry is not a finished one while the survey still has heights
- * to commit: that commit is a movement we know is coming, and revealing
- * before it is choosing to show the reader a layout we already know is about
- * to change. Measured on three ordinary notes, it lands 51-85ms after the
- * fixed point -- so waiting for it costs about a frame's worth of extra hold
- * in the normal case, and removes the last visible settle.
- *
- * It is bounded separately from `maxSettleMs`, and much more tightly, because
- * the two failures are not the same. Overrunning `maxSettleMs` means
- * something is broken. Overrunning this just means the survey is slow -- a big
- * continuous document, a loaded machine -- and there the right answer is to
- * stop waiting and show the note, because a pane held blank is worse than a
- * settle the reader can at least read through. Reaching this bound is a
- * graceful degradation to the previous behaviour, not a bug, and it does not
- * warn.
- */
-const DEFAULT_MAX_MEASUREMENT_WAIT_MS = 250
-
-/**
- * How long the outgoing note takes to fade away. There is deliberately no
- * matching fade in.
- *
- * The hold is unavoidable -- the incoming note's real geometry cannot be
- * known without mounting and measuring it -- so the only question is how the
- * reader meets it. The two ends of that gap are not symmetric, and treating
- * them as if they were is what a crossfade gets wrong.
+ * The two ends of a note switch are not symmetric, and treating them as if
+ * they were is what a crossfade gets wrong.
  *
  * LEAVING is not an event. Nothing the reader wants to look at is happening,
  * and cutting the old note away in one frame is a flash; a short fade lets it
@@ -136,17 +98,33 @@ const DEFAULT_MAX_MEASUREMENT_WAIT_MS = 250
  *
  * ARRIVING is the event, and it is the thing the reader asked for. A fade in
  * is the one part of a crossfade that genuinely delays it -- the note is
- * finished, measured and correct, and the fade is spent showing it to them
+ * finished and correct, and the fade would be spent showing it to them
  * slowly. That is precisely what the interaction doc's note-activation rule
- * rejects: motion that conveys nothing and only delays arrival. So the reveal
- * is instantaneous, and the fade is spent only on the half where there is
- * nothing to wait for.
+ * rejects: motion that conveys nothing and only delays arrival.
  *
- * The fade-out runs against the OUTGOING note, which means it has to start
- * before React commits the incoming one -- see beginFadeOut, and the note
- * switch in EditorSection's activateNote that drives it.
+ * ## It is never waited for
+ *
+ * The fade begins at the top of a note switch and the load runs alongside it,
+ * so on a slow load it completes on its own and costs nothing. On a FAST load
+ * the switch commits while the fade is still running, and the fade is simply
+ * cut short -- the incoming note is not held back for it. An earlier version
+ * did hold it back, for up to a full fade, which put a floor under every
+ * switch; that floor was a third of the total wait when the pane still had a
+ * measurement survey to sit through, and two thirds of it once the survey was
+ * deleted. Motion that delays arrival is the thing being avoided, so it does
+ * not get to delay arrival.
+ *
+ * Cutting it short is safe rather than merely tolerable: `beginSettle` runs
+ * in the LAYOUT phase, before paint, so the frame that swaps in the new
+ * note's DOM is the same frame that takes it to zero opacity. A half-faded
+ * INCOMING note is never painted. What the reader can see is the outgoing
+ * note's fade ending early -- at this duration, a frame or two of one.
+ *
+ * The fade runs against the OUTGOING note, which means it has to start before
+ * React commits the incoming one -- see beginFadeOut, and the note switch in
+ * EditorSection's activateNote that drives it.
  */
-export const PREVIEW_FADE_OUT_MS = 90
+export const PREVIEW_FADE_OUT_MS = 50
 
 /**
  * How long after a fade-out the gate waits for the note switch that is
@@ -169,20 +147,6 @@ export interface PreviewSettleGateOptions {
   /** The preview scroll container (`previewScrollRef`'s element). Read lazily -- it isn't mounted yet when the gate is created. */
   getContainer: () => HTMLElement | null
   maxSettleMs?: number
-  /** See DEFAULT_MAX_MEASUREMENT_WAIT_MS. */
-  maxMeasurementWaitMs?: number
-  /**
-   * Whether the preview's background measurement survey still has heights to
-   * commit for the document now on screen.
-   *
-   * The gate treats a pending survey as "the geometry has not finished
-   * moving", because it has not: the survey buffers every measured height and
-   * lands them in ONE commit at the end (see commitPrewarmedSizes), and that
-   * commit changed the total document height by up to 10% on the notes this
-   * was measured on. Absent, or answering false, the gate behaves exactly as
-   * it did before this existed.
-   */
-  isMeasurementPending?: () => boolean
   /**
    * Elements outside the scroll container that must be hidden and revealed
    * with it, in the same frame.
@@ -282,8 +246,6 @@ export interface PreviewSettleGate {
 export function createPreviewSettleGate({
   getContainer,
   maxSettleMs = DEFAULT_MAX_SETTLE_MS,
-  maxMeasurementWaitMs = DEFAULT_MAX_MEASUREMENT_WAIT_MS,
-  isMeasurementPending,
   getCompanions,
   onBeforeReveal,
   scheduler = DEFAULT_SCHEDULER,
@@ -292,18 +254,6 @@ export function createPreviewSettleGate({
   let isHidden = false
   let restoreAppliedGeneration = -1
   let lastSignature: string | null = null
-  /** When the geometry first came to rest while the survey was still pending. Null whenever it is not resting, or nothing is pending. */
-  let measurementWaitStartedAtMs: number | null = null
-  /**
-   * When an in-flight fade-out will finish, so a `beginSettle` that lands
-   * mid-fade can let it play out instead of cutting it.
-   *
-   * Without this, hiding instantly (which is what beginSettle wants, the pane
-   * being invisible already by then) clears the transition property and the
-   * half-faded pane jumps the rest of the way in one frame -- the exact snap
-   * the fade exists to remove, produced by the fade's own machinery.
-   */
-  let fadeOutEndsAtMs = 0
   /** Armed by beginFadeOut, disarmed by the settle that should follow it. See FADE_OUT_ABANDONED_AFTER_MS. */
   let fadeOutAbandonTimer: number | null = null
   let settleStartedAtMs = 0
@@ -422,7 +372,6 @@ export function createPreviewSettleGate({
     disarmFadeOutAbandon()
     isHidden = false
     lastSignature = null
-    fadeOutEndsAtMs = 0
     // Before the un-hide, deliberately: anything brought up to date here is
     // then correct in the very first frame it is seen, rather than correcting
     // itself in the second one.
@@ -465,10 +414,6 @@ export function createPreviewSettleGate({
         maxSettleMs,
         signature: readGeometrySignature(container),
         restoreApplied: restoreAppliedGeneration === generation,
-        // Distinguishes the one benign way to get here: the geometry never
-        // came to rest long enough for the (tightly bounded) measurement wait
-        // to expire first. That is a slow survey, not a stuck pane.
-        measurementPending: isMeasurementPending?.() ?? false,
       })
       reveal('safety-bound')
       return
@@ -484,34 +429,11 @@ export function createPreviewSettleGate({
 
     const signature = readGeometrySignature(container)
     if (lastSignature !== null && signature === lastSignature) {
-      // At rest -- but not necessarily finished. The measurement survey
-      // commits every height it has gathered in one go at the end, and that
-      // commit moves the geometry again. Revealing between the two is how the
-      // reader ends up watching the note settle: the note is shown at heights
-      // we already know are about to be replaced. So a resting geometry with
-      // a pending survey is a wait, not a reveal signal -- bounded, because a
-      // slow survey must not hold the pane blank (see
-      // DEFAULT_MAX_MEASUREMENT_WAIT_MS).
-      if (isMeasurementPending?.()) {
-        if (measurementWaitStartedAtMs === null) {
-          measurementWaitStartedAtMs = scheduler.now()
-          traceSettle(() => `waiting gen=${generation} geometry at rest, survey still pending (up to ${maxMeasurementWaitMs}ms)`)
-        } else if (scheduler.now() - measurementWaitStartedAtMs > maxMeasurementWaitMs) {
-          reveal('measurement-wait-expired')
-          return
-        }
-        scheduleEvaluate()
-        return
-      }
-
       reveal('fixed-point')
       return
     }
 
     traceSettle(() => `sample gen=${generation} sig=${signature}${lastSignature === null ? ' (first)' : ' (moved)'}`)
-    // Moving again -- so any wait we had started is over; the survey's own
-    // commit is one of the things that lands here.
-    measurementWaitStartedAtMs = null
     lastSignature = signature
     scheduleEvaluate()
   }
@@ -527,13 +449,17 @@ export function createPreviewSettleGate({
       isHidden = true
       restoreAppliedGeneration = -1
       lastSignature = null
-      measurementWaitStartedAtMs = null
       settleStartedAtMs = scheduler.now()
       stopWatching()
       // The switch this fade-out was for has arrived; the settle's own bounds
       // take over from here.
       disarmFadeOutAbandon()
-      setHidden(true, Math.max(0, fadeOutEndsAtMs - scheduler.now()))
+      // INSTANT, and never the remainder of a running fade. By the time this
+      // runs React has already swapped in the incoming note's DOM, so
+      // continuing the fade would be fading the WRONG note in front of the
+      // reader. This is the layout phase, so taking it to zero here happens
+      // in the same frame the swap does and neither is ever painted.
+      setHidden(true)
       traceSettle(() => `begin  gen=${generation} container=${getContainer() ? 'yes' : 'MISSING -- nothing was hidden'}`)
       scheduleEvaluate()
       // A timer, NOT another animation frame, because the whole point of
@@ -564,7 +490,6 @@ export function createPreviewSettleGate({
       // Restart the comparison from here: samples taken before the scroll
       // landed say nothing about whether the *final* position is stable.
       lastSignature = null
-      measurementWaitStartedAtMs = null
       scheduleEvaluate()
     },
 
@@ -588,7 +513,6 @@ export function createPreviewSettleGate({
 
     beginFadeOut: () => {
       traceSettle(() => `fadeout gen=${generation} ${PREVIEW_FADE_OUT_MS}ms (outgoing note still mounted)`)
-      fadeOutEndsAtMs = scheduler.now() + PREVIEW_FADE_OUT_MS
       setHidden(true, PREVIEW_FADE_OUT_MS)
 
       disarmFadeOutAbandon()
