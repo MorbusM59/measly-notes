@@ -644,7 +644,19 @@ export function EditorSection({
     // and costs nothing; on a fast one the switch commits first and the fade
     // is cut short, which is the trade the fade is allowed to make -- it may
     // cover a wait, it may not create one.
-    if (isPreviewModeRef.current && previousNoteId !== null && previousNoteId !== noteId) {
+    //
+    // Only when a SETTLE will follow to end it. A fade is undone by the
+    // settle the same switch opens, and the settle-gate effect declines to
+    // open one for a frozen section (useSnapshotFreeze -- the same note, the
+    // same position, swapped between its live text and a snapshot of it). A
+    // fade started there had nothing to end it, so the pane sat hidden until
+    // the five-second abandon valve fired: measured as a note that took
+    // "a very very long time to settle", which is exactly what it was.
+    const willOpenSettle = isPreviewModeRef.current
+      && !isFrozenSectionPreviewRef.current
+      && previousNoteId !== null
+      && previousNoteId !== noteId
+    if (willOpenSettle) {
       editorSectionMountRest.previewSettleGateRef.current?.beginFadeOut()
     }
     const persistOutStart = performance.now()

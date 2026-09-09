@@ -207,8 +207,6 @@ export interface PreviewSettleGate {
   markRestoreApplied: (generation: number) => void
   /** Called from the preview renderer's commit layout effect: the block subtree changed, so geometry may be moving again. */
   notifyCommit: () => void
-  /** Subscribe to those same commits -- used by the restore to retry its anchor lookup exactly when the DOM could have changed, instead of polling frames. */
-  subscribeToCommit: (listener: () => void) => () => void
   /**
    * Start fading the pane out, and answer how long that fade will take.
    *
@@ -259,7 +257,6 @@ export function createPreviewSettleGate({
   let settleStartedAtMs = 0
   let scheduledFrame: number | null = null
   let safetyTimer: number | null = null
-  const commitListeners = new Set<() => void>()
 
   /** Every element the hold covers: the pane, plus anything outside it that describes the pane. */
   const eachCoveredElement = (visit: (element: HTMLElement) => void) => {
@@ -494,15 +491,7 @@ export function createPreviewSettleGate({
     },
 
     notifyCommit: () => {
-      for (const listener of commitListeners) listener()
       scheduleEvaluate()
-    },
-
-    subscribeToCommit: (listener: () => void) => {
-      commitListeners.add(listener)
-      return () => {
-        commitListeners.delete(listener)
-      }
     },
 
     forceReveal: (reason?: string) => {
@@ -533,7 +522,6 @@ export function createPreviewSettleGate({
       cancelScheduled()
       disarmFadeOutAbandon()
       stopWatching()
-      commitListeners.clear()
       setHidden(false)
     },
   }

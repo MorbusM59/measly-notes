@@ -57,14 +57,33 @@ describe('resolvePreviewSourceAnchorEntry', () => {
     expect(visited).toEqual(['body', 'body', 'body', 'body'])
   })
 
-  it('falls back to the last block when the line is past the end of the document', () => {
+  it('refuses to answer for a line outside the mounted range, so the caller can retry', () => {
+    // The windowed pane mounts only a moving run of the document, so "no
+    // element spans this line" usually means "the target is not in the DOM
+    // yet", not "the line is in a gap". Answering with the run's own edge
+    // moved the reader eight blocks and made the next capture record it, so
+    // the note walked forward on every switch. Refusing is what makes the
+    // restore's retry meaningful -- one frame later the window has mounted
+    // the target and the spanning branch answers exactly.
+    const mountedRun = [
+      { element: {} as HTMLElement, line: 91, lineStart: 91, lineEnd: 93, text: 'run-start' },
+      { element: {} as HTMLElement, line: 100, lineStart: 100, lineEnd: 102, text: 'run-end' },
+    ]
+
+    expect(resolvePreviewSourceAnchorEntry(mountedRun, 40)).toBeNull()
+    expect(resolvePreviewSourceAnchorEntry(mountedRun, 197)).toBeNull()
+  })
+
+  it('still resolves an interior gap, which is the only kind a fully mounted pane has', () => {
     const entries = [
       { element: {} as HTMLElement, line: 2, lineStart: 2, lineEnd: 4, text: 'intro' },
       { element: {} as HTMLElement, line: 8, lineStart: 8, lineEnd: 10, text: 'body' },
     ]
 
-    // Nothing forward to land on, so the honest answer is the last element
-    // rather than snapping the reader back to the top.
-    expect(resolvePreviewSourceAnchorEntry(entries, 40)?.text).toBe('body')
+    // 6 sits between the two, inside the range -- a real gap, resolved forward.
+    expect(resolvePreviewSourceAnchorEntry(entries, 6)?.text).toBe('body')
+    // The boundaries themselves are spanned, not gaps.
+    expect(resolvePreviewSourceAnchorEntry(entries, 2)?.text).toBe('intro')
+    expect(resolvePreviewSourceAnchorEntry(entries, 10)?.text).toBe('body')
   })
 })

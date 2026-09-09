@@ -809,6 +809,22 @@ export function usePreviewWindow(options: UsePreviewWindowOptions): {
       const px = resolveCharOffsetPx(charOffset)
       const maxScrollTopPx = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
       if (px !== null && px >= 0 && px <= maxScrollTopPx) {
+        // A landing overrides a carry -- the same rule anchorWindowOn states
+        // below, which until now only the re-anchoring branch obeyed. A carry
+        // exists to hold the reader still across a window move they did not
+        // ask for; this IS the reader being moved on purpose, so a carry
+        // queued before it is compensating for a position that no longer
+        // means anything.
+        //
+        // Without this, a move committed just before a landing applied its
+        // carry just after, re-anchoring on the block the reader was at
+        // BEFORE the landing and quietly undoing it. Measured on a note
+        // switch into a windowed note: the restore landed block 120 at the
+        // top, the in-flight carry then put block 127 there, and the next
+        // capture recorded 127 as the new position -- so every switch walked
+        // the note forward by eight paragraphs, compounding. The landing was
+        // never wrong; it was overwritten a commit later.
+        pendingAnchorRef.current = null
         const previousBehavior = scroller.style.scrollBehavior
         scroller.style.scrollBehavior = 'auto'
         scroller.scrollTop = px

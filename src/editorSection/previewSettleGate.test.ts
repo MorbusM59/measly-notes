@@ -241,16 +241,19 @@ describe('previewSettleGate', () => {
     expect(isHidden()).toBe(false)
   })
 
-  it('fans commit notifications out to subscribers until they unsubscribe', () => {
-    const { gate } = createHarness()
-    const listener = vi.fn()
-    const unsubscribe = gate.subscribeToCommit(listener)
+  it('re-evaluates on a commit, since the geometry may have moved', () => {
+    // The subscriber side of this is gone with the restore's re-aim loop --
+    // nothing waits to be told the DOM changed, because nothing looks twice.
+    // What remains is the gate's own reason to care: a commit is a moment the
+    // geometry could have moved, so it is worth another sample.
+    const { gate, advanceFrame, isHidden } = createHarness()
+    const generation = gate.beginSettle()
+    gate.markRestoreApplied(generation)
+    advanceFrame()
 
     gate.notifyCommit()
-    expect(listener).toHaveBeenCalledTimes(1)
+    advanceFrame()
 
-    unsubscribe()
-    gate.notifyCommit()
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(isHidden()).toBe(false)
   })
 })

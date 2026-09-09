@@ -47,21 +47,33 @@ export function resolvePreviewSourceAnchorEntry(
    * on it, and the next capture reads that same element, whose block start is
    * the same line again. A fixed point rather than a walk.
    */
+  /**
+   * OUTSIDE the mounted range is not a gap, and must not be answered.
+   *
+   * A continuous pane mounts every block, so a line that no element spans is
+   * genuinely between two neighbours and the one after it is the right
+   * answer. A WINDOWED pane mounts only a moving run, so the same condition
+   * usually means something else entirely: the target is not in the DOM yet.
+   * Neither neighbour is then anywhere near it -- answering with the run's
+   * own first or last element moves the reader by half a window.
+   *
+   * Measured: restoring line 197 while the window held blocks 91..108 landed
+   * on the run's edge instead, and the next capture recorded a position eight
+   * blocks away, which walked the note forward on every switch. Resolving
+   * backwards had the same defect pointing the other way.
+   *
+   * So this answers null, and the caller retries. The restore already asks
+   * the window to scroll to the line before looking the element up; one frame
+   * later the window has mounted it and the spanning branch above answers
+   * exactly. Refusing to guess is what makes the retry meaningful -- a
+   * confident wrong answer is precisely what stops it from happening.
+   */
+  const firstEntry = sortedEntries[0]
+  const lastEntry = sortedEntries[sortedEntries.length - 1]
+  if (sourceLine < firstEntry.lineStart || sourceLine > lastEntry.lineEnd) {
+    return null
+  }
+
   const afterEntry = sortedEntries.find((entry) => entry.lineStart >= sourceLine)
-  if (afterEntry) {
-    return afterEntry
-  }
-
-  // Only when the line is past every element -- a position at or beyond the
-  // end of the document. There is nothing forward to land on, so the last
-  // element is the honest answer.
-  const beforeEntry = [...sortedEntries]
-    .reverse()
-    .find((entry) => entry.lineEnd <= sourceLine)
-
-  if (beforeEntry) {
-    return beforeEntry
-  }
-
-  return sortedEntries[0]
+  return afterEntry ?? null
 }

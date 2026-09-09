@@ -2523,16 +2523,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     // wrong note early.
     const settleGeneration = previewSettleGenerationRef.current
 
-    // Teardown for anything the restore subscribes to; the restore path is
-    // async, so it can still be mid-flight when this effect is torn down.
-    const restoreCleanups: Array<() => void> = []
-    const registerRestoreCleanup = (cleanup: () => void) => {
-      restoreCleanups.push(cleanup)
-    }
-    const runRestoreCleanups = () => {
-      for (const cleanup of restoreCleanups.splice(0)) cleanup()
-    }
-
     // Whichever way this effect ends -- superseded, unmounted, mode flip --
     // the gate must not be left holding a preview hidden for a restore that
     // will now never report in.
@@ -2616,99 +2606,53 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       }
 
       /**
-       * Scroll, look, RE-AIM -- on frames, not on commits.
+       * ONE landing, from information that is already in hand.
        *
-       * The scroll above resolves the target block's offset against heights
-       * that are still estimates for every block nobody has looked at, so on
-       * a large document it can stop enormously short: measured entering
-       * render view on a 200k-character note, aimed at source line 429 and
-       * landed on line 75. The block's element is then not mounted, because
-       * in a virtualized preview a block only mounts where the scroll
-       * actually reached -- so looking for it again cannot help, and looking
-       * is all this used to do.
+       * This was a scroll-look-RE-AIM loop: scroll on an estimate, look for
+       * the target, and if it had not mounted yet, aim again next frame, up
+       * to ninety of them. Every part of that premise is gone. A continuous
+       * pane mounts every block, so the target is in the DOM before this
+       * runs. A windowed pane settles itself synchronously and reports where
+       * it landed (landOnChar). Neither has to be found by trying.
        *
-       * It also used to look on COMMIT notifications, which is the part that
-       * made it hopeless rather than merely insufficient: commits come from
-       * the preview re-rendering, and a preview that has settled in the wrong
-       * place has stopped re-rendering. The retry ran once or twice and then
-       * waited forever for a signal that was never coming again. (Re-aiming
-       * on that same commit signal was tried first and changed nothing, for
-       * exactly this reason.)
-       *
-       * Frames always come. Each re-aim is also a better-informed question
-       * than the last, because the blocks the previous attempt DID reach have
-       * been measured since, so the estimate of everything before the target
-       * improves and the aim crawls toward it. The loop ends the moment the
-       * target mounts -- which is the only outcome that proves the scroll
-       * arrived -- or when it runs out of frames, and it is bounded so a
-       * target that can never resolve cannot spin forever.
+       * The rule this restores is the one the render view is built on: wait
+       * until the information is there, then hit the target by design. An
+       * approximate landing followed by a correction is not a cheaper way of
+       * arriving -- it is a wrong position, and on the windowed pane it was
+       * worse than merely wrong, because the correction re-anchored the
+       * window and the next capture recorded the carried position, walking
+       * the note eight blocks on every switch.
        */
-      const MAX_SETTLE_FRAMES = 90
-      let framesLeft = MAX_SETTLE_FRAMES
-      let rafId: number | null = null
-      let unsubscribeFromCommits: (() => void) | null = null
-
-      const stopWatching = () => {
-        unsubscribeFromCommits?.()
-        unsubscribeFromCommits = null
-        if (rafId !== null) {
-          cancelAnimationFrame(rafId)
-          rafId = null
-        }
-      }
-
-      const attemptFindAndScroll = () => {
-        if (cancelled || !container) {
-          stopWatching()
-          finishRestore()
-          return
-        }
-
-        const target = findPreviewSourceAnchorElement(container, clampedSourceLine)
-        if (target) {
-          stopWatching()
-          // The restore half of the round trip. `landedTop` is the element's
-          // own offset from the container edge AFTER the scroll -- compare it
-          // against the capture line's `reference`: if the restore aligns a
-          // top to the offset that the capture merely measured THROUGH, every
-          // switch loses the distance between them.
-          const beforeScrollTop = container.scrollTop
-          target.scrollIntoView({ block: 'start', inline: 'nearest' })
-          traceSettle(() => {
-            const landedTop = target.getBoundingClientRect().top - container.getBoundingClientRect().top
-            return `restore line=${clampedSourceLine}`
-              + ` scrollTop=${beforeScrollTop.toFixed(1)}->${container.scrollTop.toFixed(1)}`
-              + ` landedTop=${landedTop.toFixed(1)} padding=${container.style.scrollPaddingTop || '(none)'}`
-          })
-          finishRestore()
-          return
-        }
-
-        if (framesLeft <= 0) {
-          debugLogScrollSync(`preview anchor never mounted: line=${clampedSourceLine} after ${MAX_SETTLE_FRAMES} frames`)
-          stopWatching()
-          finishRestore()
-          return
-        }
-        framesLeft -= 1
-
-        previewScrollToSourceLineRef.current?.(clampedSourceLine, { align: 'start' })
-        rafId = requestAnimationFrame(attemptFindAndScroll)
-      }
-
-      // Commits are kept as a second signal -- when one does land it is the
-      // most likely frame for the target to have appeared -- but the frame
-      // loop is what guarantees the retry happens at all.
-      unsubscribeFromCommits = previewSettleGateRef.current?.subscribeToCommit(() => {
-        if (cancelled) return
-        const target = findPreviewSourceAnchorElement(container, clampedSourceLine)
-        if (!target) return
-        stopWatching()
-        target.scrollIntoView({ block: 'start', inline: 'nearest' })
+      // Read from the DOM rather than threaded through as a flag: the
+      // windowed pane IS its container, so asking whether one is mounted is
+      // asking the thing itself rather than a proxy for it.
+      const isWindowedPane = container.querySelector('.preview-window') !== null
+      if (isWindowedPane) {
+        // Already landed, exactly, by the call above. Looking an element up
+        // here is what broke it: the run mounted around the target is not the
+        // document, and any answer taken from its edge is a different place.
+        traceSettle(() => `restore line=${clampedSourceLine} windowed scrollTop=${container.scrollTop.toFixed(1)}`)
         finishRestore()
-      }) ?? null
-      registerRestoreCleanup(stopWatching)
-      attemptFindAndScroll()
+        return
+      }
+
+      // Continuous: the element exists now and its position is a fact. One
+      // write, landed by scroll-padding-top at the same offset the capture
+      // reads from, so the two agree by construction.
+      const target = findPreviewSourceAnchorElement(container, clampedSourceLine)
+      if (target) {
+        const beforeScrollTop = container.scrollTop
+        target.scrollIntoView({ block: 'start', inline: 'nearest' })
+        traceSettle(() => {
+          const landedTop = target.getBoundingClientRect().top - container.getBoundingClientRect().top
+          return `restore line=${clampedSourceLine}`
+            + ` scrollTop=${beforeScrollTop.toFixed(1)}->${container.scrollTop.toFixed(1)}`
+            + ` landedTop=${landedTop.toFixed(1)} padding=${container.style.scrollPaddingTop || '(none)'}`
+        })
+      } else {
+        traceSettle(() => `restore line=${clampedSourceLine} NO ELEMENT -- nothing to land on`)
+      }
+      finishRestore()
     }
 
     const previewRestoreKey = `${activeNoteId}:${previewedSnapshotId ?? 'live'}`
@@ -2721,7 +2665,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
 
       return () => {
         cancelled = true
-        runRestoreCleanups()
         releaseSettleGate()
         setPreviewScrollBehavior('')
       }
@@ -2789,7 +2732,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
 
     return () => {
       cancelled = true
-      runRestoreCleanups()
       releaseSettleGate()
       setPreviewScrollBehavior('')
     }

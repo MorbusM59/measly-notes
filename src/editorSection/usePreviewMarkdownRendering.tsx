@@ -735,7 +735,23 @@ export function usePreviewMarkdownRendering({
     if (windowApi) {
       const offsets = blockCharOffsetsRef.current
       if (!offsets || index + 1 >= offsets.length) return false
-      windowApi.scrollToChar(offsets[index])
+      // landOnChar, not scrollToChar, AND its answer is used rather than
+      // discarded -- both halves are load-bearing.
+      //
+      // scrollToChar alone leaves the very next adjustment pass free to
+      // re-anchor the window and compensate scrollTop. That compensation
+      // keeps the READER still, which is right when they are reading and
+      // wrong here, because the reader is not where they are supposed to end
+      // up yet -- so the target slid out from under the landing.
+      //
+      // landOnChar runs those passes to a standstill first and then REPORTS
+      // the pixel the target ended up at; it does not go there. Ignoring that
+      // report left the pane wherever the compensation had put it, which is
+      // the note walking eight paragraphs on every switch. One write, to the
+      // settled answer, is the landing.
+      const landedPx = windowApi.landOnChar(offsets[index])
+      if (landedPx === null) return false
+      scrollPreviewTo(landedPx)
       return true
     }
 
