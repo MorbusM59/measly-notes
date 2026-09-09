@@ -56,6 +56,7 @@ import {
 import { ScrollTransitionController } from '../editor/ScrollTransitionController'
 import type { PreviewScrollToSourceLineFn } from './usePreviewMarkdownRendering'
 import { createPreviewSettleGate, type PreviewSettleGate } from './previewSettleGate'
+import { traceSettle } from './previewSettleTrace'
 
 /**
  * Throwaway checkpoint logger for the commit-to-paint input-lag
@@ -683,6 +684,23 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       RESTORE_OFFSET_LINES * Math.max(1, lineHeightPx),
     )
     if (!selected) return null
+
+    // The capture half of the note-switch round trip. `top` is what matters:
+    // the restore aligns this element's TOP to the same reference offset, so
+    // any gap between its top and the offset is distance the reader loses on
+    // every switch. `pick` names which branch of selectPreviewAnchorCandidate
+    // won, because "the element covering the line" and "the first element
+    // below it" drift in opposite directions.
+    traceSettle(() => {
+      const reference = RESTORE_OFFSET_LINES * Math.max(1, lineHeightPx)
+      const pick = selected.entry.top <= reference && selected.entry.bottom > reference
+        ? 'straddling'
+        : selected.entry.top > reference ? 'firstBelow' : 'lastAbove'
+      return `capture line=${selected.entry.line} pick=${pick}`
+        + ` top=${selected.entry.top.toFixed(1)} bottom=${selected.entry.bottom.toFixed(1)}`
+        + ` reference=${reference.toFixed(1)} overshootAbove=${(reference - selected.entry.top).toFixed(1)}px`
+        + ` candidates=${anchors.length} scrollTop=${container.scrollTop.toFixed(1)}`
+    })
 
     return {
       sourceAnchorLine: selected.entry.line,
@@ -2649,7 +2667,19 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         const target = findPreviewSourceAnchorElement(container, clampedSourceLine)
         if (target) {
           stopWatching()
+          // The restore half of the round trip. `landedTop` is the element's
+          // own offset from the container edge AFTER the scroll -- compare it
+          // against the capture line's `reference`: if the restore aligns a
+          // top to the offset that the capture merely measured THROUGH, every
+          // switch loses the distance between them.
+          const beforeScrollTop = container.scrollTop
           target.scrollIntoView({ block: 'start', inline: 'nearest' })
+          traceSettle(() => {
+            const landedTop = target.getBoundingClientRect().top - container.getBoundingClientRect().top
+            return `restore line=${clampedSourceLine}`
+              + ` scrollTop=${beforeScrollTop.toFixed(1)}->${container.scrollTop.toFixed(1)}`
+              + ` landedTop=${landedTop.toFixed(1)} padding=${container.style.scrollPaddingTop || '(none)'}`
+          })
           finishRestore()
           return
         }
