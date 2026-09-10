@@ -53,27 +53,43 @@ export function resolveScrollColumnLeftPx(regionLeftPx: number, cellWidthPx: num
 }
 
 /**
- * The rows of the track a thumb span colours.
+ * The grid thumb's size: a whole number of rows -- never fewer than one, nor
+ * more than the track holds.
+ *
+ * Applied where the thumb's size is DECIDED (CM6Editor's
+ * readScrollbarGeometry), not just where it is drawn, so the thumb's travel, a
+ * click's target and every frame of a journey all work with the size that
+ * appears on screen. A whole-row size is what lets snapThumbSpanToRows round
+ * the thumb's two edges independently and still keep it perfectly steady while
+ * it moves.
+ */
+export function quantizeThumbHeightToRows(heightPx: number, rowHeightPx: number, totalRows: number): number {
+  if (!(rowHeightPx > 0) || totalRows <= 0) return 0
+  const rows = Math.min(totalRows, Math.max(1, Math.round(heightPx / rowHeightPx)))
+  return rows * rowHeightPx
+}
+
+/**
+ * The rows of the track a thumb span colours: each edge rounded to its own
+ * nearest row boundary, independently; at least one row; kept inside the
+ * track.
  *
  * The span is in pixels, measured from the track's top, exactly as the
- * ordinary scrollbar computes it (including mid-journey, when it stretches).
- * Its size becomes a whole number of rows -- never fewer than one, which keeps
- * the thumb's size steady while it moves. Its start is the row nearest the
- * span's top, but never so far off that the band misses the row holding the
- * span's CENTRE; then it is kept inside the track.
+ * ordinary scrollbar computes it -- including mid-journey, when it stretches.
  *
- * Why both rules, when each alone looks sufficient:
- * - Nearest-row start alone can drop the very box a click was on: a click
- *   centres the thumb on itself, and a 1.4-row thumb clicked near the top of a
- *   box starts nearest the box ABOVE, colouring only that one.
- * - Centring on the centre row alone fails at the ends: a thumb pinned against
- *   the top of the track has its centre below the clicked box (a 2.4-row thumb
- *   clicked in the first box centres in the second), and a band centred there
- *   leaves the first box out.
- * Nearest start kept within reach of the centre satisfies both: away from the
- * ends the centre IS the click; pinned at an end, the nearest start is the end
- * itself, and the band runs from there past the centre, over the click. The
- * test pins this down across random clicks, sizes and tracks.
+ * Edges, not "a size plus a start": rounding the size and the start separately
+ * could put the far edge a whole row past the span's true edge. During a
+ * journey's stretch that showed as a box beyond the destination lighting up
+ * and then going out as the thumb settled -- a one-row overshoot. Rounding each
+ * edge on its own keeps both within half a row of where the span really is,
+ * so a stretch never colours past where it lands.
+ *
+ * With the thumb a whole number of rows (quantizeThumbHeightToRows) this is
+ * also perfectly steady: moving a whole-row span shifts both edges together.
+ * And it always covers the box a click was on: a click centres the thumb on
+ * itself, and a band at least a row tall with independently rounded edges
+ * always contains the row holding the span's centre -- pinned against either
+ * end of the track included. All three are pinned down by the tests.
  */
 export function snapThumbSpanToRows(
   topPx: number,
@@ -82,10 +98,7 @@ export function snapThumbSpanToRows(
   totalRows: number,
 ): { startRow: number; rows: number } {
   if (!(rowHeightPx > 0) || totalRows <= 0 || !(heightPx > 0)) return { startRow: 0, rows: 0 }
-  const rows = Math.min(totalRows, Math.max(1, Math.round(heightPx / rowHeightPx)))
-  const centerRow = Math.floor((topPx + heightPx / 2) / rowHeightPx)
-  const nearestStartRow = Math.round(topPx / rowHeightPx)
-  const startRowCoveringCenter = Math.min(centerRow, Math.max(centerRow - rows + 1, nearestStartRow))
-  const startRow = Math.min(totalRows - rows, Math.max(0, startRowCoveringCenter))
-  return { startRow, rows }
+  const startRow = Math.min(totalRows - 1, Math.max(0, Math.round(topPx / rowHeightPx)))
+  const endRow = Math.min(totalRows, Math.max(startRow + 1, Math.round((topPx + heightPx) / rowHeightPx)))
+  return { startRow, rows: endRow - startRow }
 }

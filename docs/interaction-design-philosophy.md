@@ -492,10 +492,15 @@ The goal is deterministic behavior with one source of truth per interaction phas
 - The thumb's own boxes are inert: there is no drag. Anywhere else on the column
   is a track press read at its exact pixel -- the upper and the lower part of
   one box land differently -- and only the resulting scroll position is rounded
-  to a row, as every edit-view scroll is. The thumb is drawn in whole rows
-  (`src/editor/immersiveScrollColumn.ts`) and always covers the box that was
-  clicked, pinned against either end of the track included; that is a tested
-  property, not an intention.
+  to a row, as every edit-view scroll is. The thumb is a whole number of rows
+  (decided where its size is decided, not only where it is drawn), and its
+  two edges are each rounded to their own nearest row boundary
+  (`src/editor/immersiveScrollColumn.ts`). That is what keeps it steady while
+  it moves, makes it always cover the box that was clicked (pinned against
+  either end of the track included), and keeps a journey's stretch from ever
+  colouring a box past where it lands -- rounding a size and a start
+  separately did exactly that, a one-row flicker below the destination. All
+  three are tested properties, not intentions.
 
 ### 3e. A long journey is cut, not endured
 - Travel time is a property of the interaction, not of the distance. A

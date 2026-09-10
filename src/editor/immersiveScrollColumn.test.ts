@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { computeRightEdgeReservePx, resolveScrollColumnLeftPx, snapThumbSpanToRows } from './immersiveScrollColumn'
+import {
+  computeRightEdgeReservePx,
+  quantizeThumbHeightToRows,
+  resolveScrollColumnLeftPx,
+  snapThumbSpanToRows,
+} from './immersiveScrollColumn'
+import { resolveThumbRubberBand } from './scrollThumbRubberBand'
 
 // Small seeded LCG: reproducible sequences without a dependency.
 const createRandom = (seed: number) => () => {
@@ -44,6 +50,16 @@ describe('computeRightEdgeReservePx', () => {
   })
 })
 
+describe('quantizeThumbHeightToRows', () => {
+  it('is a whole number of rows, at least one, at most the track', () => {
+    expect(quantizeThumbHeightToRows(10, 20, 30)).toBe(20)
+    // 3.4 rows rounds down to 3, 3.5 up to 4.
+    expect(quantizeThumbHeightToRows(68, 20, 30)).toBe(60)
+    expect(quantizeThumbHeightToRows(70, 20, 30)).toBe(80)
+    expect(quantizeThumbHeightToRows(5000, 20, 30)).toBe(600)
+  })
+})
+
 describe('snapThumbSpanToRows', () => {
   it('colours nothing for an empty span or track', () => {
     expect(snapThumbSpanToRows(10, 0, 20, 30)).toEqual({ startRow: 0, rows: 0 })
@@ -55,14 +71,25 @@ describe('snapThumbSpanToRows', () => {
     expect(snapThumbSpanToRows(0, 5000, 20, 30)).toEqual({ startRow: 0, rows: 30 })
   })
 
+  it('keeps a whole-row thumb exactly its size wherever it sits', () => {
+    const random = createRandom(0x3c11)
+    for (let run = 0; run < 3000; run += 1) {
+      const rowHeight = 12 + Math.floor(random() * 30)
+      const totalRows = 2 + Math.floor(random() * 80)
+      const thumbHeight = quantizeThumbHeightToRows(random() * totalRows * rowHeight, rowHeight, totalRows)
+      const top = random() * (totalRows * rowHeight - thumbHeight)
+      expect(snapThumbSpanToRows(top, thumbHeight, rowHeight, totalRows).rows).toBe(thumbHeight / rowHeight)
+    }
+  })
+
   it('colours the clicked box for any click, thumb size and track -- including thumbs pinned at either end', () => {
     const random = createRandom(0x7ac4)
     for (let run = 0; run < 5000; run += 1) {
       const rowHeight = 12 + Math.floor(random() * 30)
       const totalRows = 1 + Math.floor(random() * 80)
       const trackHeight = totalRows * rowHeight
-      // The ordinary thumb: at least one row tall (the grid's minimum), never taller than the track.
-      const thumbHeight = rowHeight + random() * (trackHeight - rowHeight)
+      // The grid's thumb: a whole number of rows, at least one, never taller than the track.
+      const thumbHeight = quantizeThumbHeightToRows(rowHeight + random() * (trackHeight - rowHeight), rowHeight, totalRows)
       // A click anywhere in the track, exact to the pixel -- the upper or lower part of a box alike.
       const clickY = random() * trackHeight
       // What the scrollbar does with it: centre the thumb on the click, kept inside the track.
@@ -73,6 +100,49 @@ describe('snapThumbSpanToRows', () => {
       expect(clickedRow).toBeLessThan(startRow + rows)
       expect(startRow).toBeGreaterThanOrEqual(0)
       expect(startRow + rows).toBeLessThanOrEqual(totalRows)
+    }
+  })
+
+  it('never colours a box past where a journey lands or began, and comes to rest exactly on the landing', () => {
+    const random = createRandom(0x9e17)
+    for (let run = 0; run < 2000; run += 1) {
+      const rowHeight = 12 + Math.floor(random() * 30)
+      const totalRows = 5 + Math.floor(random() * 80)
+      const trackHeight = totalRows * rowHeight
+      const thumbHeight = quantizeThumbHeightToRows(rowHeight + random() * (trackHeight / 3), rowHeight, totalRows)
+      const maxTop = trackHeight - thumbHeight
+      const startTop = random() * maxTop
+      const targetTop = random() * maxTop
+      const origin = snapThumbSpanToRows(startTop, thumbHeight, rowHeight, totalRows)
+      const landing = snapThumbSpanToRows(targetTop, thumbHeight, rowHeight, totalRows)
+      const highestRow = Math.min(origin.startRow, landing.startRow)
+      const lowestRowEnd = Math.max(origin.startRow + origin.rows, landing.startRow + landing.rows)
+
+      // Walk the whole stretch: the leading edge runs the span, then the trailing edge catches up.
+      const steps: Array<[number, number]> = []
+      for (let i = 0; i <= 24; i += 1) steps.push([i / 24, 0])
+      for (let i = 0; i <= 24; i += 1) steps.push([1, i / 24])
+      for (const [leadProgress, trailProgress] of steps) {
+        const { topPx, heightPx } = resolveThumbRubberBand({
+          startTopPx: startTop,
+          targetTopPx: targetTop,
+          thumbHeightPx: thumbHeight,
+          leadProgress,
+          trailProgress,
+        })
+        const band = snapThumbSpanToRows(topPx, heightPx, rowHeight, totalRows)
+        expect(band.startRow).toBeGreaterThanOrEqual(highestRow)
+        expect(band.startRow + band.rows).toBeLessThanOrEqual(lowestRowEnd)
+      }
+
+      const rest = resolveThumbRubberBand({
+        startTopPx: startTop,
+        targetTopPx: targetTop,
+        thumbHeightPx: thumbHeight,
+        leadProgress: 1,
+        trailProgress: 1,
+      })
+      expect(snapThumbSpanToRows(rest.topPx, rest.heightPx, rowHeight, totalRows)).toEqual(landing)
     }
   })
 })

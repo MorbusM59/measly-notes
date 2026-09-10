@@ -39,7 +39,7 @@ import { attachRowGridGuard, resolveRowGridCorrection, resolveRowGridDirection, 
 import { registerScrollBridge } from '../editor/scrollBridge';
 import { resolveThumbRubberBand } from '../editor/scrollThumbRubberBand';
 import { boxMouseSelection, resolveBoxAtCoords } from '../editor/boxPointer';
-import { computeRightEdgeReservePx, resolveScrollColumnLeftPx, snapThumbSpanToRows } from '../editor/immersiveScrollColumn';
+import { computeRightEdgeReservePx, quantizeThumbHeightToRows, resolveScrollColumnLeftPx, snapThumbSpanToRows } from '../editor/immersiveScrollColumn';
 import { createCommittedThumbHeight } from '../editor/scrollThumbMetrics';
 import { sampleCurveRampProgress } from '../editor/ScrollCurvePlan';
 import type { ScrollJourneyTiming } from '../editor/scrollJourney';
@@ -1194,7 +1194,7 @@ export function CM6Editor({
     // to change the size; scrollHeight is not one of them, because CM6 refines
     // it as it measures more of the document, and a thumb that follows that is
     // reporting on the app's knowledge rather than on the reader's position.
-    const thumbHeightPx = thumbHeightCommitRef.current.resolve({
+    const committedThumbHeightPx = thumbHeightCommitRef.current.resolve({
       // Every input here is one the reader can actually change: the document,
       // the type geometry, the pane, the track. Deliberately NOT the width of
       // contentDOM, which `readDocumentLines` measures and which grows with
@@ -1232,6 +1232,15 @@ export function CM6Editor({
         ? lineHeightPxRef.current
         : (scrollThumbElRef.current?.offsetWidth || SCROLL_TRACK_MIN_THUMB_HEIGHT_PX),
     });
+    // In immersive mode's grid track the thumb is a whole number of rows,
+    // decided here rather than only when drawn -- so its travel, a click's
+    // target and every frame of a journey work with the size on screen, and
+    // the drawing can round its two edges independently without the thumb
+    // breathing a row as it moves (see snapThumbSpanToRows).
+    const lineHeightPxNow = lineHeightPxRef.current;
+    const thumbHeightPx = isImmersiveRef.current && lineHeightPxNow > 0
+      ? quantizeThumbHeightToRows(committedThumbHeightPx, lineHeightPxNow, Math.floor(usableTrackHeight / lineHeightPxNow))
+      : committedThumbHeightPx;
     const maxThumbTravelPx = Math.max(0, usableTrackHeight - thumbHeightPx);
 
     return {
