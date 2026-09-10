@@ -107,6 +107,16 @@ function applyInvert(color: RgbaColor, amount: number): RgbaColor {
  * `clickBalance` weight, entirely at draw time -- the underlying settings
  * values themselves are never mutated by clicking.
  */
+/**
+ * The page's own zoom factor -- double size mode's 2x -- from the preload's
+ * webFrame, which display scaling never touches. 1 where there are no window
+ * controls (browser mode, which has no page zoom to follow).
+ */
+function readPageZoomFactor(): number {
+  const zoom = window.windowControls?.getPageZoomFactor?.()
+  return typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0 ? zoom : 1
+}
+
 export function MouseCursorOverlay({
   settings,
   fadeMs = 550,
@@ -114,6 +124,14 @@ export function MouseCursorOverlay({
 }: MouseCursorOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const posRef = useRef<{ x: number; y: number } | null>(null)
+  // The page zoom posRef was recorded at. posRef is in page (CSS) pixels, and
+  // double size mode's 2x zoom halves the page pixels of every point on the
+  // screen -- but the pointer only reports a new position when it moves, so
+  // without this the drawn cursor stayed at the old numbers and appeared to
+  // jump away from the real one. Page zoom alone, not devicePixelRatio: moving
+  // the window to a monitor with other display scaling changes the ratio but
+  // leaves page coordinates where they are.
+  const pageZoomRef = useRef(readPageZoomFactor())
   // Exact backing-buffer-to-CSS-box scale, not just `devicePixelRatio`: the
   // canvas's backing resolution is rounded to a whole pixel count, which can
   // shift the true scale by a fraction of a percent. Using that exact ratio
@@ -149,7 +167,12 @@ export function MouseCursorOverlay({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const dpr = window.devicePixelRatio || 1
+    // Live, not captured once: double size mode's 2x zoom doubles it, and so
+    // can a monitor with other display scaling. Re-read by
+    // updateCanvasResolution on every change, and read by every size the draw
+    // loop multiplies, so the canvas never stays at a stale resolution -- which
+    // left the cursor soft after a zoom switch until the overlay remounted.
+    let dpr = window.devicePixelRatio || 1
     const dot = applyInvert(resolveRgba(dotColor), filterInvert)
     const center = applyInvert(resolveRgba(centerColor), filterInvert)
     const trail = applyInvert(resolveRgba(trailColor), filterInvert)
@@ -176,6 +199,18 @@ export function MouseCursorOverlay({
     const clickDurationSec = resolveCursorClickDurationSec(clickSpeedX)
 
     function updateCanvasResolution() {
+      // A zoom change arrives as a resize. The pointer has not moved within
+      // the window, so its page position is the recorded one scaled by old
+      // zoom over new -- exact, with nothing to wait for.
+      const pageZoom = readPageZoomFactor()
+      const pos = posRef.current
+      if (pos && pageZoom !== pageZoomRef.current) {
+        const factor = pageZoomRef.current / pageZoom
+        posRef.current = { x: pos.x * factor, y: pos.y * factor }
+      }
+      pageZoomRef.current = pageZoom
+
+      dpr = window.devicePixelRatio || 1
       const width = window.innerWidth
       const height = window.innerHeight
       const backingWidth = Math.max(1, Math.round(width * dpr))
@@ -189,6 +224,21 @@ export function MouseCursorOverlay({
     }
 
     updateCanvasResolution()
+
+    // A zoom switch arrives as a resize, but a pixel-density change with no
+    // change in CSS size -- the window dragged onto a monitor with other
+    // display scaling -- may not. A resolution query fires on exactly that; it
+    // is tied to one value, so each change re-arms it at the new one.
+    let stopWatchingDpr = () => {}
+    function watchDpr() {
+      const query = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+      const handleChange = () => {
+        updateCanvasResolution()
+        watchDpr()
+      }
+      query.addEventListener('change', handleChange, { once: true })
+      stopWatchingDpr = () => query.removeEventListener('change', handleChange)
+    }
 
     function ensureLoopRunning() {
       if (rafRef.current === null) {
@@ -436,6 +486,7 @@ export function MouseCursorOverlay({
     window.addEventListener('mousedown', handleWindowMouseDown, { capture: true })
     window.addEventListener('mouseup', handleWindowMouseUp, { capture: true })
     window.addEventListener('resize', updateCanvasResolution)
+    watchDpr()
 
     return () => {
       window.removeEventListener('pointermove', handlePointerMove, { capture: true })
@@ -443,6 +494,7 @@ export function MouseCursorOverlay({
       window.removeEventListener('mousedown', handleWindowMouseDown, { capture: true })
       window.removeEventListener('mouseup', handleWindowMouseUp, { capture: true })
       window.removeEventListener('resize', updateCanvasResolution)
+      stopWatchingDpr()
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
       activeSinceRef.current = null

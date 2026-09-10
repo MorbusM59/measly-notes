@@ -1,4 +1,4 @@
-import { ipcRenderer, contextBridge } from 'electron'
+import { ipcRenderer, contextBridge, webFrame } from 'electron'
 import type {
   AddTagInput,
   CreateNoteInput,
@@ -113,6 +113,10 @@ const windowControls = {
     ipcRenderer.send('window-control:chrome-min-size', size),
   setDoubleSizeMode: (enabled: boolean) => ipcRenderer.send('window-control:double-size-mode', enabled),
   setFullScreen: (enabled: boolean) => ipcRenderer.send('window-control:full-screen', enabled),
+  // The page's own zoom (double size mode sets it from the main process via
+  // webContents.setZoomFactor). Read synchronously by the custom cursor,
+  // which has to convert its stored pointer position when the zoom changes.
+  getPageZoomFactor: () => webFrame.getZoomFactor(),
   startWindowDrag: (screenX: number, screenY: number) =>
     ipcRenderer.send(WINDOW_DRAG_CHANNELS.start, { screenX, screenY }),
   moveWindowDrag: (screenX: number, screenY: number) =>

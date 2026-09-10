@@ -28,6 +28,8 @@ interface Window {
 		setChromeMinSize: (size: { width: number; widthWithoutSidebar: number; height: number }) => void;
 		setDoubleSizeMode: (enabled: boolean) => void;
 		setFullScreen: (enabled: boolean) => void;
+		/** The page's own zoom factor (double size mode's 2x), independent of the display's scaling. */
+		getPageZoomFactor: () => number;
 		startWindowDrag: (screenX: number, screenY: number) => void;
 		moveWindowDrag: (screenX: number, screenY: number) => void;
 		endWindowDrag: () => void;
