@@ -149,6 +149,23 @@
   box-shadow: none;
 }
 
+/* The edit view's grid scrollbar (CM6Editor.tsx): track boxes in the gutter
+   background, the thumb's boxes in the immersive scroll thumb colour painted
+   over it. --thumb-start/--thumb-end are whole-row boundaries, written by
+   CM6Editor's paintScrollThumb -- the grid lines drawn above this column are
+   what make it read as boxes. */
+.immersive-scroll-column {
+  background:
+    linear-gradient(
+      to bottom,
+      transparent var(--thumb-start, 0px),
+      var(--color-immersive-scroll-thumb) var(--thumb-start, 0px),
+      var(--color-immersive-scroll-thumb) var(--thumb-end, 0px),
+      transparent var(--thumb-end, 0px)
+    ),
+    var(--color-gutter-bg);
+}
+
 /* Texture overlay */
 .app-grid::before {
   content:          '';

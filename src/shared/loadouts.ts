@@ -58,6 +58,7 @@ export type UiLayoutLoadout = {
     gridOutline: string;
     grid: string;
     gutterBackground: string;
+    immersiveScrollThumb: string;
     reviewLine: string;
     warningLine: string;
     lineNumber: string;

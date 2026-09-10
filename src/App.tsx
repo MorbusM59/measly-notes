@@ -299,6 +299,7 @@ const DEFAULT_HIGHLIGHT_COLORS: HighlightColors = {
   gridOutline: '#00000022',
   grid: '#f9f6f3',
   gutterBackground: 'rgba(196, 187, 182, 0.49)',
+  immersiveScrollThumb: 'rgba(0, 0, 0, 0.333)',
   reviewLine: 'rgba(255, 230, 0, 0.6)',
   warningLine: 'rgba(255, 50, 0, 0.2)',
   lineNumber: 'rgba(0, 0, 0, 0.6)',
@@ -898,6 +899,7 @@ function normalizeLoadoutHighlightColors(source: unknown): HighlightColors {
     gridOutline: typeof record.gridOutline === 'string' ? record.gridOutline : DEFAULT_HIGHLIGHT_COLORS.gridOutline,
     grid: typeof record.grid === 'string' ? record.grid : DEFAULT_HIGHLIGHT_COLORS.grid,
     gutterBackground: typeof record.gutterBackground === 'string' ? record.gutterBackground : DEFAULT_HIGHLIGHT_COLORS.gutterBackground,
+    immersiveScrollThumb: typeof record.immersiveScrollThumb === 'string' ? record.immersiveScrollThumb : DEFAULT_HIGHLIGHT_COLORS.immersiveScrollThumb,
     reviewLine: typeof record.reviewLine === 'string' ? record.reviewLine : DEFAULT_HIGHLIGHT_COLORS.reviewLine,
     warningLine: typeof record.warningLine === 'string' ? record.warningLine : DEFAULT_HIGHLIGHT_COLORS.warningLine,
     lineNumber: typeof record.lineNumber === 'string' ? record.lineNumber : DEFAULT_HIGHLIGHT_COLORS.lineNumber,
@@ -2899,6 +2901,7 @@ function App() {
         gridOutline: highlightColors.gridOutline,
         grid: highlightColors.grid,
         gutterBackground: highlightColors.gutterBackground,
+        immersiveScrollThumb: highlightColors.immersiveScrollThumb,
         reviewLine: highlightColors.reviewLine,
         warningLine: highlightColors.warningLine,
         lineNumber: highlightColors.lineNumber,
@@ -3077,6 +3080,7 @@ function App() {
       gridOutline: loadout.highlightColors.gridOutline,
       grid: loadout.highlightColors.grid,
       gutterBackground: loadout.highlightColors.gutterBackground,
+      immersiveScrollThumb: loadout.highlightColors.immersiveScrollThumb ?? DEFAULT_HIGHLIGHT_COLORS.immersiveScrollThumb,
       reviewLine: loadout.highlightColors.reviewLine,
       warningLine: loadout.highlightColors.warningLine,
       lineNumber: loadout.highlightColors.lineNumber,
@@ -4243,6 +4247,7 @@ function App() {
       highlightGridOutlineColor: highlightColors.gridOutline,
       highlightGridColor: highlightColors.grid,
       highlightGutterBackgroundColor: highlightColors.gutterBackground,
+      highlightImmersiveScrollThumbColor: highlightColors.immersiveScrollThumb,
       highlightReviewColor: highlightColors.reviewLine,
       highlightWarningColor: highlightColors.warningLine,
       highlightLineNumberColor: highlightColors.lineNumber,
@@ -4922,6 +4927,7 @@ function App() {
       '--color-grid-outline': highlightColors.gridOutline,
       '--color-grid-bg': highlightColors.grid,
       '--color-gutter-bg': highlightColors.gutterBackground,
+      '--color-immersive-scroll-thumb': highlightColors.immersiveScrollThumb,
       '--color-review-line': highlightColors.reviewLine,
       '--color-warning-line': highlightColors.warningLine,
       '--color-line-number': lineNumberOpaqueCss,
@@ -6598,6 +6604,7 @@ ${markdownHtml}
               gridOutline: appState.menu.highlightGridOutlineColor ?? DEFAULT_HIGHLIGHT_COLORS.gridOutline,
               grid: appState.menu.highlightGridColor ?? DEFAULT_HIGHLIGHT_COLORS.grid,
               gutterBackground: appState.menu.highlightGutterBackgroundColor ?? DEFAULT_HIGHLIGHT_COLORS.gutterBackground,
+              immersiveScrollThumb: appState.menu.highlightImmersiveScrollThumbColor ?? DEFAULT_HIGHLIGHT_COLORS.immersiveScrollThumb,
               reviewLine: appState.menu.highlightReviewColor ?? DEFAULT_HIGHLIGHT_COLORS.reviewLine,
               warningLine: appState.menu.highlightWarningColor ?? DEFAULT_HIGHLIGHT_COLORS.warningLine,
               lineNumber: appState.menu.highlightLineNumberColor ?? DEFAULT_HIGHLIGHT_COLORS.lineNumber,
@@ -10270,6 +10277,7 @@ ${markdownHtml}
                   caretSizeDeviationPx={caretSizeDeviationPx}
                   showLineNumbers={reviewGutterVisibleBySection[entry.id] ?? false}
                   showReviewFlags={reviewFlagsVisibleBySection[entry.id] ?? false}
+                  isImmersiveMode={isImmersiveMode}
                   onToggleReviewGutter={() => handleToggleReviewGutter(entry.id)}
                   onToggleReviewFlags={() => handleToggleReviewFlags(entry.id)}
                 />

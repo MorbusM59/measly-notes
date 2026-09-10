@@ -13,6 +13,7 @@ export type HighlightColorKey =
   | 'gridOutline'
   | 'grid'
   | 'gutterBackground'
+  | 'immersiveScrollThumb'
   | 'reviewLine'
   | 'warningLine'
   | 'lineNumber'

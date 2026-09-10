@@ -272,7 +272,7 @@ const VIEW_STYLE_OPTIONS: Array<{ key: ViewStyleKey; label: string; family: stri
   { key: 'bubblerone', label: 'Bubbler One', family: "'Bubbler One', 'Segoe UI', sans-serif" },
 ]
 
-const BOX_HIGHLIGHT_COLOR_ORDER: HighlightColorKey[] = ['background', 'grid', 'gridOutline', 'topBackground', 'bottomBackground', 'gutterBackground', 'reviewLine', 'warningLine', 'lineNumber']
+const BOX_HIGHLIGHT_COLOR_ORDER: HighlightColorKey[] = ['background', 'grid', 'gridOutline', 'topBackground', 'bottomBackground', 'gutterBackground', 'immersiveScrollThumb', 'reviewLine', 'warningLine', 'lineNumber']
 const MARKDOWN_HIGHLIGHT_COLOR_ORDER: HighlightColorKey[] = [
   'markdownHeadline',
   'markdownList',
@@ -297,6 +297,7 @@ const HIGHLIGHT_COLOR_TITLES: Record<HighlightColorKey, string> = {
   gridOutline: 'Box Outline',
   grid: 'Box Grid',
   gutterBackground: 'Gutter Background',
+  immersiveScrollThumb: 'Immersive Scroll Thumb',
   reviewLine: 'Review Flag Color',
   warningLine: 'Warning Flag Color',
   lineNumber: 'Line Number Color',
@@ -326,6 +327,7 @@ const HIGHLIGHT_COLOR_ICONS: Record<HighlightColorKey, string> = {
   gridOutline: 'fa-regular fa-square',
   grid: 'fa-solid fa-border-all',
   gutterBackground: 'fa-solid fa-list-ol',
+  immersiveScrollThumb: 'fa-solid fa-grip-vertical',
   reviewLine: 'fa-solid fa-question',
   warningLine: 'fa-solid fa-triangle-exclamation',
   lineNumber: 'fa-solid fa-hashtag',

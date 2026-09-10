@@ -477,6 +477,26 @@ The goal is deterministic behavior with one source of truth per interaction phas
   font size. Accuracy is decided where the click is interpreted, never by
   moving the cursor's picture -- do not reintroduce an offset there.
 
+### 3d3. In immersive mode, the edit view's scrollbar is part of the grid
+- Immersive mode has no app grid to hold the ordinary track, so the track
+  becomes the grid's last full box column, over exactly the whole rows the
+  viewport shows; with review flags on, the flag column sits two columns to its
+  left with one empty column between. The boxes are the track (in the gutter
+  background colour) and the thumb (in the immersive scroll thumb colour,
+  painted over it). Regular mode keeps its ordinary scrollbar.
+- It is the SAME scrollbar, not a second one: thumb size from the text, click
+  travels, hold snaps, the bridged-journey stretch -- all in pixels against
+  whichever track element is mounted. Only the drawing differs, through one
+  paint function in `CM6Editor.tsx` (`paintScrollThumb`), so the two
+  presentations cannot drift apart. Do not fork the logic for the grid.
+- The thumb's own boxes are inert: there is no drag. Anywhere else on the column
+  is a track press read at its exact pixel -- the upper and the lower part of
+  one box land differently -- and only the resulting scroll position is rounded
+  to a row, as every edit-view scroll is. The thumb is drawn in whole rows
+  (`src/editor/immersiveScrollColumn.ts`) and always covers the box that was
+  clicked, pinned against either end of the track included; that is a tested
+  property, not an intention.
+
 ### 3e. A long journey is cut, not endured
 - Travel time is a property of the interaction, not of the distance. A
   scrollbar click across a very large document takes about the same half second

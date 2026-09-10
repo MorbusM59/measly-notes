@@ -125,6 +125,8 @@ export interface SectionEditorAreaProps {
   caretSizeDeviationPx: number
   showLineNumbers: boolean
   showReviewFlags: boolean
+  /** Immersive mode (App.tsx isImmersiveMode) -- the edit view draws its scroll track into the grid (CM6Editor). */
+  isImmersiveMode: boolean
   onToggleReviewGutter: () => void
   onToggleReviewFlags: () => void
   /** Whether the active note (or its whole chapter family) is frozen in time -- see databaseService.ts's freezeNoteFamily. Forces the editor read-only, hides the Time Machine timeline, and disables chapter/tag mutation affordances, same shape as isViewingAutoTocChapter/isViewingAutoOpenItemsChapter below. */
@@ -244,6 +246,7 @@ export function SectionEditorArea({
   caretSizeDeviationPx,
   showLineNumbers,
   showReviewFlags,
+  isImmersiveMode,
   onToggleReviewGutter,
   onToggleReviewFlags,
   isViewingTimelessNote,
@@ -372,6 +375,7 @@ export function SectionEditorArea({
                   caretSizeDeviationPx={caretSizeDeviationPx}
                   showLineNumbers={showLineNumbers}
                   showReviewFlags={showReviewFlags}
+                  isImmersive={isImmersiveMode}
                 />
               ) : null}
             </div>

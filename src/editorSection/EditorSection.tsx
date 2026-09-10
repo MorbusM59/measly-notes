@@ -235,6 +235,7 @@ export function EditorSection({
   caretSizeDeviationPx,
   showLineNumbers,
   showReviewFlags,
+  isImmersiveMode,
   onToggleReviewGutter,
   onToggleReviewFlags,
   isEscapeHoldPanelOpen,
@@ -2276,6 +2277,7 @@ export function EditorSection({
         caretSizeDeviationPx={caretSizeDeviationPx}
         showLineNumbers={showLineNumbers}
         showReviewFlags={showReviewFlags}
+        isImmersiveMode={isImmersiveMode}
         onToggleReviewGutter={onToggleReviewGutter}
         onToggleReviewFlags={onToggleReviewFlags}
         isViewingAutoTocChapter={isViewingAutoTocChapter}

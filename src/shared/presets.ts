@@ -118,6 +118,7 @@ export const NEUTRAL_BASE: UiLayoutLoadout = {
     gridOutline: '#00000022',
     grid: '#f9f6f3',
     gutterBackground: 'rgba(196, 187, 182, 0.49)',
+    immersiveScrollThumb: 'rgba(0, 0, 0, 0.333)',
     reviewLine: 'rgba(255, 230, 0, 0.6)',
     warningLine: 'rgba(255, 50, 0, 0.2)',
     lineNumber: 'rgba(0, 0, 0, 0.6)',

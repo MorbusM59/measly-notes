@@ -39,6 +39,7 @@ import { attachRowGridGuard, resolveRowGridCorrection, resolveRowGridDirection, 
 import { registerScrollBridge } from '../editor/scrollBridge';
 import { resolveThumbRubberBand } from '../editor/scrollThumbRubberBand';
 import { boxMouseSelection, resolveBoxAtCoords } from '../editor/boxPointer';
+import { computeRightEdgeReservePx, resolveScrollColumnLeftPx, snapThumbSpanToRows } from '../editor/immersiveScrollColumn';
 import { createCommittedThumbHeight } from '../editor/scrollThumbMetrics';
 import { sampleCurveRampProgress } from '../editor/ScrollCurvePlan';
 import type { ScrollJourneyTiming } from '../editor/scrollJourney';
@@ -295,6 +296,9 @@ export interface CM6EditorProps {
   // docs/editor-contract.md-adjacent reasoning in the gutter section below.
   showLineNumbers?: boolean;
   showReviewFlags?: boolean;
+  // Immersive mode (App.tsx isImmersiveMode): the scroll track moves into the
+  // grid's last full box column -- see editor/immersiveScrollColumn.ts.
+  isImmersive?: boolean;
 }
 
 function toSelectionState(range: { anchor: number; head: number; from: number; to: number; empty: boolean }): EditorSelectionState {
@@ -539,27 +543,27 @@ const quantizeToPhase = (value: number, unit: number, phase: number) => (
   phase + Math.round((value - phase) / unit) * unit
 );
 
-/**
- * The review gutter's flag-column width: one real grid box plus whatever's
- * cut off past it (see reviewGutterRightPx's own render-scope doc comment
- * for why -- the grid's box columns are phase-anchored from the left only,
- * never corrected against the right edge). Factored out as a pure function,
- * not just inlined at render time, so the resize-observer callback below
- * can call this SAME formula synchronously the instant it measures a new
- * scroller width -- applying view.contentDOM.style.paddingRight there
- * directly, rather than only through the render-driven padding effect,
- * closes the one-frame window where the browser has already reflowed the
- * pane to its new width but React hasn't re-rendered with the corrected
- * padding yet: CM6 wraps text against the stale width for that frame, then
- * snaps to the correct wrap the moment React catches up -- the reported
- * "characters jitter, calculate a wrap, then revert" during a live resize.
+/*
+ * The right-edge reservation -- the review-flag column, and in immersive mode
+ * the grid scrollbar's column -- is editor/immersiveScrollColumn.ts's
+ * computeRightEdgeReservePx, a pure function called from TWO triggers: render,
+ * and the resize-observer callback below, which applies it synchronously the
+ * instant it measures a new scroller width. Applying
+ * view.contentDOM.style.paddingRight there directly, rather than only through
+ * the render-driven padding effect, closes the one-frame window where the
+ * browser has already reflowed the pane to its new width but React hasn't
+ * re-rendered with the corrected padding yet: CM6 wraps text against the stale
+ * width for that frame, then snaps to the correct wrap the moment React
+ * catches up -- the reported "characters jitter, calculate a wrap, then
+ * revert" during a live resize.
  */
-const computeReviewGutterRightPx = (measuredWidthPx: number, cellWidthPx: number, gutterOn: boolean): number => {
-  if (!gutterOn || cellWidthPx <= 0) return 0;
-  const halfCellWidthPxNow = Math.round(cellWidthPx / 2);
-  const remainderPx = (((measuredWidthPx - halfCellWidthPxNow) % cellWidthPx) + cellWidthPx) % cellWidthPx;
-  return cellWidthPx + remainderPx;
-};
+
+/**
+ * The ordinary track's inset at either end, which its thumb never enters.
+ * Immersive mode's grid track has none: its thumb is whole rows of the grid,
+ * edge to edge of the column.
+ */
+const resolveTrackEdgeGapPx = (isImmersive: boolean): number => (isImmersive ? 0 : SCROLL_TRACK_EDGE_GAP_PX);
 
 /** Ported verbatim from Editor.tsx. */
 const quantizeTopEdge = (valuePx: number, lineHeightPx: number) => Math.max(0, Math.round(valuePx / lineHeightPx) * lineHeightPx);
@@ -752,6 +756,7 @@ export function CM6Editor({
   caretSizeDeviationPx = 0,
   showLineNumbers = false,
   showReviewFlags = false,
+  isImmersive = false,
 }: CM6EditorProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -860,12 +865,17 @@ export function CM6Editor({
   // App.tsx's persistMenuStateNowRef documents.
   const scheduleCaretUpdateRef = useRef<(() => void) | null>(null);
   const cellWidthPxRef = useRef(cellWidthPx);
-  // Mirrors showReviewFlags for the resize-observer callback below, which
-  // needs the CURRENT value inside a mount-once closure -- same pattern as
-  // lineHeightPxRef/cellWidthPxRef. Only the flag column affects the right
-  // padding computed there (see computeReviewGutterRightPx), so line-number
-  // visibility doesn't need a mirror ref.
+  // Mirror showReviewFlags and isImmersive for the resize-observer callback
+  // below, which needs the CURRENT values inside a mount-once closure -- same
+  // pattern as lineHeightPxRef/cellWidthPxRef. Only the flag column and the
+  // grid scrollbar's column affect the right padding computed there (see
+  // computeRightEdgeReservePx), so line-number visibility doesn't need a
+  // mirror ref. isImmersiveRef is also what the scrollbar reads to know which
+  // track it is drawing.
   const showReviewFlagsRef = useRef(showReviewFlags);
+  const isImmersiveRef = useRef(isImmersive);
+  // Immersive mode's painted scroll column -- see paintScrollThumb.
+  const gridScrollPaintRef = useRef<HTMLDivElement | null>(null);
   const [caretStyle, setCaretStyle] = useState<React.CSSProperties | null>(null);
   const caretAnimationFrameRef = useRef<number | null>(null);
   // scrollerRect/layerRect don't change on a plain text keystroke -- only
@@ -1139,7 +1149,7 @@ export function CM6Editor({
     const viewportHeight = scroller.clientHeight;
     const contentHeight = scroller.scrollHeight;
     const trackHeight = track.clientHeight;
-    const usableTrackHeight = Math.max(0, trackHeight - (SCROLL_TRACK_EDGE_GAP_PX * 2));
+    const usableTrackHeight = Math.max(0, trackHeight - (resolveTrackEdgeGapPx(isImmersiveRef.current) * 2));
     const maxScrollTopPx = Math.max(0, contentHeight - viewportHeight);
 
     if (viewportHeight <= 0 || contentHeight <= 0 || trackHeight <= 0) {
@@ -1202,6 +1212,8 @@ export function CM6Editor({
         scroller.clientWidth,
         lineMetrics?.lineHeightPx ?? 0,
         cellWidthPxRef.current,
+        // Which track: the grid's has another minimum (below).
+        isImmersiveRef.current ? 'grid' : 'rail',
       ].join('|'),
       ratio,
       provisionalRatio: viewportHeight / contentHeight,
@@ -1214,7 +1226,11 @@ export function CM6Editor({
       // stop being square the moment either changed.
       // `||`, not `??`: before the thumb is laid out `offsetWidth` is 0, which
       // is a real number and a useless floor.
-      minThumbHeightPx: scrollThumbElRef.current?.offsetWidth || SCROLL_TRACK_MIN_THUMB_HEIGHT_PX,
+      // In immersive mode's grid track the thumb is whole rows, so its
+      // smallest is one row.
+      minThumbHeightPx: isImmersiveRef.current
+        ? lineHeightPxRef.current
+        : (scrollThumbElRef.current?.offsetWidth || SCROLL_TRACK_MIN_THUMB_HEIGHT_PX),
     });
     const maxThumbTravelPx = Math.max(0, usableTrackHeight - thumbHeightPx);
 
@@ -1229,6 +1245,32 @@ export function CM6Editor({
     };
   }, [readDocumentLines]);
 
+  /**
+   * The one place the thumb reaches the screen. The sync below and the
+   * bridged-journey stretch both draw through here, so the two presentations
+   * can never disagree about where the thumb is. The ordinary track moves its
+   * thumb element; immersive mode's grid track colours whole rows instead
+   * (editor/immersiveScrollColumn.ts), as two custom properties the painted
+   * column's own background reads -- two style writes per frame, however long
+   * the journey.
+   */
+  const paintScrollThumb = useCallback((topPx: number, heightPx: number) => {
+    if (isImmersiveRef.current) {
+      const paint = gridScrollPaintRef.current;
+      if (!paint) return;
+      const rowHeightPx = lineHeightPxRef.current;
+      const totalRows = rowHeightPx > 0 ? Math.round(paint.clientHeight / rowHeightPx) : 0;
+      const { startRow, rows } = snapThumbSpanToRows(topPx, heightPx, rowHeightPx, totalRows);
+      paint.style.setProperty('--thumb-start', `${startRow * rowHeightPx}px`);
+      paint.style.setProperty('--thumb-end', `${(startRow + rows) * rowHeightPx}px`);
+      return;
+    }
+    const thumb = scrollThumbElRef.current;
+    if (!thumb) return;
+    thumb.style.top = `${topPx}px`;
+    thumb.style.height = `${Math.max(0, heightPx)}px`;
+  }, []);
+
   const syncCustomScrollbar = useCallback((options?: { force?: boolean }) => {
     // A drag and a bridged journey both own the thumb outright while they run;
     // a sync reading the real scroll position mid-cut says nothing anybody
@@ -1241,6 +1283,7 @@ export function CM6Editor({
       setScrollThumbHeightPx(0);
       setScrollThumbTopPx(0);
       setIsScrollThumbActive(false);
+      paintScrollThumb(0, 0);
       return;
     }
 
@@ -1252,18 +1295,20 @@ export function CM6Editor({
       setScrollThumbHeightPx(0);
       setScrollThumbTopPx(0);
       setIsScrollThumbActive(false);
+      paintScrollThumb(0, 0);
       return;
     }
 
     if (geometry.contentHeight <= geometry.viewportHeight) {
       setScrollThumbHeightPx(geometry.usableTrackHeight);
-      setScrollThumbTopPx(SCROLL_TRACK_EDGE_GAP_PX);
+      setScrollThumbTopPx(resolveTrackEdgeGapPx(isImmersiveRef.current));
       setIsScrollThumbActive(false);
+      paintScrollThumb(resolveTrackEdgeGapPx(isImmersiveRef.current), geometry.usableTrackHeight);
       return;
     }
 
     const scrollRatio = geometry.maxScrollTopPx > 0 ? scroller.scrollTop / geometry.maxScrollTopPx : 0;
-    const derivedThumbTop = SCROLL_TRACK_EDGE_GAP_PX + Math.round(geometry.maxThumbTravelPx * scrollRatio);
+    const derivedThumbTop = resolveTrackEdgeGapPx(isImmersiveRef.current) + Math.round(geometry.maxThumbTravelPx * scrollRatio);
 
     // Standing where a click sent it: draw it there. See thumbLandingPinRef.
     const pin = thumbLandingPinRef.current;
@@ -1271,8 +1316,8 @@ export function CM6Editor({
     if (pin !== null && !isPinned) thumbLandingPinRef.current = null;
     const nextThumbTop = isPinned
       ? Math.max(
-        SCROLL_TRACK_EDGE_GAP_PX,
-        Math.min(pin.thumbTopPx, SCROLL_TRACK_EDGE_GAP_PX + geometry.maxThumbTravelPx),
+        resolveTrackEdgeGapPx(isImmersiveRef.current),
+        Math.min(pin.thumbTopPx, resolveTrackEdgeGapPx(isImmersiveRef.current) + geometry.maxThumbTravelPx),
       )
       : derivedThumbTop;
 
@@ -1290,12 +1335,8 @@ export function CM6Editor({
     // every sync -- the state always differed, so React always re-rendered.
     // Now that the height is committed and stable, the handoff has to be
     // explicit.
-    const thumbEl = scrollThumbElRef.current;
-    if (thumbEl) {
-      thumbEl.style.top = `${nextThumbTop}px`;
-      thumbEl.style.height = `${Math.max(0, geometry.thumbHeightPx)}px`;
-    }
-  }, [isEditScrollInteractionBlocked, readScrollbarGeometry]);
+    paintScrollThumb(nextThumbTop, geometry.thumbHeightPx);
+  }, [isEditScrollInteractionBlocked, readScrollbarGeometry, paintScrollThumb]);
 
   useEffect(() => {
     syncCustomScrollbarRef.current = syncCustomScrollbar;
@@ -1372,16 +1413,12 @@ export function CM6Editor({
         leadProgress,
         trailProgress,
       });
-      const thumb = scrollThumbElRef.current;
-      if (thumb) {
-        thumb.style.top = `${topPx}px`;
-        thumb.style.height = `${Math.max(0, heightPx)}px`;
-      }
+      paintScrollThumb(topPx, heightPx);
       thumbRubberBandRafRef.current = requestAnimationFrame(frame);
     };
 
     thumbRubberBandRafRef.current = requestAnimationFrame(frame);
-  }, [stopThumbRubberBand, syncCustomScrollbar]);
+  }, [stopThumbRubberBand, syncCustomScrollbar, paintScrollThumb]);
 
   useEffect(() => {
     startThumbRubberBandRef.current = startThumbRubberBand;
@@ -1396,13 +1433,13 @@ export function CM6Editor({
     if (!scroller || !geometry) return;
 
     const maxThumbTravel = geometry.maxThumbTravelPx;
-    const minThumbTop = SCROLL_TRACK_EDGE_GAP_PX;
-    const maxThumbTop = SCROLL_TRACK_EDGE_GAP_PX + maxThumbTravel;
+    const minThumbTop = resolveTrackEdgeGapPx(isImmersiveRef.current);
+    const maxThumbTop = resolveTrackEdgeGapPx(isImmersiveRef.current) + maxThumbTravel;
     const clampedTop = Math.max(minThumbTop, Math.min(thumbTopPx, maxThumbTop));
     setScrollThumbTopPx(clampedTop);
 
     const maxScrollTop = geometry.maxScrollTopPx;
-    const ratio = maxThumbTravel > 0 ? (clampedTop - SCROLL_TRACK_EDGE_GAP_PX) / maxThumbTravel : 0;
+    const ratio = maxThumbTravel > 0 ? (clampedTop - resolveTrackEdgeGapPx(isImmersiveRef.current)) / maxThumbTravel : 0;
     const targetScrollTop = ratio * maxScrollTop;
     const quantizedScrollTop = Math.max(0, Math.min(maxScrollTop, Math.round(targetScrollTop / lineHeightPxRef.current) * lineHeightPxRef.current));
     scroller.scrollTop = quantizedScrollTop;
@@ -1437,6 +1474,12 @@ export function CM6Editor({
   useEffect(() => {
     showReviewFlagsRef.current = showReviewFlags;
   }, [showReviewFlags]);
+
+  // A layout effect, not a passive one: the scrollbar sync that follows the
+  // track swap runs in a layout effect too, and must already see the new mode.
+  useLayoutEffect(() => {
+    isImmersiveRef.current = isImmersive;
+  }, [isImmersive]);
 
   useEffect(() => {
     hasViewportLinesRef.current = hasViewportLines;
@@ -1574,14 +1617,14 @@ export function CM6Editor({
   // scroller's own right edge -- same remainder-into-the-last-cell trick
   // alignmentPaddingBottomPx below already uses for the bottom edge, just
   // horizontal.
-  // Shares computeReviewGutterRightPx with the resize-observer callback
+  // Shares computeRightEdgeReservePx with the resize-observer callback
   // below, which applies the same formula synchronously against a freshly
   // measured width -- see that function's own doc comment for why the
   // formula needs to live in exactly one place, called from two triggers.
-  const reviewGutterRightPx = computeReviewGutterRightPx(scrollerClientWidthPx, cellWidthPx, showReviewFlags);
+  const rightEdgeReservePx = computeRightEdgeReservePx(scrollerClientWidthPx, cellWidthPx, { reviewFlags: showReviewFlags, scrollColumn: isImmersive });
   // Rendered via an explicit `left`, never `right: 0`: a `right: 0` box's
   // right edge is resolved live by the browser against the parent's actual
-  // current width on every layout pass, while reviewGutterRightPx (its
+  // current width on every layout pass, while rightEdgeReservePx (its
   // width) only updates when scrollerClientWidthPx's own state does (the
   // ResizeObserver callback/settle loop, not every frame) -- during a live
   // window/pane resize those two go out of sync for a few frames, and a
@@ -1593,9 +1636,9 @@ export function CM6Editor({
   // never a CSS edge keyword). Clamped to 0: before the first real width
   // measurement lands, scrollerClientWidthPx is still 0 and this would
   // otherwise go negative.
-  const reviewGutterRightLeftPx = Math.max(0, scrollerClientWidthPx - reviewGutterRightPx);
+  const reviewGutterRightLeftPx = Math.max(0, scrollerClientWidthPx - rightEdgeReservePx);
   // The VISIBLE/clickable flag column is exactly one box, not the full
-  // reviewGutterRightPx region (that's one box PLUS the cut-off remainder --
+  // rightEdgeReservePx region (that's one box PLUS the cut-off remainder --
   // see its own comment -- reserved from text wrapping so the remainder
   // sliver stays clear of glyphs too, but the flag box itself doesn't need
   // to fill it). Anchored at the same reviewGutterRightLeftPx grid boundary,
@@ -1604,6 +1647,15 @@ export function CM6Editor({
   // rendering it at the full reserved width visually extended the gutter
   // all the way to the border, past where a single box actually ends.
   const reviewGutterFlagBoxWidthPx = showReviewFlags ? cellWidthPx : 0;
+  // Immersive mode's grid scrollbar: the last full box column, over exactly
+  // the whole rows the viewport shows -- the half row the grid opens with and
+  // the sliver it closes with stay out. See editor/immersiveScrollColumn.ts.
+  const immersiveScrollColumnLeftPx = isImmersive && scrollerClientWidthPx > 0 && cellWidthPx > 0
+    ? resolveScrollColumnLeftPx(reviewGutterRightLeftPx, cellWidthPx, showReviewFlags)
+    : null;
+  const immersiveTrackRows = isImmersive && lineHeightPx > 0
+    ? Math.max(0, Math.floor((scrollerClientHeightPx - halfLineHeightPx) / lineHeightPx))
+    : 0;
   // Whether the gutter's static top/bottom edge box (see
   // ReviewGutterEdgeLines) should show an up/down-long "jump" arrow -- true
   // iff a flagged line exists strictly past that edge (above
@@ -1678,12 +1730,12 @@ export function CM6Editor({
     // far edges are expected, not a bug -- see the grid overlay's own
     // backgroundPosition below, which is shifted by the exact same amount
     // so text and grid move together and stay aligned).
-    // reviewGutterLeftPx/reviewGutterRightPx (0 when the gutter is off) push
+    // reviewGutterLeftPx/rightEdgeReservePx (0 when the gutter is off) push
     // the grid-alignment math above outward without altering it: text still
     // starts exactly halfCellWidthPx past wherever the content box now
     // begins, the gutter columns occupy the reserved space to either side.
     view.contentDOM.style.paddingLeft = `${halfCellWidthPx + reviewGutterLeftPx}px`;
-    view.contentDOM.style.paddingRight = `${reviewGutterRightPx}px`;
+    view.contentDOM.style.paddingRight = `${rightEdgeReservePx}px`;
     view.contentDOM.style.paddingTop = `${topBoundaryVisualPx}px`;
     view.contentDOM.style.paddingBottom = `${bottomBoundaryPxDisplay + alignmentPaddingBottomPx}px`;
     // See glyphCenteringShiftPx's own doc comment above -- closes the real
@@ -1711,7 +1763,7 @@ export function CM6Editor({
     // comment for the class of bug this closes (a fresh contentDOM with no
     // inline styles yet, paired with unchanged geometry numbers that would
     // otherwise make React skip re-running this effect).
-  }, [topBoundaryVisualPx, bottomBoundaryPxDisplay, alignmentPaddingBottomPx, halfCellWidthPx, reviewGutterLeftPx, reviewGutterRightPx, glyphCenteringShiftPx, viewMountGeneration]);
+  }, [topBoundaryVisualPx, bottomBoundaryPxDisplay, alignmentPaddingBottomPx, halfCellWidthPx, reviewGutterLeftPx, rightEdgeReservePx, glyphCenteringShiftPx, viewMountGeneration]);
 
   // Custom scrollbar sync -- ported from Editor.tsx's own three sync
   // effects. Runs after the portal target (scrollbarHost) or any layout
@@ -1722,7 +1774,10 @@ export function CM6Editor({
   useLayoutEffect(() => {
     syncCustomScrollbar();
     requestAnimationFrame(() => syncCustomScrollbar());
-  }, [syncCustomScrollbar, scrollbarHost]);
+  // isImmersive and the grid column's geometry: entering or leaving immersive
+  // mode swaps the track element, and the thumb has to be drawn onto the new
+  // one before paint.
+  }, [syncCustomScrollbar, scrollbarHost, isImmersive, immersiveScrollColumnLeftPx, immersiveTrackRows]);
 
   useEffect(() => {
     syncCustomScrollbar();
@@ -3160,7 +3215,7 @@ export function CM6Editor({
           });
           if (timing && geometry) {
             const ratio = geometry.maxScrollTopPx > 0 ? targetScrollTopPx / geometry.maxScrollTopPx : 0;
-            const targetThumbTopPx = SCROLL_TRACK_EDGE_GAP_PX
+            const targetThumbTopPx = resolveTrackEdgeGapPx(isImmersiveRef.current)
               + Math.round(geometry.maxThumbTravelPx * Math.max(0, Math.min(1, ratio)));
             // The landing is where this journey was aimed, not what the height
             // estimate says once it arrives -- see thumbLandingPinRef.
@@ -4597,12 +4652,12 @@ export function CM6Editor({
     // pane to its new width but contentDOM's paddingRight is still stale:
     // CM6 wraps text against that stale width for one visible frame, then
     // snaps to the corrected wrap the moment React catches up. Applying the
-    // same formula (computeReviewGutterRightPx) directly to the DOM in the
+    // same formula (computeRightEdgeReservePx) directly to the DOM in the
     // exact callback that measured the new width closes that window --
     // found live as "characters next to the flag column jitter, wrap, then
     // revert" while dragging a pane divider narrower.
     const applySynchronousGutterRightPadding = (measuredWidthPx: number) => {
-      view.contentDOM.style.paddingRight = `${computeReviewGutterRightPx(measuredWidthPx, cellWidthPxRef.current, showReviewFlagsRef.current)}px`;
+      view.contentDOM.style.paddingRight = `${computeRightEdgeReservePx(measuredWidthPx, cellWidthPxRef.current, { reviewFlags: showReviewFlagsRef.current, scrollColumn: isImmersiveRef.current })}px`;
     };
 
     const resizeObserver = new ResizeObserver(() => {
@@ -5101,7 +5156,7 @@ export function CM6Editor({
         const scrollRatio = geometry.maxScrollTopPx > 0
           ? viewRef.current.scrollDOM.scrollTop / geometry.maxScrollTopPx
           : 0;
-        const currentThumbTop = SCROLL_TRACK_EDGE_GAP_PX + (geometry.maxThumbTravelPx * scrollRatio);
+        const currentThumbTop = resolveTrackEdgeGapPx(isImmersiveRef.current) + (geometry.maxThumbTravelPx * scrollRatio);
         const currentThumbBottom = currentThumbTop + geometry.thumbHeightPx;
         const reachedCursor = hold.direction === 1
           ? currentThumbBottom >= hold.cursorYPx
@@ -5136,11 +5191,11 @@ export function CM6Editor({
 
     const targetThumbTop = clickY - (geometry.thumbHeightPx / 2);
     const maxThumbTravel = geometry.maxThumbTravelPx;
-    const minThumbTop = SCROLL_TRACK_EDGE_GAP_PX;
-    const maxThumbTop = SCROLL_TRACK_EDGE_GAP_PX + maxThumbTravel;
+    const minThumbTop = resolveTrackEdgeGapPx(isImmersiveRef.current);
+    const maxThumbTop = resolveTrackEdgeGapPx(isImmersiveRef.current) + maxThumbTravel;
     const clampedTop = Math.max(minThumbTop, Math.min(targetThumbTop, maxThumbTop));
     const maxScrollTop = geometry.maxScrollTopPx;
-    const ratio = maxThumbTravel > 0 ? (clampedTop - SCROLL_TRACK_EDGE_GAP_PX) / maxThumbTravel : 0;
+    const ratio = maxThumbTravel > 0 ? (clampedTop - resolveTrackEdgeGapPx(isImmersiveRef.current)) / maxThumbTravel : 0;
     const targetScrollTop = ratio * maxScrollTop;
 
     // Click travels, hold snaps -- see scrollTrackHold.ts. The same gesture as
@@ -5249,6 +5304,24 @@ export function CM6Editor({
         goTo(false);
       },
     });
+  };
+
+  // Immersive mode's grid track. The thumb's own boxes do nothing -- there is
+  // no drag to start. Anywhere else is an ordinary track press, read at its
+  // exact pixel: the upper and the lower part of one box land differently, and
+  // either way that box ends up coloured (see snapThumbSpanToRows).
+  const handleGridTrackMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    const paint = gridScrollPaintRef.current;
+    if (paint) {
+      const offsetYPx = event.clientY - paint.getBoundingClientRect().top;
+      const thumbStartPx = Number.parseFloat(paint.style.getPropertyValue('--thumb-start')) || 0;
+      const thumbEndPx = Number.parseFloat(paint.style.getPropertyValue('--thumb-end')) || 0;
+      if (thumbEndPx > thumbStartPx && offsetYPx >= thumbStartPx && offsetYPx < thumbEndPx) {
+        event.preventDefault();
+        return;
+      }
+    }
+    handleTrackMouseDown(event);
   };
 
   const handleTrackContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -5733,6 +5806,28 @@ export function CM6Editor({
           />
         </>
       )}
+      {/* Immersive mode's grid scrollbar -- see editor/immersiveScrollColumn.ts.
+          Two elements over the same boxes: the painted column under the grid
+          lines (zIndex 2, like the gutter), so it reads as boxes of the grid;
+          and a transparent hit target above the text layer, which would
+          otherwise take every click on the column. The hit target is also the
+          track the scrollbar geometry measures. */}
+      {immersiveScrollColumnLeftPx !== null && immersiveTrackRows > 0 && (
+        <>
+          <div
+            ref={gridScrollPaintRef}
+            className="absolute pointer-events-none immersive-scroll-column"
+            style={{ top: halfLineHeightPx, left: immersiveScrollColumnLeftPx, width: cellWidthPx, height: immersiveTrackRows * lineHeightPx, zIndex: 2 }}
+          />
+          <div
+            ref={scrollbarTrackRef}
+            className="absolute"
+            style={{ top: halfLineHeightPx, left: immersiveScrollColumnLeftPx, width: cellWidthPx, height: immersiveTrackRows * lineHeightPx, zIndex: 11 }}
+            onMouseDown={handleGridTrackMouseDown}
+            onContextMenu={handleTrackContextMenu}
+          />
+        </>
+      )}
       {/* Line-number + review-flag gutter -- reuses the exact grid units
           (cellWidthPx/lineHeightPx) and half-cell phase offset as the box
           grid above, so it reads as columns of that same grid rather than a
@@ -5743,7 +5838,7 @@ export function CM6Editor({
           the way the grid/boundary zones are -- reviewGutterLeftPx/RightPx
           are already 0 when off, so this renders nothing (not a wrong-pitch
           flash) until those are ready either way. */}
-      {(showLineNumbers || showReviewFlags) && (reviewGutterLeftPx > 0 || reviewGutterRightPx > 0) && (
+      {(showLineNumbers || showReviewFlags) && (reviewGutterLeftPx > 0 || rightEdgeReservePx > 0) && (
         <>
           {/* left starts at halfCellWidthPx, not 0 -- the same "infinity
               grid" breathing-room shift the content's own paddingLeft gets,
@@ -5966,7 +6061,9 @@ export function CM6Editor({
   return (
     <>
       {editorLayer}
-      {scrollbarHost ? createPortal(scrollbarRail, scrollbarHost) : null}
+      {/* Not in immersive mode: its track is the grid column above, and one
+          element at a time can be the track the scrollbar measures. */}
+      {scrollbarHost && !isImmersive ? createPortal(scrollbarRail, scrollbarHost) : null}
     </>
   );
 }
