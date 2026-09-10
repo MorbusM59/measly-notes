@@ -1541,6 +1541,7 @@ export function EditorSection({
     adapterRef,
     documentFindDirective,
     isDocumentFindCaseSensitive: effectiveCaseSensitive,
+    isSearchHighlightActive: isSidebarVisible && sidebarMode === 'find',
     renderedDisplayText,
     previewScrollToSourceLineRef: editorSectionMountRest.previewScrollToSourceLineRef,
     previewDocumentPositionRef,

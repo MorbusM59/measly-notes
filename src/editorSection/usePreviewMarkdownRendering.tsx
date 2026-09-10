@@ -187,6 +187,15 @@ export interface UsePreviewMarkdownRenderingOptions {
   adapterRef: MutableRefObject<EditorAdapter | null>
   documentFindDirective: DocumentFindDirective
   isDocumentFindCaseSensitive: boolean
+  /**
+   * Whether the find panel is actually on screen (sidebar visible, showing
+   * find). Render view highlights EVERY hit, so a query left behind in a
+   * closed or switched-away find panel would otherwise keep marking up the
+   * reader's text with nothing on screen to explain it. The query itself is
+   * kept -- reopening the panel brings the highlights straight back. Edit
+   * view needs no such gate: it only ever selects the hit you click.
+   */
+  isSearchHighlightActive: boolean
   renderedDisplayText: string
   /**
    * Written (not read) by this hook so `useEditorSectionMount`'s scroll-
@@ -337,6 +346,7 @@ export function usePreviewMarkdownRendering({
   adapterRef,
   documentFindDirective,
   isDocumentFindCaseSensitive,
+  isSearchHighlightActive,
   renderedDisplayText,
   previewScrollToSourceLineRef,
   previewDocumentPositionRef,
@@ -1198,9 +1208,12 @@ export function usePreviewMarkdownRendering({
     [isViewingAutoOpenItemsChapter, handleToggleOpenItem, isActiveNoteEditable],
   )
 
+  // An empty needle is the plugin's own "highlight nothing" -- see
+  // isSearchHighlightActive for why a hidden find panel highlights nothing.
+  const highlightFindText = isSearchHighlightActive ? documentFindDirective.findText : ''
   const previewSearchHighlightPlugin = useMemo(
-    () => createPreviewSearchHighlightRehypePlugin(documentFindDirective.findText, isDocumentFindCaseSensitive),
-    [documentFindDirective.findText, isDocumentFindCaseSensitive],
+    () => createPreviewSearchHighlightRehypePlugin(highlightFindText, isDocumentFindCaseSensitive),
+    [highlightFindText, isDocumentFindCaseSensitive],
   )
 
   // ---------------------------------------------------------------------
