@@ -172,7 +172,7 @@ export function SectionTabBar({
         <button
           type="button"
           className={`btn-icon sidebar-toggle${isSidebarVisible ? ' is-active' : ''}`}
-          data-tooltip={isSidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+          data-tooltip={isSidebarVisible ? 'Hide sidebar (Ctrl+Space)' : 'Show sidebar (Ctrl+Space)'}
           aria-label={isSidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
           onClick={toggleSidebarVisible}
         >

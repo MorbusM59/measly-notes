@@ -42,8 +42,12 @@ export function resolveDocumentFindDirective(
   replaceQuery: string,
   isReplaceMode: boolean,
 ): DocumentFindDirective {
+  // Both terms are taken raw -- never trimmed. A leading or trailing space is
+  // part of what the reader is looking for (a double space, a space before
+  // punctuation), and trimming made such searches, and replacing them,
+  // impossible. Only an empty term means "nothing to find".
   return {
-    findText: normalizeInternalText(findQuery).trim(),
+    findText: normalizeInternalText(findQuery),
     replaceText: isReplaceMode ? normalizeInternalText(replaceQuery) : '',
     isReplaceMode,
   };
@@ -55,6 +59,11 @@ export function resolveDocumentFindDirective(
  * all-upper matches recase the whole replacement, a single Capitalized
  * word recases just its first letter, anything else (mixed case) is left
  * as the literal replacement text.
+ *
+ * "Capitalized" is judged on the first LETTER, not the first character, on
+ * both sides: find and replace terms are taken raw, so a match or a
+ * replacement can open with spaces or punctuation (" Foo", "(bar") and must
+ * still read, and be written, as Capitalized.
  */
 export function applyPreserveCase(matchedText: string, replacementText: string): string {
   if (!/[a-zA-Z]/.test(matchedText)) {
@@ -72,13 +81,23 @@ export function applyPreserveCase(matchedText: string, replacementText: string):
     return replacementText.toLowerCase();
   }
 
-  const firstIsUpper = /[A-Z]/.test(matchedText[0]);
-  const restIsLower = !/[A-Z]/.test(matchedText.slice(1));
+  const firstLetterIndex = matchedText.search(/[a-zA-Z]/);
+  const firstIsUpper = /[A-Z]/.test(matchedText[firstLetterIndex]);
+  const restIsLower = !/[A-Z]/.test(matchedText.slice(firstLetterIndex + 1));
   if (firstIsUpper && restIsLower) {
-    return replacementText.charAt(0).toUpperCase() + replacementText.slice(1).toLowerCase();
+    return capitalizeFirstLetter(replacementText);
   }
 
   return replacementText;
+}
+
+/** Upper-cases the first letter wherever it sits, lower-cases every letter after it; anything before it (spaces, punctuation) is left as is. */
+function capitalizeFirstLetter(text: string): string {
+  const firstLetterIndex = text.search(/[a-zA-Z]/);
+  if (firstLetterIndex < 0) {
+    return text;
+  }
+  return text.slice(0, firstLetterIndex) + text[firstLetterIndex].toUpperCase() + text.slice(firstLetterIndex + 1).toLowerCase();
 }
 
 export function buildDocumentFindHits(
@@ -91,8 +110,9 @@ export function buildDocumentFindHits(
   // every keystroke via useDocumentFind's useMemo regardless of whether the
   // find bar is even open, so normalizing the full document here whenever
   // there's no query to search for was a real, avoidable per-keystroke
-  // O(document length) cost.
-  const normalizedQuery = normalizeInternalText(query).trim();
+  // O(document length) cost. The query is taken raw (see
+  // resolveDocumentFindDirective): only an empty one means nothing to search.
+  const normalizedQuery = normalizeInternalText(query);
   if (!normalizedQuery) {
     return [];
   }
@@ -142,8 +162,8 @@ export function buildPreviewVisibleDocumentFindHits(
 ): DocumentFindHit[] {
   // Same query-first ordering as buildDocumentFindHits, and for a stronger
   // reason here: with no query there is nothing to search, and the
-  // projection is a full remark parse of the document.
-  const normalizedQuery = normalizeInternalText(query).trim();
+  // projection is a full remark parse of the document. Raw, as above.
+  const normalizedQuery = normalizeInternalText(query);
   if (!normalizedQuery) {
     return [];
   }

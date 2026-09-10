@@ -639,6 +639,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 | --- | --- |
 | \`Ctrl+N\` | New blank note |
 | \`Ctrl+Shift+N\` | New note titled from clipboard |
+| \`Ctrl+Space\` | Show / hide the sidebar |
 | \`Esc\` | Toggle edit / preview (or blur a focused field) |
 | Hold \`Esc\` | Open the quick actions menu |
 | \`Ctrl+F\` | Find in note -- opens the sidebar if it's closed; press again from the find field to close it |

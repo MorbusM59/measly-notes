@@ -1213,6 +1213,10 @@ const NoteListItem = memo(function NoteListItem({
   }, [primedAction, note.id, onPrimedLeftClick, onSelect])
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    // Plain Enter/Space only: a modified combo is an app-wide shortcut (Ctrl+Space
+    // toggles the sidebar), and claiming it here would open this note instead --
+    // this handler runs before App's window-level one, which skips handled keys.
+    if (event.ctrlKey || event.altKey || event.metaKey) return
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
       onSelect(note.id)
@@ -8793,6 +8797,21 @@ ${markdownHtml}
         return
       }
 
+      // Ctrl+Space shows or hides the sidebar from anywhere -- fields and the
+      // editor included. Closing it with focus inside hands focus back to the
+      // editor, as Ctrl+F's close does; otherwise focus would fall to <body>
+      // along with the sidebar's DOM. A held key toggles once, not per repeat.
+      if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && event.code === 'Space') {
+        event.preventDefault()
+        if (event.repeat) return
+        const wasSidebarFocused = Boolean(target?.closest('.notes-sidebar'))
+        toggleSidebarVisible()
+        if (isSidebarVisible && wasSidebarFocused) {
+          activeSection?.scheduleFocusEditorInEditMode()
+        }
+        return
+      }
+
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'n') {
         event.preventDefault()
         void createNoteFromClipboardTitle()
@@ -9487,7 +9506,7 @@ ${markdownHtml}
                         })}
                         {(activeSection?.documentFindHits.length ?? 0) === 0 ? (
                           <div className="notes-empty-state">
-                            {(activeSection?.documentFindQuery ?? '').trim()
+                            {(activeSection?.documentFindQuery ?? '')
                               ? 'No matches in the current note.'
                               : 'Type in the search field to find text in the current note.'}
                           </div>
