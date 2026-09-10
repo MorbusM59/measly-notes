@@ -31,8 +31,9 @@
 }
 
 /* Sized via an inline exact pixel flex-basis (grow/shrink 0), derived in
- * App.tsx from widthFraction weights and the observed row width -- see
- * computeSlotWidthsPx in sectionWidths.ts. That function, not flexbox, owns
+ * App.tsx from widthFraction weights and the row width derived from the grid's
+ * columns (never measured -- see sectionSlotWidthsPx) -- see
+ * computeSlotWidthsPx in slotWidths.ts. That function, not flexbox, owns
  * min-width enforcement and window-shrink reflow, so no CSS min-width here.
  * During a divider drag the two dragged neighbors' bases are written
  * directly to the DOM per mousemove, then committed back to React state on

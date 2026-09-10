@@ -2087,8 +2087,17 @@ function App() {
   const [persistenceReady, setPersistenceReady] = useState(false)
   // Seeded at the shell's own minimum; the real width lands on the first
   // ResizeObserver callback (see appShellMinWidthPx).
-  const [appShellWidthPx, setAppShellWidthPx] = useState(appShellMinWidthPx)
+  // The shell's measured width is an INPUT (the window's width -- nothing we
+  // render sets it), so it is observed. The minimum it is clamped to depends
+  // on the sidebar's visibility, so the clamp is applied here, in render, and
+  // never in the observer's effect: applied there, it lagged a render behind
+  // every sidebar toggle, and so did everything laid out from it.
+  const [appShellMeasuredWidthPx, setAppShellMeasuredWidthPx] = useState(0)
   const [isSidebarVisible, setIsSidebarVisible] = useState(true)
+  const appShellWidthPx = Math.max(
+    isSidebarVisible ? appShellMinWidthPx : appShellMinWidthPx - (sidebarWidthPx + GRID_DIVIDER_PX),
+    appShellMeasuredWidthPx,
+  )
   const [isEscapeHoldPanelOpen, setIsEscapeHoldPanelOpen] = useState(false)
   const escapeHoldTimerRef = useRef<number | null>(null)
   const escapeHoldTriggeredRef = useRef(false)
@@ -7381,50 +7390,31 @@ ${markdownHtml}
     }
   }, [applyResolvedSections, editorSections, pruneReviewGutterVisibility, syncFixedWidthsFromEntries, undockedNote])
 
-  const editorSectionsRowRef = useRef<HTMLDivElement | null>(null)
   const sectionSlotElByIdRef = useRef<Map<string, HTMLDivElement>>(new Map())
 
-  // Deterministic slot sizing: the row's live width is observed and each
-  // slot's exact pixel width is derived from it (see computeSlotWidthsPx),
-  // rather than letting flex-grow weights improvise. This is what makes
-  // window shrinks reflow sections (down to their minimum, never clipping)
-  // and makes create/close/drag arithmetic land exactly as computed.
-  const [slotsRowWidthPx, setSectionsRowWidthPx] = useState<number | null>(null)
-
-  useLayoutEffect(() => {
-    const rowEl = editorSectionsRowRef.current
-    if (!rowEl) return
-
-    const applyMeasuredWidth = (widthPx: number) => {
-      setSectionsRowWidthPx((previous) => (
-        previous !== null && Math.abs(previous - widthPx) < 0.5 ? previous : widthPx
-      ))
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        applyMeasuredWidth(entry.contentRect.width)
-      }
-    })
-    observer.observe(rowEl)
-    applyMeasuredWidth(rowEl.getBoundingClientRect().width)
-
-    return () => observer.disconnect()
-  }, [])
-
-  const sectionSlotWidthsPx = useMemo(() => {
-    if (slotsRowWidthPx === null || slotsRowWidthPx <= 0) return null
-    return computeSlotWidthsPx(
-      editorSections.map((entry) => ({
-        id: entry.id,
-        widthFraction: entry.widthFraction,
-        fixedWidthPx: fixedWidthPxBySectionId.get(entry.id) ?? null,
-      })),
-      slotsRowWidthPx,
-      GRID_DIVIDER_PX,
-      SLOT_MIN_WIDTH_PX,
-    )
-  }, [editorSections, slotsRowWidthPx, fixedWidthPxBySectionId])
+  // Deterministic slot sizing: each slot's exact pixel width is derived from
+  // the row's width (see computeSlotWidthsPx), rather than letting flex-grow
+  // weights improvise. This is what makes window shrinks reflow sections
+  // (down to their minimum, never clipping) and makes create/close/drag
+  // arithmetic land exactly as computed.
+  //
+  // The row width is DERIVED (editorSectionsRowWidthPx: the grid's explicit
+  // pixel columns, computed from state), never measured off the row. It used
+  // to be read back by a ResizeObserver, but the grid template that sizes the
+  // row is our own output, recomputed in the same render as the sidebar's
+  // visibility -- so the measurement always arrived a render late, and
+  // toggling the sidebar painted one frame of slots at their old widths in
+  // the row's new position. Derived, the grid and the slots change together.
+  const sectionSlotWidthsPx = useMemo(() => computeSlotWidthsPx(
+    editorSections.map((entry) => ({
+      id: entry.id,
+      widthFraction: entry.widthFraction,
+      fixedWidthPx: fixedWidthPxBySectionId.get(entry.id) ?? null,
+    })),
+    editorSectionsRowWidthPx,
+    GRID_DIVIDER_PX,
+    SLOT_MIN_WIDTH_PX,
+  ), [editorSections, editorSectionsRowWidthPx, fixedWidthPxBySectionId])
 
   // Drag-resizes exactly the two sections on either side of the divider that
   // was grabbed. Slots render with an exact pixel flex-basis (grow/shrink 0,
@@ -7761,27 +7751,24 @@ ${markdownHtml}
     }
   }, [enqueueExternalFileImport, persistenceReady])
 
+  // Measures only -- see appShellMeasuredWidthPx for why the sidebar-dependent
+  // clamp lives in render instead. The shell is rendered unconditionally, so
+  // attaching once at mount is enough.
   useEffect(() => {
     const shellElement = appShellRef.current
     if (!shellElement) return
 
-    const effectiveMin = isSidebarVisible ? appShellMinWidthPx : (appShellMinWidthPx - (sidebarWidthPx + GRID_DIVIDER_PX))
-
-    const updateShellWidth = () => {
-      setAppShellWidthPx(Math.max(effectiveMin, Math.round(shellElement.clientWidth)))
-    }
-
-    updateShellWidth()
+    setAppShellMeasuredWidthPx(Math.round(shellElement.clientWidth))
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (!entry) return
-      setAppShellWidthPx(Math.max(effectiveMin, Math.round(entry.contentRect.width)))
+      setAppShellMeasuredWidthPx(Math.round(entry.contentRect.width))
     })
 
     observer.observe(shellElement)
     return () => observer.disconnect()
-  }, [isSidebarVisible, appShellMinWidthPx, sidebarWidthPx])
+  }, [])
 
   const sortedNotes = useMemo(() => {
     return [...notes].sort((a, b) => b.updatedAtMs - a.updatedAtMs)
@@ -10087,7 +10074,7 @@ ${markdownHtml}
               toggleTableOfContents={activeSection?.toggleTableOfContents ?? noop}
             />
 
-            <div className="editor-sections-row" ref={editorSectionsRowRef}>
+            <div className="editor-sections-row">
               {editorSections.map((entry, index) => (
               <Fragment key={entry.id}>
                 {index > 0 ? (
@@ -10101,9 +10088,7 @@ ${markdownHtml}
                 <div
                   className="editor-section-slot"
                   data-section-id={entry.id}
-                  style={sectionSlotWidthsPx?.has(entry.id)
-                    ? { flexGrow: 0, flexShrink: 0, flexBasis: `${sectionSlotWidthsPx.get(entry.id)}px` }
-                    : { flexGrow: entry.widthFraction ?? (1 / editorSections.length), flexShrink: 1, flexBasis: 0 }}
+                  style={{ flexGrow: 0, flexShrink: 0, flexBasis: `${sectionSlotWidthsPx.get(entry.id) ?? 0}px` }}
                   ref={(el) => {
                     if (el) {
                       sectionSlotElByIdRef.current.set(entry.id, el)
