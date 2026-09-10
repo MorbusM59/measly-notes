@@ -457,7 +457,7 @@ maps to the correct shifted position, not 0).
 reproduction of the *original triggering race* (what exactly makes `initialText` and CM6's live
 doc transiently disagree for the same note) was not obtained. Two specific hypotheses were tested
 and didn't reproduce it: (1) `deferPreviewOnRapidInput`'s coalesced-commit lag — its
-`scheduleCoalescedPreviewCommit` reads `latestEditorTextRef.current` fresh at rAF-fire time, not a
+the coalesced frame (now `documentCommitCoalescer.ts`) reads `latestEditorTextRef.current` fresh at rAF-fire time, not a
 stale snapshot, so it's more robust than it looks; (2) a 62-character synchronous CM6-dispatch
 burst within a single JS task (to try to outrun React's re-render) — also stayed in sync every
 time. The fix closes the *symptom* (confirmed via direct testing of the actual mechanism it

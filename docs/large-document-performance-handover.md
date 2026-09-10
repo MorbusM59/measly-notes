@@ -3315,7 +3315,7 @@ Read this section before touching `CM6Editor.tsx`'s hydration effect.
 React holds a second copy (`activeNoteText`). The hydration effect's same-note
 branch force-matches the live document to React's copy via
 `computeMinimalTextReplacement`. React's copy is routinely behind: the commit
-carrying it is coalesced onto a frame (`scheduleCoalescedPreviewCommit`), and
+carrying it is coalesced onto a frame (`documentCommitCoalescer.ts`, which commits the selection in the same frame so the pair never disagrees), and
 on a large note the render it triggers takes long enough that more keystrokes
 land before the effect runs. The effect then "corrects" the document by
 deleting whatever was typed in the meantime.
