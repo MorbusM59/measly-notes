@@ -112,6 +112,7 @@ const windowControls = {
   setChromeMinSize: (size: { width: number; widthWithoutSidebar: number; height: number }) =>
     ipcRenderer.send('window-control:chrome-min-size', size),
   setDoubleSizeMode: (enabled: boolean) => ipcRenderer.send('window-control:double-size-mode', enabled),
+  setFullScreen: (enabled: boolean) => ipcRenderer.send('window-control:full-screen', enabled),
   startWindowDrag: (screenX: number, screenY: number) =>
     ipcRenderer.send(WINDOW_DRAG_CHANNELS.start, { screenX, screenY }),
   moveWindowDrag: (screenX: number, screenY: number) =>
@@ -135,6 +136,15 @@ const windowControls = {
     ipcRenderer.on('window-collapsed-state', listener)
     return () => {
       ipcRenderer.off('window-collapsed-state', listener)
+    }
+  },
+  onFullScreenStateChange: (callback: (isFullScreen: boolean) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: boolean) => {
+      callback(value)
+    }
+    ipcRenderer.on('window-fullscreen-state', listener)
+    return () => {
+      ipcRenderer.off('window-fullscreen-state', listener)
     }
   },
 }

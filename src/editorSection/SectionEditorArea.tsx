@@ -445,7 +445,7 @@ export function SectionEditorArea({
           </div>
         </div>
       </main>
-      <aside className={`editor-scrollbar-slot${isChapterPanelOpen ? ' chapter-panel-is-open' : ''}`}>
+      <aside className={`editor-scrollbar-slot${isChapterPanelOpen ? ' chapter-panel-is-open' : ''}${isPreviewMode ? ' is-preview-mode' : ''}`}>
         <div className="editor-scrollbar-slot-inner" aria-hidden="true">
           {!isPreviewMode ? (
             activeNoteId ? (

@@ -88,6 +88,67 @@
   display: none !important;
 }
 
+/* =============================================================================
+   Immersive mode (App.tsx isImmersiveMode) -- the active slot alone, full
+   screen, its grid running from edge to edge.
+
+   The WIDTH is not set here: App.tsx's layout already treats the sidebar as
+   off screen and lays the active slot out alone across the whole row
+   (slotLayoutSections), the same derived-width path every layout change
+   takes. These rules only take the chrome away.
+   ============================================================================= */
+.app-grid.is-immersive > :not(.editor-sections-row) {
+  display: none !important;
+}
+
+.app-grid.is-immersive .editor-section-divider,
+.app-grid.is-immersive .editor-section-slot.is-immersive-hidden {
+  display: none;
+}
+
+/* The slot's own chrome: tab bar, chapter/tag panel, bottom utility bar. */
+.app-grid.is-immersive .tabbar-grid,
+.app-grid.is-immersive .chapter-panel,
+.app-grid.is-immersive .editor-document-stats {
+  display: none !important;
+}
+
+/* Borderless: nothing between the text grid and the edge of the screen. */
+.app-grid.is-immersive .editor-viewer-frame {
+  padding: 0;
+}
+.app-grid.is-immersive .editor-shell {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+.app-grid.is-immersive .editor-stage {
+  border-radius: 0;
+}
+
+/* Scrollbar. Edit view has none here: the ordinary track cannot sit on the
+   box grid, and the grid's own scrollbar is its replacement. Render view keeps
+   its thumb alone, floating over the text's right edge -- a thumb without a
+   track reads clean there. The track keeps its full height (the thumb is
+   sized from it) and only stops being drawn. */
+.app-grid.is-immersive .editor-scrollbar-slot {
+  display: none;
+}
+.app-grid.is-immersive .editor-scrollbar-slot.is-preview-mode {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  z-index: 2;
+}
+.app-grid.is-immersive .editor-scrollbar-slot.is-preview-mode .thockdown-scroll-track {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 /* Texture overlay */
 .app-grid::before {
   content:          '';

@@ -119,6 +119,12 @@ let databaseService: DatabaseService | null = null;
 let pendingExternalFilePaths: string[] = [];
 let windowIsUtilityCollapsed = false;
 let utilityCollapseRestoreState: WindowState | null = null;
+// The ordinary window's state from just before immersive mode took it full
+// screen -- saved in place of the full-screen bounds while that lasts, the
+// same way utilityCollapseRestoreState stands in for mini mode's. Without it
+// every resize during full screen saved the screen's size as the window's
+// own, and the next launch opened at screen size.
+let preFullScreenWindowState: WindowState | null = null;
 let alwaysOnTopBeforeUtilityCollapse: boolean | null = null;
 let windowDragState: { startCursorX: number; startCursorY: number; startWinX: number; startWinY: number } | null = null;
 
@@ -781,6 +787,28 @@ function registerIpcHandlers() {
     }
   })
 
+  // Immersive mode (the renderer's isImmersiveMode) takes the window full
+  // screen and back. The ordinary window's state is kept aside first, so what
+  // is saved while full screen is that, not the screen -- see
+  // readPersistableWindowState. A request the window will not honour (mini
+  // mode) is answered with the state it actually has, so the renderer never
+  // believes the window is full screen when it is not.
+  ipcMain.on('window-control:full-screen', (_event, enabled: unknown) => {
+    try {
+      if (!win || win.isDestroyed()) return
+      const next = Boolean(enabled)
+      if (next === win.isFullScreen()) return
+      if (next && windowIsUtilityCollapsed) {
+        win.webContents.send('window-fullscreen-state', false)
+        return
+      }
+      if (next) preFullScreenWindowState = readCurrentWindowState(win)
+      win.setFullScreen(next)
+    } catch (error) {
+      console.warn('Failed to toggle full screen', error)
+    }
+  })
+
   ipcMain.handle(EXTERNAL_FILE_CHANNELS.getPendingPaths, async () => {
     const paths = [...pendingExternalFilePaths];
     pendingExternalFilePaths = [];
@@ -1248,6 +1276,9 @@ function readPersistableWindowState(windowRef: BrowserWindow): WindowState {
   if (windowIsUtilityCollapsed && utilityCollapseRestoreState) {
     return { ...utilityCollapseRestoreState };
   }
+  if (windowRef.isFullScreen() && preFullScreenWindowState) {
+    return { ...preFullScreenWindowState };
+  }
   return readCurrentWindowState(windowRef);
 }
 
@@ -1450,6 +1481,19 @@ async function createWindow() {
       win.webContents.send('window-maximize-state', false)
     }
   });
+  win.on('enter-full-screen', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('window-fullscreen-state', true)
+    }
+  });
+  win.on('leave-full-screen', () => {
+    // Back to the ordinary window: its own bounds are the ones to save again.
+    preFullScreenWindowState = null
+    persistWindowState()
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('window-fullscreen-state', false)
+    }
+  });
   win.on('close', persistWindowState);
 
   // Test active push message to Renderer-process.
@@ -1457,6 +1501,9 @@ async function createWindow() {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
     win?.webContents.send('window-maximize-state', win.isMaximized())
     win?.webContents.send('window-collapsed-state', windowIsUtilityCollapsed)
+    // Immersive mode is renderer state, which a reload resets; a window left
+    // full screen by it would outlive the mode that put it there.
+    if (win?.isFullScreen()) win.setFullScreen(false)
     if (currentDoubleSizeMode) {
       win?.webContents.setZoomFactor(2)
     }

@@ -2098,10 +2098,25 @@ function App() {
   // every sidebar toggle, and so did everything laid out from it.
   const [appShellMeasuredWidthPx, setAppShellMeasuredWidthPx] = useState(0)
   const [isSidebarVisible, setIsSidebarVisible] = useState(true)
+  // Immersive mode: the active slot alone, full screen, no chrome. Transient
+  // by design -- never persisted, so a launch always opens in the ordinary
+  // layout. While it lasts the sidebar is off screen WITHOUT its saved setting
+  // changing: isSidebarShown, not isSidebarVisible, is what the layout and
+  // anything asking "is the sidebar on screen" read. isSidebarVisible stays
+  // the reader's setting, and is exactly what leaving immersive returns to.
+  const [isImmersiveMode, setIsImmersiveMode] = useState(false)
+  const isSidebarShown = isSidebarVisible && !isImmersiveMode
   const appShellWidthPx = Math.max(
-    isSidebarVisible ? appShellMinWidthPx : appShellMinWidthPx - (sidebarWidthPx + GRID_DIVIDER_PX),
+    isSidebarShown ? appShellMinWidthPx : appShellMinWidthPx - (sidebarWidthPx + GRID_DIVIDER_PX),
     appShellMeasuredWidthPx,
   )
+  const setImmersiveMode = useCallback((next: boolean) => {
+    // Mini mode is the app at its smallest, immersive the editor at its
+    // largest; the one is not a way into the other.
+    if (next && windowIsCollapsed) return
+    setIsImmersiveMode(next)
+    window.windowControls?.setFullScreen?.(next)
+  }, [windowIsCollapsed])
   const [isEscapeHoldPanelOpen, setIsEscapeHoldPanelOpen] = useState(false)
   const escapeHoldTimerRef = useRef<number | null>(null)
   const escapeHoldTriggeredRef = useRef(false)
@@ -2293,6 +2308,14 @@ function App() {
   }, [appShellMinWidthPx, appShellMinHeightPx, sidebarWidthPx])
 
   const toggleSidebarVisible = useCallback(() => {
+    // From immersive mode the sidebar is off screen whatever its setting, so a
+    // toggle can only mean "show it". Leaving immersive already brings back a
+    // sidebar that was showing before; only one that was hidden needs the
+    // toggle itself, which then shows it.
+    if (isImmersiveMode) {
+      setImmersiveMode(false)
+      if (isSidebarVisible) return
+    }
     setIsSidebarVisible((previous) => {
       const next = !previous
       // If we're hiding the sidebar while the options panel is selected,
@@ -2339,7 +2362,7 @@ function App() {
     // pass and both are initialized), but the array itself is evaluated
     // eagerly, before those consts exist.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getActiveSection, persistenceReady, sidebarMode, lastSidebarModeBeforeOptions])
+  }, [getActiveSection, persistenceReady, sidebarMode, lastSidebarModeBeforeOptions, isImmersiveMode, isSidebarVisible, setImmersiveMode])
 
   const handleToggleDoubleSizeMode = useCallback(() => {
     setIsDoubleSizeMode((previous) => {
@@ -4633,6 +4656,9 @@ function App() {
    * no transition to carry it does visibility persist on its own.
    */
   const showSidebarInMode = useCallback((mode: SidebarMode) => {
+    // Asking for a sidebar panel is asking to leave immersive mode: it has no
+    // sidebar to show one in.
+    if (isImmersiveMode) setImmersiveMode(false)
     const wasHidden = !isSidebarVisible
     if (wasHidden) {
       setIsSidebarVisible(true)
@@ -4648,7 +4674,7 @@ function App() {
     } else if (wasHidden) {
       void persistMenuStateNow({ isSidebarVisible: true })
     }
-  }, [isSidebarVisible, sidebarMode, runSidebarMenuTransition, persistMenuStateNow])
+  }, [isImmersiveMode, setImmersiveMode, isSidebarVisible, sidebarMode, runSidebarMenuTransition, persistMenuStateNow])
 
   const toggleSidebarOptionsMenu = useCallback(() => {
     if (sidebarMode === 'options') {
@@ -4736,6 +4762,16 @@ function App() {
     })
     return () => unsubscribe?.()
   }, [runSidebarMenuTransition, sidebarMode, lastSidebarModeBeforeOptions])
+
+  // The window can leave full screen without us (an OS shortcut); immersive
+  // mode follows it out rather than staying laid out for a screen the window
+  // no longer has.
+  useEffect(() => {
+    const unsubscribe = window.windowControls?.onFullScreenStateChange?.((isFullScreen) => {
+      if (!isFullScreen) setIsImmersiveMode(false)
+    })
+    return () => unsubscribe?.()
+  }, [])
 
   useEffect(() => {
     window.windowControls?.reportBackgroundColor?.(rootBackgroundColorHex)
@@ -4854,14 +4890,14 @@ function App() {
   const layout = useMemo(() => {
     const toolbarWidthPx = Math.max(
       toolbarMinWidthPx,
-      appShellWidthPx - (isSidebarVisible ? (sidebarWidthPx + GRID_DIVIDER_PX) : 0) - windowControlsWidthPx,
+      appShellWidthPx - (isSidebarShown ? (sidebarWidthPx + GRID_DIVIDER_PX) : 0) - windowControlsWidthPx,
     )
 
     return {
       toolbarWidthPx,
-      gridTemplateColumns: `${isSidebarVisible ? `${sidebarWidthPx}px ${GRID_DIVIDER_PX}px` : '0px 0px'} ${Math.round(toolbarWidthPx)}px ${windowControlsWidthPx}px`,
+      gridTemplateColumns: `${isSidebarShown ? `${sidebarWidthPx}px ${GRID_DIVIDER_PX}px` : '0px 0px'} ${Math.round(toolbarWidthPx)}px ${windowControlsWidthPx}px`,
     }
-  }, [appShellWidthPx, isSidebarVisible, sidebarWidthPx, toolbarMinWidthPx, windowControlsWidthPx])
+  }, [appShellWidthPx, isSidebarShown, sidebarWidthPx, toolbarMinWidthPx, windowControlsWidthPx])
 
   // The combined 'editor' grid area (tab bar + viewer) spans the same two
   // columns the old 'toolbar'/'window_control' areas did -- its actual
@@ -7409,8 +7445,15 @@ ${markdownHtml}
   // visibility -- so the measurement always arrived a render late, and
   // toggling the sidebar painted one frame of slots at their old widths in
   // the row's new position. Derived, the grid and the slots change together.
+  // In immersive mode the active slot is the only one laid out: it takes the
+  // whole row, and the others stay mounted but hidden (is-immersive-hidden),
+  // so their editors, scroll positions and widths come back exactly as left.
+  const slotLayoutSections = useMemo(
+    () => (isImmersiveMode ? editorSections.filter((entry) => entry.id === activeSectionId) : editorSections),
+    [isImmersiveMode, editorSections, activeSectionId],
+  )
   const sectionSlotWidthsPx = useMemo(() => computeSlotWidthsPx(
-    editorSections.map((entry) => ({
+    slotLayoutSections.map((entry) => ({
       id: entry.id,
       widthFraction: entry.widthFraction,
       fixedWidthPx: fixedWidthPxBySectionId.get(entry.id) ?? null,
@@ -7418,7 +7461,7 @@ ${markdownHtml}
     editorSectionsRowWidthPx,
     GRID_DIVIDER_PX,
     SLOT_MIN_WIDTH_PX,
-  ), [editorSections, editorSectionsRowWidthPx, fixedWidthPxBySectionId])
+  ), [slotLayoutSections, editorSectionsRowWidthPx, fixedWidthPxBySectionId])
 
   // Drag-resizes exactly the two sections on either side of the divider that
   // was grabbed. Slots render with an exact pixel flex-basis (grow/shrink 0,
@@ -8358,7 +8401,9 @@ ${markdownHtml}
     // totalPagedNotes/itemsPerPage are in here so the card measurement re-runs
     // once notes actually populate the list -- the observers above only fire on
     // box changes, and filling an already-sized list isn't one.
-  }, [isSidebarVisible, sidebarMode, spacingRegularPx, totalPagedNotes, itemsPerPage])
+  // isSidebarShown, not isSidebarVisible: this measures the sidebar's DOM,
+  // which immersive mode unmounts and restores without the setting changing.
+  }, [isSidebarShown, sidebarMode, spacingRegularPx, totalPagedNotes, itemsPerPage])
 
   useLayoutEffect(() => {
     const compute = () => {
@@ -8770,6 +8815,17 @@ ${markdownHtml}
         return
       }
 
+      // Immersive mode, from anywhere: F11 or Ctrl+Shift+Space, and the same
+      // key to leave. A held key toggles once, not per repeat.
+      const isImmersiveShortcut = (event.key === 'F11' && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey)
+        || (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.code === 'Space')
+      if (isImmersiveShortcut) {
+        event.preventDefault()
+        if (event.repeat) return
+        setImmersiveMode(!isImmersiveMode)
+        return
+      }
+
       // Ctrl+F (find) and Ctrl+H (find & replace) open the sidebar on that
       // panel -- showing it if hidden -- and focus the find field. Pressed
       // again from inside the sidebar while it already shows that same panel,
@@ -8783,7 +8839,7 @@ ${markdownHtml}
         event.preventDefault()
         const wantsReplace = findShortcut === 'replace'
         const isSidebarFocused = Boolean(target?.closest('.notes-sidebar'))
-        if (isSidebarVisible && isFindMode && isReplaceMode === wantsReplace && isSidebarFocused) {
+        if (isSidebarShown && isFindMode && isReplaceMode === wantsReplace && isSidebarFocused) {
           toggleSidebarVisible()
           activeSection?.scheduleFocusEditorInEditMode()
           return
@@ -8806,7 +8862,7 @@ ${markdownHtml}
         if (event.repeat) return
         const wasSidebarFocused = Boolean(target?.closest('.notes-sidebar'))
         toggleSidebarVisible()
-        if (isSidebarVisible && wasSidebarFocused) {
+        if (isSidebarShown && wasSidebarFocused) {
           activeSection?.scheduleFocusEditorInEditMode()
         }
         return
@@ -9057,9 +9113,11 @@ ${markdownHtml}
     handleEscapeHoldPanelClose,
     isEscapeHoldPanelOpen,
     isFindMode,
+    isImmersiveMode,
     isReplaceMode,
-    isSidebarVisible,
+    isSidebarShown,
     markSectionActive,
+    setImmersiveMode,
     showSidebarInMode,
     toggleSidebarVisible,
   ])
@@ -9238,11 +9296,11 @@ ${markdownHtml}
         ) : null}
         <div className="app-sheen">
           <div
-            className={`app-shell app-grid${filterInvert > 0.5 ? ' shadow-flip' : ''}${windowIsCollapsed ? ' is-window-collapsed' : ''}`}
+            className={`app-shell app-grid${filterInvert > 0.5 ? ' shadow-flip' : ''}${windowIsCollapsed ? ' is-window-collapsed' : ''}${isImmersiveMode ? ' is-immersive' : ''}`}
             ref={appShellRef}
             style={appShellStyle}
           >
-            {isSidebarVisible ? (
+            {isSidebarShown ? (
             <aside className="notes-sidebar" style={{ gridArea: 'sidebar' }}>
               <div className="search-box" aria-label="Search panel">
                 <div className={`search-input-shell${isReplaceMode ? ' search-replace-row' : ''}`}>
@@ -9938,7 +9996,7 @@ ${markdownHtml}
             </aside>
             ) : null}
 
-            {isSidebarVisible ? (
+            {isSidebarShown ? (
             <div
               className="grid-divider divider-sidebar"
               style={{ gridArea: 'd-sidebar' }}
@@ -10105,7 +10163,7 @@ ${markdownHtml}
                   />
                 ) : null}
                 <div
-                  className="editor-section-slot"
+                  className={`editor-section-slot${isImmersiveMode && entry.id !== activeSectionId ? ' is-immersive-hidden' : ''}`}
                   data-section-id={entry.id}
                   style={{ flexGrow: 0, flexShrink: 0, flexBasis: `${sectionSlotWidthsPx.get(entry.id) ?? 0}px` }}
                   ref={(el) => {
@@ -10131,7 +10189,7 @@ ${markdownHtml}
                   unpinNoteFromSection={unpinNoteFromSection}
                   isNoteOpenInOtherSection={isNoteOpenInOtherSection}
                   markSectionActive={markSectionActive}
-                  isSidebarVisible={isSidebarVisible}
+                  isSidebarVisible={isSidebarShown}
                   toggleSidebarVisible={toggleSidebarVisible}
                   persistenceReady={persistenceReady}
                   notes={notes}

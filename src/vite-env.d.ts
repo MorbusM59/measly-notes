@@ -27,11 +27,13 @@ interface Window {
 		setSectionCount: (count: number) => void;
 		setChromeMinSize: (size: { width: number; widthWithoutSidebar: number; height: number }) => void;
 		setDoubleSizeMode: (enabled: boolean) => void;
+		setFullScreen: (enabled: boolean) => void;
 		startWindowDrag: (screenX: number, screenY: number) => void;
 		moveWindowDrag: (screenX: number, screenY: number) => void;
 		endWindowDrag: () => void;
 		restoreMaximizedWindow: (originX: number, originY: number, releaseX: number, releaseY: number) => void;
 		onMaximizeStateChange: (callback: (isMaximized: boolean) => void) => () => void;
 		onCollapsedStateChange: (callback: (isCollapsed: boolean) => void) => () => void;
+		onFullScreenStateChange: (callback: (isFullScreen: boolean) => void) => () => void;
 	};
 }

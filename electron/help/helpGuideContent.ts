@@ -640,6 +640,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 | \`Ctrl+N\` | New blank note |
 | \`Ctrl+Shift+N\` | New note titled from clipboard |
 | \`Ctrl+Space\` | Show / hide the sidebar |
+| \`F11\` or \`Ctrl+Shift+Space\` | Immersive mode: full screen, just the editor you're in -- press again to leave |
 | \`Esc\` | Toggle edit / preview (or blur a focused field) |
 | Hold \`Esc\` | Open the quick actions menu |
 | \`Ctrl+F\` | Find in note -- opens the sidebar if it's closed; press again from the find field to close it |
@@ -669,6 +670,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - **Settings (gear)** — opens/closes the Settings panel, see [Settings Panel]($HELP§APPEARANCE-SETTINGS#settings-panel).
 - **Music player** — see [Music Player]($HELP§MUSIC-PLAYER).
 - **Mini mode** — collapses the window into a compact strip; the music player stays fully usable, sound options included. The button that got you there expands back out, maximized — see [Music Player]($HELP§MUSIC-PLAYER).
+- **Immersive mode** (\`F11\` or \`Ctrl+Shift+Space\`) — the window goes full screen with just the editor you're working in, edge to edge: no sidebar, toolbar, tabs or other slots. Press either shortcut again to come back exactly as you were. Opening the sidebar any way you normally would (\`Ctrl+Space\`, \`Ctrl+F\`, \`Ctrl+H\`) also brings you back, with the sidebar showing. Not available from mini mode.
 - **Minimize / Maximize–Restore / Close** — standard window controls.
 - **User Guide (lightbulb)** — the upper half of the split maximize button. Opens this guide, exactly like the Quick Actions Menu's own Help cell, see [The User Guide]($HELP§NOTES-EDITING#the-user-guide).
 - **Dark mode / Double size** — a split button in the toolbar's left cluster (not in this bar): the top half switches the whole app between light and dark presets, the bottom half is double size (2x). Double size doubles the app's page zoom and, to match, the window's minimum size, so 2x content gets 2x room instead of being squeezed into the same space. Toggling off relaxes the minimum again but doesn't shrink a window you've since resized larger. Persists across restarts.
