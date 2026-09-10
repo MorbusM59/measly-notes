@@ -3217,9 +3217,11 @@ export function CM6Editor({
     // down to sanitized plain text (control/invisible chars, emoji, raw HTML
     // tags; the "extended" path additionally reconstructs wrapped-paragraph
     // line breaks and normalizes bullet markers -- see textSanitization.ts).
-    // Ctrl+Shift+V requests the non-extended (plain) sanitization, matching
-    // the original's own "power paste" escape hatch.
-    let plainPasteRequested = false;
+    // A plain paste gets only the plain sanitization; Ctrl+Shift+V requests
+    // the extended ("smart") one. Reversed from the original, whose smart
+    // paste was the default -- it rewrote text the reader had not asked it
+    // to touch, so it is now the one you ask for.
+    let smartPasteRequested = false;
     // Set by the paste handler right before it mutates the document, read
     // (and cleared) by the updateListener's own reconcile below -- CM6's
     // synchronous transaction commit means this doesn't need Lexical's
@@ -3403,7 +3405,7 @@ export function CM6Editor({
       Prec.highest(keymap.of([{
         any: (view, event) => {
           if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'v') {
-            plainPasteRequested = true;
+            smartPasteRequested = true;
           }
 
           if (isRefocusKey(event)) {
@@ -3724,23 +3726,23 @@ export function CM6Editor({
         },
         paste: (event, view) => {
           if (!event.clipboardData) {
-            plainPasteRequested = false;
+            smartPasteRequested = false;
             return false;
           }
           const plainText = event.clipboardData.getData('text/plain');
           if (typeof plainText !== 'string') {
-            plainPasteRequested = false;
+            smartPasteRequested = false;
             return false;
           }
 
           event.preventDefault();
 
-          const usePlainSanitization = plainPasteRequested;
-          plainPasteRequested = false;
+          const useSmartSanitization = smartPasteRequested;
+          smartPasteRequested = false;
 
-          const sanitized = usePlainSanitization
-            ? sanitizeDocumentText(plainText)
-            : sanitizeDocumentTextExtended(plainText);
+          const sanitized = useSmartSanitization
+            ? sanitizeDocumentTextExtended(plainText)
+            : sanitizeDocumentText(plainText);
 
           const selection = view.state.selection.main;
 

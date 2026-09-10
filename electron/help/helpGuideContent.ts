@@ -653,6 +653,8 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 | \`Ctrl+-\` | Toggle bulleted list |
 | \`Ctrl+#\` (or \`Ctrl+Shift+3\`) | Toggle numbered list |
 | \`Ctrl+Z\` / \`Ctrl+Y\` | Undo / redo |
+| \`Ctrl+V\` | Paste the text as-is |
+| \`Ctrl+Shift+V\` | Smart paste: rejoins lines broken mid-paragraph and tidies list markers |
 
 - Shortcuts that touch the editor apply to whichever slot is currently active.
 `,
