@@ -2093,6 +2093,16 @@ function App() {
   const escapeHoldTimerRef = useRef<number | null>(null)
   const escapeHoldTriggeredRef = useRef(false)
   const escapeFreshCycleWhilePanelOpenRef = useRef(false)
+  // Set when an Escape keydown was spent on a field (defocusing it, or
+  // handing focus back to the editor from find/replace/tags), so the same
+  // press's keyup does not ALSO toggle the view -- the keyup listener runs on
+  // every Escape regardless of what its keydown did. Opt-out rather than
+  // "keyup only acts on keydowns this handler armed": CM6 claims Escape
+  // itself when there is a text selection (simplifySelection), so that
+  // keydown never reaches here, and its view toggle comes from keyup alone.
+  // Cleared by every fresh Escape keydown, so a keyup the window never saw
+  // cannot swallow a later press.
+  const escapeConsumedByFieldRef = useRef(false)
   const clearEscapeHoldTimer = useCallback(() => {
     if (escapeHoldTimerRef.current !== null) {
       window.clearTimeout(escapeHoldTimerRef.current)
@@ -4591,34 +4601,51 @@ function App() {
     focusActiveNoteInSidebarMode,
   ])
 
+  /**
+   * Shows the sidebar (if hidden) on `mode` -- the one way a feature asks for
+   * a particular sidebar panel to be on screen. runSidebarMenuTransition alone
+   * cannot: it only switches modes, and returns early when `mode` is already
+   * current, which left Ctrl+F on a hidden sidebar already in find mode doing
+   * nothing visible at all.
+   *
+   * The visibility change is persisted together with the mode transition, in
+   * the SAME snapshot -- not as a separate persistMenuStateNow call first.
+   * isSidebarVisible's React state hasn't re-rendered yet this tick, so
+   * runSidebarMenuTransition's own persist would otherwise read the *old*
+   * value straight out of buildMenuStateSnapshot's fallback and silently
+   * overwrite a correct separate write with it a moment later (confirmed live:
+   * that's exactly what happened when the options toggle used to persist
+   * isSidebarVisible on its own first). See persistMenuStateOnce's own doc
+   * comment for the general rule this is an instance of. Only when there is
+   * no transition to carry it does visibility persist on its own.
+   */
+  const showSidebarInMode = useCallback((mode: SidebarMode) => {
+    const wasHidden = !isSidebarVisible
+    if (wasHidden) {
+      setIsSidebarVisible(true)
+      try {
+        window.windowControls?.setSidebarVisible?.(true)
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (mode !== sidebarMode) {
+      runSidebarMenuTransition(mode, wasHidden ? { isSidebarVisible: true } : undefined)
+    } else if (wasHidden) {
+      void persistMenuStateNow({ isSidebarVisible: true })
+    }
+  }, [isSidebarVisible, sidebarMode, runSidebarMenuTransition, persistMenuStateNow])
+
   const toggleSidebarOptionsMenu = useCallback(() => {
     if (sidebarMode === 'options') {
       runSidebarMenuTransition(lastSidebarModeBeforeOptions)
       return
     }
 
-    // Ensure the sidebar is visible when opening the options panel so the
-    // options content is accessible.
-    setIsSidebarVisible(true)
-    try {
-      window.windowControls?.setSidebarVisible?.(true)
-    } catch (e) {
-      // ignore
-    }
-
-    // Persist the sidebar-visible change together with the mode transition
-    // below, in the SAME snapshot -- not as a separate persistMenuStateNow
-    // call first. isSidebarVisible's React state (setIsSidebarVisible just
-    // above) hasn't re-rendered yet this tick, so runSidebarMenuTransition's
-    // own persist would otherwise read the *old* value straight out of
-    // buildMenuStateSnapshot's fallback and silently overwrite a correct
-    // separate write with it a moment later (confirmed live: that's exactly
-    // what happened when this used to persist isSidebarVisible on its own
-    // first). See persistMenuStateOnce's own doc comment for the general
-    // rule this is an instance of.
     setLastSidebarModeBeforeOptions(sidebarMode)
-    runSidebarMenuTransition('options', { isSidebarVisible: true })
-  }, [lastSidebarModeBeforeOptions, runSidebarMenuTransition, sidebarMode])
+    showSidebarInMode('options')
+  }, [lastSidebarModeBeforeOptions, runSidebarMenuTransition, showSidebarInMode, sidebarMode])
 
   const handleWindowMinimize = useCallback(() => {
     window.windowControls?.minimize?.()
@@ -8715,6 +8742,11 @@ ${markdownHtml}
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      // Before the defaultPrevented bail-out: a fresh press starts clean even
+      // when something else (CM6's own Escape binding) claims its keydown.
+      if (event.key === 'Escape' && !event.repeat) {
+        escapeConsumedByFieldRef.current = false
+      }
       if (event.defaultPrevented) return
 
       const target = event.target instanceof HTMLElement ? event.target : null
@@ -8736,6 +8768,7 @@ ${markdownHtml}
       if (isEditorControlField && ['Escape', 'Enter', 'Tab'].includes(event.key) && !shouldPassThroughToReplaceField) {
         event.preventDefault()
         event.stopImmediatePropagation()
+        if (event.key === 'Escape') escapeConsumedByFieldRef.current = true
         activeSection?.scheduleFocusEditorInEditMode()
         return
       }
@@ -8746,21 +8779,26 @@ ${markdownHtml}
         return
       }
 
-      if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'f') {
+      // Ctrl+F (find) and Ctrl+H (find & replace) open the sidebar on that
+      // panel -- showing it if hidden -- and focus the find field. Pressed
+      // again from inside the sidebar while it already shows that same panel,
+      // they close it and hand focus back to the editor. Only from inside the
+      // sidebar: from the editor, the shortcut always means "take me to the
+      // find field", even when the panel is already open.
+      const findShortcut = event.ctrlKey && !event.shiftKey
+        ? (event.key.toLowerCase() === 'f' ? 'find' : event.key.toLowerCase() === 'h' ? 'replace' : null)
+        : null
+      if (findShortcut) {
         event.preventDefault()
-        getActiveSection()?.setIsDocumentReplaceMode(false)
-        runSidebarMenuTransition('find')
-        requestAnimationFrame(() => {
-          sidebarSearchInputRef.current?.focus()
-          sidebarSearchInputRef.current?.select()
-        })
-        return
-      }
-
-      if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'h') {
-        event.preventDefault()
-        getActiveSection()?.setIsDocumentReplaceMode(true)
-        runSidebarMenuTransition('find')
+        const wantsReplace = findShortcut === 'replace'
+        const isSidebarFocused = Boolean(target?.closest('.notes-sidebar'))
+        if (isSidebarVisible && isFindMode && isReplaceMode === wantsReplace && isSidebarFocused) {
+          toggleSidebarVisible()
+          activeSection?.scheduleFocusEditorInEditMode()
+          return
+        }
+        getActiveSection()?.setIsDocumentReplaceMode(wantsReplace)
+        showSidebarInMode('find')
         requestAnimationFrame(() => {
           sidebarSearchInputRef.current?.focus()
           sidebarSearchInputRef.current?.select()
@@ -8925,6 +8963,7 @@ ${markdownHtml}
 
         if (isEditableField && activeElement instanceof HTMLElement) {
           event.preventDefault()
+          escapeConsumedByFieldRef.current = true
           activeElement.blur()
           return
         }
@@ -8961,6 +9000,14 @@ ${markdownHtml}
       if (event.key !== 'Escape') return
 
       clearEscapeHoldTimer()
+
+      // This press was spent on a field (see escapeConsumedByFieldRef); it
+      // has already done its job and must not switch the view as well.
+      if (escapeConsumedByFieldRef.current) {
+        escapeConsumedByFieldRef.current = false
+        event.preventDefault()
+        return
+      }
 
       if (escapeHoldTriggeredRef.current) {
         escapeHoldTriggeredRef.current = false
@@ -9005,8 +9052,10 @@ ${markdownHtml}
     isEscapeHoldPanelOpen,
     isFindMode,
     isReplaceMode,
+    isSidebarVisible,
     markSectionActive,
-    runSidebarMenuTransition,
+    showSidebarInMode,
+    toggleSidebarVisible,
   ])
 
   useEffect(() => {

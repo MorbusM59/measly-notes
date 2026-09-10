@@ -641,8 +641,8 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 | \`Ctrl+Shift+N\` | New note titled from clipboard |
 | \`Esc\` | Toggle edit / preview (or blur a focused field) |
 | Hold \`Esc\` | Open the quick actions menu |
-| \`Ctrl+F\` | Find in note |
-| \`Ctrl+H\` | Find & replace in note |
+| \`Ctrl+F\` | Find in note -- opens the sidebar if it's closed; press again from the find field to close it |
+| \`Ctrl+H\` | Find & replace in note -- opens the sidebar if it's closed; press again from the find field to close it |
 | \`Ctrl+Enter\` (in find mode) | Replace all matches |
 | \`Alt+Left\` / \`Alt+Right\` | Previous / next slot |
 | \`Ctrl+Up\` / \`Ctrl+Down\` | Jump caret to start / end of document |
