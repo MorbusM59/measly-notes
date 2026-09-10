@@ -467,7 +467,6 @@ const CM6_DEFAULT_KEYMAP_WITHOUT_ALT_ARROW = defaultKeymap
   ));
 
 /** Ported verbatim from Editor.tsx -- the custom scrollbar's own geometry constants. */
-const SCROLL_TRACK_MIN_THUMB_HEIGHT_PX = 28;
 const SCROLL_TRACK_EDGE_GAP_PX = 3;
 
 type ScrollbarGeometry = {
@@ -1219,18 +1218,19 @@ export function CM6Editor({
       provisionalRatio: viewportHeight / contentHeight,
       usableTrackHeightPx: usableTrackHeight,
       // The thumb's floor is its own WIDTH, so the smallest it can be is a
-      // square -- the same rule the render view's thumb follows. Read from the
-      // element rather than from a constant: the width follows
-      // --canonical-scroll-thickness and the handle gap, both of which move
-      // with the reader's own spacing settings, and a hardcoded 28px would
-      // stop being square the moment either changed.
-      // `||`, not `??`: before the thumb is laid out `offsetWidth` is 0, which
-      // is a real number and a useless floor.
+      // square -- the same rule the render view's and the sidebar's thumbs
+      // follow. Read from the element rather than from a constant: the width
+      // follows --canonical-scroll-thickness and the handle gap, both of which
+      // move with the reader's own spacing settings. Before the thumb is laid
+      // out the width is 0, a harmless floor for a thumb nobody can see yet:
+      // the committed height is held against its floor as well (see
+      // createCommittedThumbHeight), so the first laid-out sync re-decides it
+      // with the real width rather than keeping a fallback.
       // In immersive mode's grid track the thumb is whole rows, so its
       // smallest is one row.
       minThumbHeightPx: isImmersiveRef.current
         ? lineHeightPxRef.current
-        : (scrollThumbElRef.current?.offsetWidth || SCROLL_TRACK_MIN_THUMB_HEIGHT_PX),
+        : (scrollThumbElRef.current?.offsetWidth ?? 0),
     });
     // In immersive mode's grid track the thumb is a whole number of rows,
     // decided here rather than only when drawn -- so its travel, a click's

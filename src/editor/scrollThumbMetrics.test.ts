@@ -127,4 +127,18 @@ describe('createCommittedThumbHeight', () => {
     commit.invalidate()
     expect(commit.resolve({ ...base, signature: 'doc-a', ratio: 0.5 })).toBe(200)
   })
+
+  it('decides afresh when the minimum changes, rather than holding a size decided against another floor', () => {
+    // The floor is the thumb's own width: 0 before it is laid out, then its
+    // real width -- which the reader's spacing can change again later.
+    const commit = createCommittedThumbHeight()
+    expect(commit.resolve({ ...base, minThumbHeightPx: 0, signature: 'long-doc', ratio: 0.0001 })).toBe(0)
+    expect(commit.resolve({ ...base, minThumbHeightPx: 10, signature: 'long-doc', ratio: 0.0001 })).toBe(10)
+    // A thumb sized against an older, larger floor comes down to the new one.
+    const older = createCommittedThumbHeight()
+    expect(older.resolve({ ...base, minThumbHeightPx: 28, signature: 'long-doc', ratio: 0.0001 })).toBe(28)
+    expect(older.resolve({ ...base, minThumbHeightPx: 10, signature: 'long-doc', ratio: 0.0001 })).toBe(10)
+    // ...and a size above the floor is still held while the floor holds.
+    expect(older.resolve({ ...base, minThumbHeightPx: 10, signature: 'long-doc', ratio: 0.5 })).toBe(10)
+  })
 })

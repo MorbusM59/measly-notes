@@ -102,6 +102,14 @@ export function resolveThumbLineRatio(options: {
  * to be, or how much of the document has been measured since. When the
  * signature changes, the height is resolved once more and held again.
  *
+ * The MINIMUM is held against too, here rather than left to each caller's
+ * signature: it is the thumb's own width (the smallest thumb is a square), and
+ * that changes with the reader's spacing -- and is 0 before the thumb has been
+ * laid out at all. A size decided against a floor that has since changed is
+ * an answer to a different question, the same as one decided for a different
+ * document; holding it kept a thumb first sized before it had a width at that
+ * size for the rest of the note.
+ *
  * Position is deliberately not part of this. Where the thumb SITS must stay
  * live and truthful; only how BIG it is is frozen.
  */
@@ -131,11 +139,13 @@ export function createCommittedThumbHeight(): CommittedThumbHeight {
 
   return {
     resolve({ signature, ratio, provisionalRatio, usableTrackHeightPx, minThumbHeightPx }) {
-      // A commitment describes one document at one geometry. Once either
-      // changes it is not a stale answer to this question, it is an answer to
-      // a different one, and holding it would pin the new document's thumb to
-      // the old document's size for as long as measuring takes.
-      if (committedSignature !== signature) {
+      // A commitment describes one document at one geometry, against one
+      // floor. Once any of those changes it is not a stale answer to this
+      // question, it is an answer to a different one, and holding it would pin
+      // the new document's thumb to the old document's size for as long as
+      // measuring takes.
+      const key = `${signature}|min:${minThumbHeightPx}`
+      if (committedSignature !== key) {
         committedSignature = null
         committedHeightPx = null
       }
@@ -149,7 +159,7 @@ export function createCommittedThumbHeight(): CommittedThumbHeight {
       if (ratio === null) return toHeightPx(provisionalRatio, usableTrackHeightPx, minThumbHeightPx)
 
       committedHeightPx = toHeightPx(ratio, usableTrackHeightPx, minThumbHeightPx)
-      committedSignature = signature
+      committedSignature = key
       return committedHeightPx
     },
     invalidate() {

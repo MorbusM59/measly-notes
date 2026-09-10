@@ -60,7 +60,6 @@ type ViewStyleKey =
   | 'faunaone'
   | 'fredericka'
   | 'bubblerone'
-const SCROLL_TRACK_MIN_THUMB_HEIGHT_PX = 28
 const SCROLL_TRACK_EDGE_GAP_PX = 3
 const PREVIEW_CONTINUOUS_SCROLL_APEX_MULTIPLIER = CONTINUOUS_SCROLL_APEX_SPEED_MULTIPLIER
 
@@ -350,9 +349,11 @@ export function usePreviewScrollbar({
       // The thumb's floor is its own WIDTH, so the smallest it can be is a
       // square. Read from the element rather than from a constant: the width
       // follows --canonical-scroll-thickness and the handle gap, both of which
-      // move with the reader's own spacing settings, and a hardcoded 28px
-      // would stop being square the moment either changed.
-      minThumbHeightPx: previewScrollbarThumbRef.current?.offsetWidth || SCROLL_TRACK_MIN_THUMB_HEIGHT_PX,
+      // move with the reader's own spacing settings. Before the thumb is laid
+      // out the width is 0 -- harmless, since the committed height is held
+      // against its floor too and re-decided once the real width exists (see
+      // createCommittedThumbHeight).
+      minThumbHeightPx: previewScrollbarThumbRef.current?.offsetWidth ?? 0,
     })
 
     const maxScrollTop = contentHeight - viewportHeight

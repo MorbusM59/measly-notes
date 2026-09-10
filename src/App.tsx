@@ -280,7 +280,6 @@ const DEFAULT_BORDER_RADIUS_REGULAR_PX = 6
 const DEFAULT_BORDER_ALPHA_PERCENT = 100
 const DEFAULT_BOX_SHADOW_ALPHA_PERCENT = 100
 const TEXTURE_PREVIEW_SURFACE: TextureSurfaceKey = 'appGrid'
-const SCROLL_TRACK_MIN_THUMB_HEIGHT_PX = 28
 const SCROLL_TRACK_EDGE_GAP_PX = 3
 const COLOR_BUTTON_ARM_HOLD_MS = 300
 const PENDING_UPDATE_DEBOUNCE_MS = 400
@@ -8177,8 +8176,14 @@ ${markdownHtml}
     }
 
     const visibleRatio = viewportHeight / contentHeight
+    // The thumb's floor is its own WIDTH, so the smallest it can be is a
+    // square -- the rule the edit and render views' thumbs follow too. It
+    // used to be a hardcoded 28px, which on a 10px-wide thumb made the
+    // smallest one nearly three times taller than wide. Recomputed on every
+    // sync (nothing is held here), so the 0 of a thumb not yet laid out is
+    // gone by the next one.
     const nextThumbHeight = Math.max(
-      SCROLL_TRACK_MIN_THUMB_HEIGHT_PX,
+      sidebarScrollbarThumbRef.current?.offsetWidth ?? 0,
       Math.min(usableTrackHeight, Math.round(usableTrackHeight * visibleRatio)),
     )
 

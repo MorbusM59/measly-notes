@@ -434,8 +434,12 @@ body {
 
 .thockdown-scroll-thumb {
   position: absolute;
-  left: var(--canonical-scroll-handle-gap);
-  right: var(--canonical-scroll-handle-gap);
+  /* Offsets are measured inside the 1px track border. gap - 2px leaves 2px of
+     space inside that border on either side, making the thumb
+     handle-thickness + 2px wide -- the same size the utility slider thumbs
+     declare (controls.css). The raw gap left it 6px wide, 4px short of that. */
+  left: calc(var(--canonical-scroll-handle-gap) - 2px);
+  right: calc(var(--canonical-scroll-handle-gap) - 2px);
   border: 1px solid var(--canonical-handle-border);
   border-radius: var(--border-radius-small);
   background: var(--canonical-handle-bg);
