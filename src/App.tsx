@@ -170,6 +170,7 @@ import {
   PREVIEW_MARKDOWN_NOOP_NAVIGATE,
 } from './editor/PreviewMarkdown'
 import { normalizeInternalText } from './editor/TextPolicy'
+import { readPageZoomFactor } from './window/pageZoom'
 import { splitChapterFamily } from './shared/chapters'
 import { trimBlankLines } from './chapters/chapterExtraction'
 import type { ExportScope } from './editorSection/EscapeHoldPanel'
@@ -2194,22 +2195,49 @@ function App() {
   // "Double size" mode: 2x page zoom paired with a doubled window minimum --
   // see the window-control:double-size-mode handler in electron/main.ts.
   const [isDoubleSizeMode, setIsDoubleSizeMode] = useState(false)
+  // The size mode actually ON SCREEN: it follows the zoom the page really has,
+  // not the one requested. isDoubleSizeMode is the reader's choice (the
+  // button, what is saved); the zoom it asks for is applied by the main
+  // process a moment later, over IPC. Everything visual keyed to the mode --
+  // the font-size set above all -- switches on this instead, so it lands in
+  // the very frame the zoom does. Keyed to the request, the new sizes were
+  // painted at the old zoom first and the zoom caught up after: a two-step,
+  // messy transition.
+  const [isDoubleSizeApplied, setIsDoubleSizeApplied] = useState(() => readPageZoomFactor() > 1)
+  useEffect(() => {
+    // A zoom change arrives as a resize, dispatched before that frame paints.
+    // flushSync commits the switch inside the handler: an ordinary update
+    // from a native resize listener is applied after paint, which would show
+    // the new zoom with the old sizes for a frame -- the same mess the other
+    // way round. Only when it actually changes, so a window being dragged
+    // wider costs nothing.
+    let applied = readPageZoomFactor() > 1
+    const handleResize = () => {
+      const next = readPageZoomFactor() > 1
+      if (next === applied) return
+      applied = next
+      flushSync(() => setIsDoubleSizeApplied(next))
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   // Font sizes are remembered per size mode: edit view, render view and the
   // interface each keep one value for regular mode and one for double size,
   // so switching modes never asks the reader to re-tune them. Spacing needs
   // no pair -- it scales with the zoom on its own. Both sets always exist (a
   // save from before this seeds the double-size set from the regular one --
-  // see resolvePersistedFontSizesByMode). The three names below are the
-  // CURRENT mode's values, and their setters write into that mode's set only.
+  // see resolvePersistedFontSizesByMode). The three names below are the values
+  // of the mode on screen (isDoubleSizeApplied), and their setters write into
+  // that mode's set only.
   const [fontSizesByMode, setFontSizesByMode] = useState<FontSizesByMode>(() => ({
     regular: DEFAULT_FONT_SIZE_SET,
     double: DEFAULT_FONT_SIZE_SET,
   }))
-  const { editorFontSize, viewFontSize, uiFontScale } = isDoubleSizeMode ? fontSizesByMode.double : fontSizesByMode.regular
+  const { editorFontSize, viewFontSize, uiFontScale } = isDoubleSizeApplied ? fontSizesByMode.double : fontSizesByMode.regular
   const setActiveModeFontSize = useCallback((key: keyof FontSizeSet, value: number) => {
-    const mode = isDoubleSizeMode ? 'double' : 'regular'
+    const mode = isDoubleSizeApplied ? 'double' : 'regular'
     setFontSizesByMode((previous) => ({ ...previous, [mode]: { ...previous[mode], [key]: value } }))
-  }, [isDoubleSizeMode])
+  }, [isDoubleSizeApplied])
   const setEditorFontSize = useCallback((px: number) => setActiveModeFontSize('editorFontSize', px), [setActiveModeFontSize])
   const setViewFontSize = useCallback((px: number) => setActiveModeFontSize('viewFontSize', px), [setActiveModeFontSize])
   const setUiFontScale = useCallback((scale: number) => setActiveModeFontSize('uiFontScale', scale), [setActiveModeFontSize])
@@ -4781,7 +4809,10 @@ function App() {
     // does need to be 2x bigger to still contain content that's rendering at
     // 2x its CSS size on screen. Same reasoning as computeEffectiveMinSize()
     // in electron/main.ts for the normal (non-collapsed) window minimum.
-    const doubleSizeMultiplier = isDoubleSizeMode ? 2 : 1
+    // The zoom the page is actually at (see readPageZoomFactor), not the one
+    // requested: this converts page pixels into window pixels, and only the
+    // applied zoom says how big the content really renders.
+    const doubleSizeMultiplier = readPageZoomFactor()
     // The probe is a real collapsed clone laid out at max-content, so its width
     // is the panel's actual footprint -- borders, spacing setting, every button
     // in it -- and needs no arithmetic to stay true when any of those change.
@@ -4808,7 +4839,7 @@ function App() {
     }
 
     void toggleAfterOverlayFrame()
-  }, [windowControlsCollapsedWidthPx, isDoubleSizeMode])
+  }, [windowControlsCollapsedWidthPx])
 
   const handleWindowToggleMaximize = useCallback(() => {
     window.windowControls?.toggleMaximize?.()

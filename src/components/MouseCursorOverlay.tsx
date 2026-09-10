@@ -10,6 +10,7 @@ import {
   sampleCursorPressAxis,
   sampleCursorReleaseAxis,
 } from '../editor/CursorClickCurve'
+import { readPageZoomFactor } from '../window/pageZoom'
 
 export interface MouseCursorOverlayProps {
   settings: CustomCursorSettings
@@ -107,16 +108,6 @@ function applyInvert(color: RgbaColor, amount: number): RgbaColor {
  * `clickBalance` weight, entirely at draw time -- the underlying settings
  * values themselves are never mutated by clicking.
  */
-/**
- * The page's own zoom factor -- double size mode's 2x -- from the preload's
- * webFrame, which display scaling never touches. 1 where there are no window
- * controls (browser mode, which has no page zoom to follow).
- */
-function readPageZoomFactor(): number {
-  const zoom = window.windowControls?.getPageZoomFactor?.()
-  return typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0 ? zoom : 1
-}
-
 export function MouseCursorOverlay({
   settings,
   fadeMs = 550,
