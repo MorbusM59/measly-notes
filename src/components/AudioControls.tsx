@@ -775,23 +775,52 @@ export const AudioControls = memo(function AudioControls({
     if (isReverbBypassed) onReverbBypassedChange(false)
   }, [isReverbBypassed, onReverbBypassedChange])
 
+  // One wheel step per level, shared by the level's own readout and the
+  // headphones button, so both obey the same "adjusting turns it back on" rule.
+  const nudgeVolume = useCallback((deltaY: number, coarse: boolean) => {
+    unmuteForAdjust()
+    onVolumeChange(nudgeLevel(volume, deltaY, coarse))
+  }, [volume, unmuteForAdjust, onVolumeChange])
+
+  const nudgeReverb = useCallback((deltaY: number, coarse: boolean) => {
+    unbypassForAdjust()
+    onReverbAmountChange(nudgeLevel(reverbAmount, deltaY, coarse))
+  }, [reverbAmount, unbypassForAdjust, onReverbAmountChange])
+
+  const nudgeRoom = useCallback((deltaY: number, coarse: boolean) => {
+    unbypassForAdjust()
+    onReverbRoomChange(nudgeLevel(reverbRoom, deltaY, coarse))
+  }, [reverbRoom, unbypassForAdjust, onReverbRoomChange])
+
   const handleVolumeWheel = useCallback((event: WheelEvent) => {
     event.preventDefault()
-    unmuteForAdjust()
-    onVolumeChange(nudgeLevel(volume, event.deltaY, event.shiftKey))
-  }, [volume, unmuteForAdjust, onVolumeChange])
+    nudgeVolume(event.deltaY, event.shiftKey)
+  }, [nudgeVolume])
 
   const handleReverbWheel = useCallback((event: WheelEvent) => {
     event.preventDefault()
-    unbypassForAdjust()
-    onReverbAmountChange(nudgeLevel(reverbAmount, event.deltaY, event.shiftKey))
-  }, [reverbAmount, unbypassForAdjust, onReverbAmountChange])
+    nudgeReverb(event.deltaY, event.shiftKey)
+  }, [nudgeReverb])
 
   const handleRoomWheel = useCallback((event: WheelEvent) => {
     event.preventDefault()
-    unbypassForAdjust()
-    onReverbRoomChange(nudgeLevel(reverbRoom, event.deltaY, event.shiftKey))
-  }, [reverbRoom, unbypassForAdjust, onReverbRoomChange])
+    nudgeRoom(event.deltaY, event.shiftKey)
+  }, [nudgeRoom])
+
+  // The headphones button adjusts sound from the wheel whichever row is
+  // showing: plain scroll for volume, Shift for reverb, Ctrl for room. The
+  // modifiers pick the level here, so there is no coarse step -- the readouts
+  // keep Shift-for-ten. Native and non-passive for the same reason as the
+  // readouts (see SoundLevelButton), and also so Ctrl+wheel cannot zoom the
+  // page instead.
+  const soundOptionsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const handleSoundOptionsWheel = useCallback((event: WheelEvent) => {
+    event.preventDefault()
+    if (event.shiftKey) nudgeReverb(event.deltaY, false)
+    else if (event.ctrlKey || event.metaKey) nudgeRoom(event.deltaY, false)
+    else nudgeVolume(event.deltaY, false)
+  }, [nudgeVolume, nudgeReverb, nudgeRoom])
+  useNonPassiveWheel(soundOptionsButtonRef, handleSoundOptionsWheel)
 
   // The hold gesture speaks in printed 0-99 levels; the graph wants fractions.
   const handleVolumeLevel = useCallback((display: number) => {
@@ -884,6 +913,7 @@ export const AudioControls = memo(function AudioControls({
 
         {/* Sound-options toggle: swaps the bottom row between buckets and levels */}
         <button
+          ref={soundOptionsButtonRef}
           type="button"
           className={`audio-ctrl-btn${isSoundOptionsOpen ? ' is-active' : ''}`}
           data-tooltip={isSoundOptionsOpen ? 'Back to playlists' : 'Sound options'}
