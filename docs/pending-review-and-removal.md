@@ -64,6 +64,101 @@ the code itself, so the next reader does not re-suspect it).
 
 ## Open entries
 
+### Legacy data migrations and upgrade paths — pre-release inventory
+
+**What.** Code that exists only to read or upgrade data written by earlier
+builds. The app has never been released, so none of it protects a real user; the
+goal is a first release without this baggage. (The typography key migrations —
+font size and line spacing — were already removed on 2026-09-11.) Grouped by
+where the data lives; line numbers are approximate, as of that date.
+
+*Settings file (app state):*
+- `stateService.ts`, texture materials (~288): an old single `editorStage`
+  texture key is split into `editorEditText` / `editorRenderText`.
+- `stateService.ts` (~475) and `appState.ts` (~216): the pre-curve-model render
+  smooth-scroll keys, still read as a fallback.
+- `App.tsx` hydration (~6707): `reviewFlagsVisibleBySection` seeded from the old
+  combined `reviewGutterVisibleBySection`, for states saved before the
+  line-number / review-flag split.
+- `App.tsx` hydration (~6767): the app-wide `selectedNoteId` from before split
+  view.
+
+*Layout presets (loadouts / `.tdl`):*
+- `databaseService.ts` (~509–547) and `App.tsx` (~927–948): the old single
+  `selection` and `textEmboss` highlight colours, split into edit / render (/ UI)
+  variants. Two copies — remove them together.
+
+*Database schema:*
+- The `ensure…Column` helpers in `ensureSchema` (~4181–4291). **Checked, not
+  assumed:** 10 of the 21 columns they add are already in their `CREATE TABLE`
+  (notes: `sourceAnchorLine`, `sourceAnchorText`, `contentChecksum`,
+  `previewBlockCache`; `note_snapshots.isFromDisk`; editor_sections:
+  `lastActiveNoteId`, `fixedWidthPx`, `noteSlotInitialized`;
+  `note_tabs.lastActiveChapterNoteId`; `chapters.chapterId`) — for those the
+  helper is pure upgrade code. **11 are ALTER-only** — notes: `assignedId`,
+  `anchorBlockIndex`, `chapterOnly`, `isAutoToc`, `isAutoOpenItems`,
+  `isTimeless`, `detachedChapterParentId` / `Position` / `ChapterId` /
+  `Sequence`; `note_snapshots.anchorBlockIndex`. A fresh install gets those ONLY
+  through the ALTER, so those helpers are currently load-bearing, not legacy.
+- `migrateMusicSongsSlotRange` (~3903): rebuilds `music_songs` to widen the slot
+  CHECK for the sixth (Lounge) bucket.
+- Editor-slot seeding (~4308): moves widths off `editor_sections.widthFraction` /
+  `.fixedWidthPx` onto `editor_slots`. Those two section columns are kept but no
+  longer written (~2529, ~4180: "retiring columns without a drop-column
+  migration").
+- `migrateChaptersToSingleParent` and `migrateChapterTagsToParent` (~4394,
+  ~4420).
+
+*Note content:*
+- `parseLegacyMetadata` (~361, used ~899): reads a legacy metadata header (tags)
+  out of `.md` files.
+- `readStoredNoteContent` (~2270): falls back to snapshots for a note last
+  written before content was stored.
+- `EditorSection.tsx` (~832–852): backfills the from-disk baseline for an
+  external note from before baselines existed.
+- `useMarkdownFormattingToolbar.ts` `unwrapLegacyAnchorHeading` (~148–180):
+  cleans out TOC blocks and anchor-linked headings from before the TOC stopped
+  linking.
+- `App.tsx` (~863) and `EditRestoreMath.ts` (~147–156): converts a pixel scroll
+  position from the legacy per-note SQLite `scrollTop` column. Check whether
+  this is still live before treating it as a migration.
+
+*Mirrors:* `installBrowserMockBridges.ts` (~141, ~354) reproduces some of the
+above for browser mode, and goes with them.
+
+**Not baggage — keep.** Listed so a cleanup does not mistake them:
+- `sanitizeDatabase`'s startup repairs: the search-index dedupe (~1024), the
+  repair of ids links cannot express (~1074), the guide re-seal (~1176), and the
+  missing note-id / chapter-id backfills (~1129, ~1211). They are idempotent and
+  also repair restored, copied and synced databases, not only upgrades — their
+  comments mention upgrades, but the passes stay. So do their tests
+  (`databaseService.assignedIds.test.ts`).
+- Wording only: "legacy proportional split" (`slotWidths.ts` and its tests,
+  `App.tsx` ~7071) names a live fallback algorithm; the "CM6 migration" comments
+  (`EditorContract.ts`, `CM6Editor.tsx`) and `adventure/rules/stats.ts` are
+  history, not data paths.
+
+**Why it is suspect.** Pre-release: no install predates the current formats
+except the developer's own, which has already run every one of these by running
+current builds.
+
+**What would have to be true to remove it.**
+- Per item: the developer's own database and app state are already in the
+  current format (they are). Then the reading code goes, together with the tests
+  that exercise it — the migration cases in `databaseService.chapters.test.ts`
+  and `databaseService.music.test.ts`, and the pre-feature TOC case in
+  `useMarkdownFormattingToolbar.test.ts`.
+- Schema, in this order: FIRST fold the 11 ALTER-only columns into their
+  `CREATE TABLE` statements, THEN delete the `ensure…Column` helpers. Deleting
+  them first breaks every fresh install. The retired `editor_sections` width
+  columns can then leave `CREATE TABLE` too.
+- After each removal: a fresh install (empty data root) builds the full schema
+  and starts, and a restart round trip still holds.
+
+**Noticed.** 2026-09-11, while removing the typography legacy migrations at the
+user's request. Purging the rest was explicitly out of that day's scope; this
+inventory is the handover for the mission that does it.
+
 ### `landOnDocumentEnd` — the 40-frame end-of-document correction
 
 **What.** `usePreviewScrollbar.ts`'s `landOnDocumentEnd` / `landOnDocumentEndAfterJourney`:

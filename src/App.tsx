@@ -282,6 +282,48 @@ const DEFAULT_BOX_SHADOW_ALPHA_PERCENT = 100
 const TEXTURE_PREVIEW_SURFACE: TextureSurfaceKey = 'appGrid'
 const SCROLL_TRACK_EDGE_GAP_PX = 3
 const COLOR_BUTTON_ARM_HOLD_MS = 300
+
+/** The font sizes that are remembered per size mode (see fontSizesByMode in App). */
+interface FontSizeSet {
+  editorFontSize: number
+  viewFontSize: number
+  uiFontScale: number
+}
+interface FontSizesByMode {
+  regular: FontSizeSet
+  double: FontSizeSet
+}
+const DEFAULT_FONT_SIZE_SET: FontSizeSet = {
+  editorFontSize: DEFAULT_EDITOR_FONT_SIZE_PX,
+  viewFontSize: DEFAULT_EDITOR_FONT_SIZE_PX,
+  uiFontScale: DEFAULT_UI_FONT_SCALE,
+}
+
+/**
+ * Both size modes' font sizes from a saved menu, each through the bad-value
+ * safeguard (resolvePersistedFontSizePx / resolvePersistedUiFontScale).
+ *
+ * The regular set lives in the original fields and falls back to the defaults.
+ * The double-size set has fields of its own; one that is missing (a save from
+ * before they existed) or damaged falls back to its REGULAR counterpart, not
+ * to the default -- so nothing changes for the reader until they tune a size
+ * in double size mode.
+ */
+function resolvePersistedFontSizesByMode(menu: PersistedMenuState): FontSizesByMode {
+  const regular: FontSizeSet = {
+    editorFontSize: resolvePersistedFontSizePx(menu.editorFontSize, DEFAULT_EDITOR_FONT_SIZE_PX),
+    viewFontSize: resolvePersistedFontSizePx(menu.viewFontSize, DEFAULT_EDITOR_FONT_SIZE_PX),
+    uiFontScale: resolvePersistedUiFontScale(menu.uiFontScale, DEFAULT_UI_FONT_SCALE),
+  }
+  return {
+    regular,
+    double: {
+      editorFontSize: resolvePersistedFontSizePx(menu.doubleSizeEditorFontSize, regular.editorFontSize),
+      viewFontSize: resolvePersistedFontSizePx(menu.doubleSizeViewFontSize, regular.viewFontSize),
+      uiFontScale: resolvePersistedUiFontScale(menu.doubleSizeUiFontScale, regular.uiFontScale),
+    },
+  }
+}
 const PENDING_UPDATE_DEBOUNCE_MS = 400
 const DEFAULT_HIGHLIGHT_COLORS: HighlightColors = {
   caret: 'rgba(120, 115, 112, 0.8)',
@@ -645,29 +687,37 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-// Font size/line-height used to be discrete keys ('xs'..'xl',
-// 'tight'..'wide'); persisted app-state files from before the continuous
-// sliders may still have those strings. Map them to their old numeric
-// equivalent so a settings file saved yesterday doesn't silently reset.
-const LEGACY_FONT_SIZE_PX_BY_KEY: Record<string, number> = { xs: 12, s: 14, m: 16, l: 18, xl: 20 }
-const LEGACY_LINE_HEIGHT_MULTIPLIER_BY_KEY: Record<string, number> = { tight: 1.2, compact: 1.4, cozy: 1.6, wide: 1.8 }
-
+/**
+ * A saved font size, or `fallback` for anything that is not one. Only a finite
+ * number is accepted, rounded to the slider's step and kept inside its range:
+ * the safeguard against a damaged or hand-edited settings file -- a string, a
+ * NaN, a size of 400 -- and nothing more. The old discrete size keys ('s',
+ * 'm', ...) are no longer migrated; one now falls back like any other bad value.
+ */
 function resolvePersistedFontSizePx(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return clamp(roundEditorFontSizePx(value), EDITOR_FONT_SIZE_MIN_PX, EDITOR_FONT_SIZE_MAX_PX)
   }
-  if (typeof value === 'string' && value in LEGACY_FONT_SIZE_PX_BY_KEY) {
-    return LEGACY_FONT_SIZE_PX_BY_KEY[value]!
+  return fallback
+}
+
+/** A saved interface scale, with the same safeguard as resolvePersistedFontSizePx. */
+function resolvePersistedUiFontScale(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return clamp(roundUiFontScale(value), UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX)
   }
   return fallback
 }
 
+/**
+ * A saved line-height multiplier, with the same safeguard as
+ * resolvePersistedFontSizePx: a finite number, rounded to the slider's step and
+ * kept inside its range, or `fallback`. The old discrete spacing keys
+ * ('tight', 'cozy', ...) are no longer migrated.
+ */
 function resolvePersistedLineHeightMultiplier(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return clamp(roundLineHeightMultiplier(value), EDITOR_LINE_HEIGHT_MULTIPLIER_MIN, EDITOR_LINE_HEIGHT_MULTIPLIER_MAX)
-  }
-  if (typeof value === 'string' && value in LEGACY_LINE_HEIGHT_MULTIPLIER_BY_KEY) {
-    return LEGACY_LINE_HEIGHT_MULTIPLIER_BY_KEY[value]!
   }
   return fallback
 }
@@ -1927,15 +1977,12 @@ function App() {
   const [windowIsCollapsed, setWindowIsCollapsed] = useState(false)
   const [windowModeTransitionOverlayNonce, setWindowModeTransitionOverlayNonce] = useState(0)
   const [viewStyle, setViewStyle] = useState<ViewStyleKey>('calibrilight')
-  const [viewFontSize, setViewFontSize] = useState<number>(DEFAULT_EDITOR_FONT_SIZE_PX)
   const [viewSpacing, setViewSpacing] = useState<number>(DEFAULT_EDITOR_LINE_HEIGHT_MULTIPLIER)
   const [viewLetterSpacingEm, setViewLetterSpacingEm] = useState<number>(DEFAULT_VIEW_LETTER_SPACING_EM)
   const [editorStyle, setEditorStyle] = useState<EditorStyleKey>(DEFAULT_EDITOR_STYLE)
-  const [editorFontSize, setEditorFontSize] = useState<number>(DEFAULT_EDITOR_FONT_SIZE_PX)
   const [editorSpacing, setEditorSpacing] = useState<number>(DEFAULT_EDITOR_LINE_HEIGHT_MULTIPLIER)
   const [editorGlyphPaddingPx, setEditorGlyphPaddingPx] = useState<number>(DEFAULT_EDITOR_GLYPH_SIDE_GAP_PX)
   const [uiFontStyle, setUiFontStyle] = useState<UiFontKey>(DEFAULT_UI_FONT_KEY)
-  const [uiFontScale, setUiFontScale] = useState<number>(DEFAULT_UI_FONT_SCALE)
   const [borderRadiusRegularPx, setBorderRadiusRegularPx] = useState<number>(DEFAULT_BORDER_RADIUS_REGULAR_PX)
   const [spacingRegularPx, setSpacingRegularPx] = useState<number>(DEFAULT_SPACING_REGULAR_PX)
   const [borderAlphaPercent, setBorderAlphaPercent] = useState<number>(DEFAULT_BORDER_ALPHA_PERCENT)
@@ -2147,6 +2194,25 @@ function App() {
   // "Double size" mode: 2x page zoom paired with a doubled window minimum --
   // see the window-control:double-size-mode handler in electron/main.ts.
   const [isDoubleSizeMode, setIsDoubleSizeMode] = useState(false)
+  // Font sizes are remembered per size mode: edit view, render view and the
+  // interface each keep one value for regular mode and one for double size,
+  // so switching modes never asks the reader to re-tune them. Spacing needs
+  // no pair -- it scales with the zoom on its own. Both sets always exist (a
+  // save from before this seeds the double-size set from the regular one --
+  // see resolvePersistedFontSizesByMode). The three names below are the
+  // CURRENT mode's values, and their setters write into that mode's set only.
+  const [fontSizesByMode, setFontSizesByMode] = useState<FontSizesByMode>(() => ({
+    regular: DEFAULT_FONT_SIZE_SET,
+    double: DEFAULT_FONT_SIZE_SET,
+  }))
+  const { editorFontSize, viewFontSize, uiFontScale } = isDoubleSizeMode ? fontSizesByMode.double : fontSizesByMode.regular
+  const setActiveModeFontSize = useCallback((key: keyof FontSizeSet, value: number) => {
+    const mode = isDoubleSizeMode ? 'double' : 'regular'
+    setFontSizesByMode((previous) => ({ ...previous, [mode]: { ...previous[mode], [key]: value } }))
+  }, [isDoubleSizeMode])
+  const setEditorFontSize = useCallback((px: number) => setActiveModeFontSize('editorFontSize', px), [setActiveModeFontSize])
+  const setViewFontSize = useCallback((px: number) => setActiveModeFontSize('viewFontSize', px), [setActiveModeFontSize])
+  const setUiFontScale = useCallback((scale: number) => setActiveModeFontSize('uiFontScale', scale), [setActiveModeFontSize])
   // Line-number gutter visibility, keyed per editor slot (sectionId) -- not
   // per note/chapter, so switching which note a slot shows leaves the toggle
   // alone. Absent key = off (a freshly created slot starts with the gutter
@@ -4179,15 +4245,19 @@ function App() {
       documentFindCaseSensitive: documentFindCaseSensitiveRef.current,
       isPreviewMode: getActiveSection()?.isPreviewMode,
       viewStyle,
-      viewFontSize,
+      viewFontSize: fontSizesByMode.regular.viewFontSize,
       viewSpacing,
       viewLetterSpacingEm,
       editorStyle,
-      editorFontSize,
+      editorFontSize: fontSizesByMode.regular.editorFontSize,
       editorSpacing,
       editorGlyphPaddingPx,
       uiFontStyle,
-      uiFontScale,
+      uiFontScale: fontSizesByMode.regular.uiFontScale,
+      // Double size mode's own font sizes -- see fontSizesByMode.
+      doubleSizeEditorFontSize: fontSizesByMode.double.editorFontSize,
+      doubleSizeViewFontSize: fontSizesByMode.double.viewFontSize,
+      doubleSizeUiFontScale: fontSizesByMode.double.uiFontScale,
       borderRadiusRegularPx,
       spacingRegularPx,
       borderAlphaPercent,
@@ -4321,10 +4391,9 @@ function App() {
     deferPreviewOnRapidInput,
     noteSizeThresholdBlocks,
     forceCharacterScrollbarThumb,
-    editorFontSize,
+    fontSizesByMode,
     editorGlyphPaddingPx,
     uiFontStyle,
-    uiFontScale,
     borderRadiusRegularPx,
     spacingRegularPx,
     borderAlphaPercent,
@@ -4380,7 +4449,6 @@ function App() {
     isDoubleSizeMode,
     reviewGutterVisibleBySection,
     reviewFlagsVisibleBySection,
-    viewFontSize,
     viewSpacing,
     viewLetterSpacingEm,
     viewStyle,
@@ -6425,11 +6493,9 @@ ${markdownHtml}
             setRestoredDocumentFindCaseSensitive(appState.menu.documentFindCaseSensitive ?? false)
             getActiveSection()?.setIsPreviewMode(appState.menu.isPreviewMode ?? false)
             setViewStyle(appState.menu.viewStyle ?? 'calibrilight')
-            setViewFontSize(resolvePersistedFontSizePx(appState.menu.viewFontSize, DEFAULT_EDITOR_FONT_SIZE_PX))
             setViewSpacing(resolvePersistedLineHeightMultiplier(appState.menu.viewSpacing, DEFAULT_EDITOR_LINE_HEIGHT_MULTIPLIER))
             setViewLetterSpacingEm(resolvePersistedViewLetterSpacingEm(appState.menu.viewLetterSpacingEm, DEFAULT_VIEW_LETTER_SPACING_EM))
             setEditorStyle(appState.menu.editorStyle ?? DEFAULT_EDITOR_STYLE)
-            setEditorFontSize(resolvePersistedFontSizePx(appState.menu.editorFontSize, DEFAULT_EDITOR_FONT_SIZE_PX))
             setEditorSpacing(resolvePersistedLineHeightMultiplier(appState.menu.editorSpacing, DEFAULT_EDITOR_LINE_HEIGHT_MULTIPLIER))
             setEditorGlyphPaddingPx(
               clamp(
@@ -6439,13 +6505,11 @@ ${markdownHtml}
               ),
             )
             setUiFontStyle(appState.menu.uiFontStyle ?? DEFAULT_UI_FONT_KEY)
-            setUiFontScale(
-              clamp(
-                roundUiFontScale(appState.menu.uiFontScale ?? DEFAULT_UI_FONT_SCALE),
-                UI_FONT_SCALE_MIN,
-                UI_FONT_SCALE_MAX,
-              ),
-            )
+            // Both size modes' font sizes at once, straight into the pair --
+            // not through the mode-aware setters, which would write them all
+            // into whichever mode is current before isDoubleSizeMode (restored
+            // below) has landed.
+            setFontSizesByMode(resolvePersistedFontSizesByMode(appState.menu))
             setBorderRadiusRegularPx(
               clamp(
                 Math.round(appState.menu.borderRadiusRegularPx ?? DEFAULT_BORDER_RADIUS_REGULAR_PX),

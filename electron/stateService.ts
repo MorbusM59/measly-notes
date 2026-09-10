@@ -162,34 +162,40 @@ function sanitizeViewStyle(input: unknown): (typeof VALID_VIEW_STYLES)[number] {
   return DEFAULT_APP_STATE.menu!.viewStyle ?? 'modern';
 }
 
-// Font size / line-height used to be discrete keys ('xs'..'xl',
-// 'tight'..'wide'); app-state files saved before the continuous sliders may
-// still have those strings, so a legacy key still resolves to its old
-// numeric equivalent instead of silently falling back to the default.
-const LEGACY_FONT_SIZE_PX_BY_KEY: Record<string, number> = { xs: 12, s: 14, m: 16, l: 18, xl: 20 };
-const LEGACY_LINE_HEIGHT_MULTIPLIER_BY_KEY: Record<string, number> = { tight: 1.2, compact: 1.4, cozy: 1.6, wide: 1.8 };
-
 const EDITOR_FONT_SIZE_MIN_PX = 6;
 const EDITOR_FONT_SIZE_MAX_PX = 24;
 const EDITOR_LINE_HEIGHT_MULTIPLIER_MIN = 0.8;
 const EDITOR_LINE_HEIGHT_MULTIPLIER_MAX = 3;
 
+// The safeguard against a damaged or hand-edited settings file: only a finite
+// number is accepted, rounded to the slider's half-pixel step and kept inside
+// its range; anything else -- a string, a NaN, null -- is the default. The old
+// discrete size keys ('s', 'm', ...) are no longer migrated.
 function sanitizeFontSizePx(input: unknown): number {
   if (typeof input === 'number' && Number.isFinite(input)) {
     return Math.max(EDITOR_FONT_SIZE_MIN_PX, Math.min(EDITOR_FONT_SIZE_MAX_PX, Math.round(input * 2) / 2));
   }
-  if (typeof input === 'string' && input in LEGACY_FONT_SIZE_PX_BY_KEY) {
-    return LEGACY_FONT_SIZE_PX_BY_KEY[input]!;
-  }
   return DEFAULT_APP_STATE.menu!.editorFontSize ?? 16;
 }
 
+// For fields the renderer fills from elsewhere when absent (double size mode's
+// own font sizes, seeded from their regular counterparts): a missing or
+// damaged value stays MISSING rather than becoming the default, which would
+// silently defeat that seeding.
+function sanitizeOptionalFontSizePx(input: unknown): number | undefined {
+  return typeof input === 'number' && Number.isFinite(input) ? sanitizeFontSizePx(input) : undefined;
+}
+
+function sanitizeOptionalUiFontScale(input: unknown): number | undefined {
+  return typeof input === 'number' && Number.isFinite(input) ? sanitizeUiFontScale(input) : undefined;
+}
+
+// Same safeguard as sanitizeFontSizePx: a finite number, rounded to the
+// slider's step and kept inside its range, or the default. The old discrete
+// spacing keys ('tight', 'cozy', ...) are no longer migrated.
 function sanitizeLineHeightMultiplier(input: unknown): number {
   if (typeof input === 'number' && Number.isFinite(input)) {
     return Math.max(EDITOR_LINE_HEIGHT_MULTIPLIER_MIN, Math.min(EDITOR_LINE_HEIGHT_MULTIPLIER_MAX, Math.round(input * 20) / 20));
-  }
-  if (typeof input === 'string' && input in LEGACY_LINE_HEIGHT_MULTIPLIER_BY_KEY) {
-    return LEGACY_LINE_HEIGHT_MULTIPLIER_BY_KEY[input]!;
   }
   return DEFAULT_APP_STATE.menu!.editorSpacing ?? 1.6;
 }
@@ -427,6 +433,11 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     ),
     uiFontStyle: sanitizeUiFontStyle(input?.uiFontStyle),
     uiFontScale: sanitizeUiFontScale(input?.uiFontScale),
+    // Double size mode's own font sizes -- missing or damaged stays missing,
+    // see sanitizeOptionalFontSizePx.
+    doubleSizeEditorFontSize: sanitizeOptionalFontSizePx(input?.doubleSizeEditorFontSize),
+    doubleSizeViewFontSize: sanitizeOptionalFontSizePx(input?.doubleSizeViewFontSize),
+    doubleSizeUiFontScale: sanitizeOptionalUiFontScale(input?.doubleSizeUiFontScale),
     borderRadiusRegularPx: sanitizeIntegerInRange(
       input?.borderRadiusRegularPx,
       0,

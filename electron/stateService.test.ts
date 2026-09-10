@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { StateService } from './stateService'
+import { UI_FONT_SCALE_MAX, UI_FONT_SCALE_MIN } from '../src/shared/UiTypography'
 import { createSession } from '../src/adventure/engine'
 import { THE_LONG_MARGIN } from '../src/adventure/content/theLongMargin'
 
@@ -54,6 +55,62 @@ describe('StateService app-state field round-trip', () => {
     const reader = new StateService(dataRoot)
     const loaded = await reader.loadAppState()
     expect(loaded.menu?.isDoubleSizeMode).toBe(false)
+  })
+
+  it('persists double size mode\'s own font sizes across a save -> fresh-instance load', async () => {
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date', selectedMonths: [], selectedYears: [], searchQuery: '',
+        editorFontSize: 18, viewFontSize: 17, uiFontScale: UI_FONT_SCALE_MAX,
+        doubleSizeEditorFontSize: 11, doubleSizeViewFontSize: 12.5, doubleSizeUiFontScale: UI_FONT_SCALE_MIN,
+      },
+    })
+
+    const loaded = await new StateService(dataRoot).loadAppState()
+    expect(loaded.menu?.editorFontSize).toBe(18)
+    expect(loaded.menu?.viewFontSize).toBe(17)
+    expect(loaded.menu?.uiFontScale).toBe(UI_FONT_SCALE_MAX)
+    expect(loaded.menu?.doubleSizeEditorFontSize).toBe(11)
+    expect(loaded.menu?.doubleSizeViewFontSize).toBe(12.5)
+    expect(loaded.menu?.doubleSizeUiFontScale).toBe(UI_FONT_SCALE_MIN)
+  })
+
+  it('keeps double size mode\'s font sizes absent for a save that never had them, so the app can seed them from the regular ones', async () => {
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: { sidebarMode: 'date', selectedMonths: [], selectedYears: [], searchQuery: '', editorFontSize: 18 },
+    })
+
+    const loaded = await new StateService(dataRoot).loadAppState()
+    expect(loaded.menu?.editorFontSize).toBe(18)
+    expect(loaded.menu?.doubleSizeEditorFontSize).toBeUndefined()
+    expect(loaded.menu?.doubleSizeViewFontSize).toBeUndefined()
+    expect(loaded.menu?.doubleSizeUiFontScale).toBeUndefined()
+  })
+
+  it('guards the font sizes against damaged values: out of range is clamped, anything not a number falls back', async () => {
+    const writer = new StateService(dataRoot)
+    await writer.saveAppState({
+      selectedNoteId: null,
+      menu: {
+        sidebarMode: 'date', selectedMonths: [], selectedYears: [], searchQuery: '',
+        editorFontSize: 400,
+        // An old discrete size key: no longer migrated, so it falls back like any bad value.
+        viewFontSize: 'm' as unknown as number,
+        doubleSizeEditorFontSize: 'l' as unknown as number,
+        doubleSizeViewFontSize: -3,
+      },
+    })
+
+    const loaded = await new StateService(dataRoot).loadAppState()
+    expect(loaded.menu?.editorFontSize).toBe(24)
+    expect(loaded.menu?.viewFontSize).toBe(16)
+    // A damaged double-size value stays missing, so the app seeds it from the regular one.
+    expect(loaded.menu?.doubleSizeEditorFontSize).toBeUndefined()
+    expect(loaded.menu?.doubleSizeViewFontSize).toBe(6)
   })
 
   it('persists the wheel-spin and wheel-step sliders, including the 0 that means "off"', async () => {
