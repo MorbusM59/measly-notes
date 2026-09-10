@@ -6123,6 +6123,13 @@ ${markdownHtml}
     event.dataTransfer.dropEffect = 'copy'
   }, [])
 
+  // Bound in the CAPTURE phase on the app root, so a file drop is claimed on
+  // the way down, before it reaches any editor. CM6's built-in drop handler
+  // (@codemirror/view's handlers.drop) reads every dropped file as text and
+  // inserts it at the drop point; bound as a bubble handler, this ran only
+  // after that insertion had already altered the note under the cursor, and
+  // the import then opened the same content a second time as a new note.
+  // Non-file drops return untouched and carry on to their own handlers.
   const handleAppDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     const types = Array.from(event.dataTransfer?.types ?? [])
     const isFileDrop = types.includes('Files')
@@ -9112,7 +9119,7 @@ ${markdownHtml}
       className={`app-root${customCursorSettings.enabled ? ' hide-native-cursor' : ''}`}
       style={appRootStyle}
       onDragOver={handleAppDragOver}
-      onDrop={handleAppDrop}
+      onDropCapture={handleAppDrop}
     >
       {bootstrapError ? (
         <div
