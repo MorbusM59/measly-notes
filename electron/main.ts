@@ -900,19 +900,18 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('export-md', async (_event, noteId: string, folderPath: string, fileName: string) => {
+  // Writes the markdown the renderer assembled rather than copying a note's
+  // file off disk: an "Export All" is the parent plus every chapter joined
+  // in order, which exists as no single file -- and the renderer is the one
+  // that holds the live, not-yet-autosaved text of whatever is open.
+  ipcMain.handle('export-md', async (_event, folderPath: string, fileName: string, markdownText: string) => {
     try {
-      if (!noteId || !folderPath || !fileName) {
+      if (!folderPath || !fileName || typeof markdownText !== 'string') {
         return { ok: false, error: 'Invalid export arguments' }
-      }
-      const sourcePath = path.join(resolveDataRoot(), 'notes', `${noteId}.md`)
-      const sourceExists = await fsPromises.stat(sourcePath).then(() => true).catch(() => false)
-      if (!sourceExists) {
-        return { ok: false, error: 'Source note file not found' }
       }
       await fsPromises.mkdir(folderPath, { recursive: true })
       const outPath = path.join(folderPath, sanitizeExportFileName(fileName))
-      await fsPromises.copyFile(sourcePath, outPath)
+      await fsPromises.writeFile(outPath, markdownText, 'utf8')
       return { ok: true, path: outPath }
     } catch (error) {
       console.warn('[main] export-md failed', error)

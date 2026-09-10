@@ -41,6 +41,9 @@ const SIMPLE_ROTATION_TRANSITION_MS = 200
 // proportionally as 250 * 50000 / maxSpeed from there.
 const heldKeyRepeatThrottleMs = () => (250 * 50000) / Math.max(1, getRenderScrollMaxSpeedPxPerSec())
 
+/** What an export covers: the note that is open, or its whole chapter family assembled into one document (see App.tsx's buildExportMarkdown). */
+export type ExportScope = 'note' | 'all'
+
 export interface EscapeHoldPanelProps {
   /** Whether the panel is the one currently "open" -- this component now stays
    * permanently mounted (its host toggles `display:none` around it instead of
@@ -51,6 +54,8 @@ export interface EscapeHoldPanelProps {
   activeNoteId: string | null
   /** True while the active note (or its whole chapter family) is timeless -- disables New Chapter, since a frozen family can't gain a new chapter (databaseService.ts's assertNotTimeless). Export/New Note are unaffected -- they're not mutations of the frozen note itself. */
   isActiveNoteTimeless: boolean
+  /** True when the open note's family has at least one real (not auto-generated) chapter -- the only case in which Export All covers more than Export does, so it is the only case in which it is offered. */
+  hasChapters: boolean
   /** Mirrors EditorToolbar.tsx's own isPreviewMode gate on its (now-removed) Export PDF/MD buttons: PDF export only makes sense against the rendered view, MD export only against the raw edit-mode text, so each cell only ever appears in its own mode rather than showing both and letting the wrong one fail or confuse. */
   isPreviewMode: boolean
   isExportingPdf: boolean
@@ -62,8 +67,8 @@ export interface EscapeHoldPanelProps {
   reduceVisualEffects: boolean
   onCreateNote: () => void | Promise<void>
   onCreateChapter: () => void | Promise<void>
-  onExportPdf: () => void | Promise<void>
-  onExportMd: () => void | Promise<void>
+  onExportPdf: (scope: ExportScope) => void | Promise<void>
+  onExportMd: (scope: ExportScope) => void | Promise<void>
   onOpenHelp: () => void | Promise<void>
   onClose: () => void
   /**
@@ -265,6 +270,7 @@ export function EscapeHoldPanel({
   isOpen,
   activeNoteId,
   isActiveNoteTimeless,
+  hasChapters,
   isPreviewMode,
   isExportingPdf,
   isExportingMd,
@@ -298,22 +304,25 @@ export function EscapeHoldPanel({
     // Returning early rather than merging is what lets a mode be written
     // without knowing which quick actions happen to be available behind it.
     if (activeMode) return activeMode.cells
+    // Mirrors EditorToolbar.tsx's own (now-removed) isPreviewMode gate: the
+    // view decides the format -- PDF from render view, MD from edit view --
+    // since each only makes sense against the mode it actually reflects.
+    // Both export cells therefore mean "in the format of what you're looking
+    // at"; they differ only in scope.
+    const onExport = isPreviewMode ? onExportPdf : onExportMd
+    const isExporting = isPreviewMode ? isExportingPdf : isExportingMd
     const candidates = [
       { id: 'new-note', label: 'New Note', icon: 'fa-solid fa-file', onSelect: onCreateNote, disabled: false },
       { id: 'new-chapter', label: 'New Chapter', icon: 'fa-solid fa-bookmark', onSelect: onCreateChapter, disabled: !hasActiveNote || isActiveNoteTimeless },
-      // Mirrors EditorToolbar.tsx's own (now-removed) isPreviewMode gate:
-      // PDF export only in render view, MD export only in edit view -- each
-      // one only makes sense against the mode it actually reflects, so the
-      // other simply drops out (see isPreviewMode's own doc comment above).
-      { id: 'export-pdf', label: 'Export PDF', icon: 'fa-solid fa-file-pdf', onSelect: onExportPdf, disabled: !hasActiveNote || isExportingPdf || !isPreviewMode },
-      { id: 'export-md', label: 'Export MD', icon: 'fa-solid fa-file-code', onSelect: onExportMd, disabled: !hasActiveNote || isExportingMd || isPreviewMode },
+      { id: 'export', label: 'Export', icon: 'fa-solid fa-chevron-up', onSelect: () => onExport('note'), disabled: !hasActiveNote || isExporting },
+      { id: 'export-all', label: 'Export All', icon: 'fa-solid fa-angles-up', onSelect: () => onExport('all'), disabled: !hasActiveNote || isExporting || !hasChapters },
       { id: 'user-guide', label: 'User Guide', icon: 'fa-solid fa-graduation-cap', onSelect: onOpenHelp, disabled: false },
     ]
     // Contributed entry cells are appended, not interleaved: the built-in
     // note actions keep their familiar order and position regardless of
     // what else is currently reachable from here.
     return [...candidates.filter((candidate) => !candidate.disabled), ...(escapeMenu?.entryCells ?? [])]
-  }, [activeMode, escapeMenu, hasActiveNote, isActiveNoteTimeless, isPreviewMode, isExportingPdf, isExportingMd, onCreateNote, onCreateChapter, onExportPdf, onExportMd, onOpenHelp])
+  }, [activeMode, escapeMenu, hasActiveNote, isActiveNoteTimeless, hasChapters, isPreviewMode, isExportingPdf, isExportingMd, onCreateNote, onCreateChapter, onExportPdf, onExportMd, onOpenHelp])
 
   const [topIndex, setTopIndex] = useState(0)
   // Which cell is focused/tabbable -- deliberately separate state from

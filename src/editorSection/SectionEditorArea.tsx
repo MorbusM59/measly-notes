@@ -14,7 +14,8 @@ import { resolveSpellCheckSurfaceState } from '../shared/spellCheckPolicy'
 import { ChapterBar } from '../chapters/ChapterBar'
 import { isSealedNoteId } from '../shared/helpGuide'
 import type { ChapterPillSplitArm } from '../chapters/useChapterPillActions'
-import { EscapeHoldPanel } from './EscapeHoldPanel'
+import { EscapeHoldPanel, type ExportScope } from './EscapeHoldPanel'
+import { splitChapterFamily } from '../shared/chapters'
 import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
 import { EscapeMenuStatusBar } from '../escapeMenu/EscapeMenuStatusBar'
 
@@ -41,8 +42,8 @@ export interface SectionEditorAreaProps {
   onEscapeHoldPanelClose: () => void
   onEscapeHoldCreateNote: () => void | Promise<void>
   onEscapeHoldCreateChapter: () => void | Promise<void>
-  onEscapeHoldExportPdf: () => void | Promise<void>
-  onEscapeHoldExportMd: () => void | Promise<void>
+  onEscapeHoldExportPdf: (scope: ExportScope) => void | Promise<void>
+  onEscapeHoldExportMd: (scope: ExportScope) => void | Promise<void>
   onEscapeHoldOpenHelp: () => void | Promise<void>
   /** Passed straight through to EscapeHoldPanel -- see its own `escapeMenu` prop and escapeMenuContract.ts. */
   escapeMenu?: EscapeMenuContribution | null
@@ -425,6 +426,7 @@ export function SectionEditorArea({
                 isOpen={isEscapeHoldActive}
                 activeNoteId={activeNoteId}
                 isActiveNoteTimeless={isViewingTimelessNote}
+                hasChapters={splitChapterFamily(chapters, notes).realChapters.length > 0}
                 isPreviewMode={isPreviewMode}
                 isExportingPdf={isExportingPdf}
                 isExportingMd={isExportingMd}

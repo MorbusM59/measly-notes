@@ -170,6 +170,9 @@ import {
   PREVIEW_MARKDOWN_NOOP_NAVIGATE,
 } from './editor/PreviewMarkdown'
 import { normalizeInternalText } from './editor/TextPolicy'
+import { splitChapterFamily } from './shared/chapters'
+import { trimBlankLines } from './chapters/chapterExtraction'
+import type { ExportScope } from './editorSection/EscapeHoldPanel'
 import { truncateTitle } from './shared/textSanitization'
 import { deriveNoteTitleFromText } from './shared/noteTitle'
 import { isNoteSearchQueryActive, matchesNoteSearchQuery } from './shared/noteSearch'
@@ -5428,9 +5431,39 @@ function App() {
     return folderPath
   }, [buildMenuStateSnapshot, getActiveSection, queueAppStateSave])
 
-  const buildExportHtmlContent = useCallback(async () => {
+  /**
+   * The markdown an export writes, and the title its file is named after.
+   * 'note' is whatever is open right now (a parent or a single chapter).
+   * 'all' is the whole family assembled into one document: the parent, then
+   * every real chapter in chapter-bar order. The auto-generated Table of
+   * Contents and Open Items chapters are left out -- they are views over the
+   * chapters, not content, and their chapter links point nowhere once the
+   * chapters are no longer separate notes. The note that is open contributes
+   * its live editor text, so an edit the autosave has not reached yet is not
+   * silently missing from the file.
+   */
+  const buildExportMarkdown = useCallback(async (scope: ExportScope): Promise<{ text: string; title: string } | null> => {
     const section = getActiveSection()
-    const currentEditorText = normalizeInternalText(section?.latestEditorTextRef.current || section?.activeNoteText || '')
+    const activeNoteId = section?.activeNoteId
+    if (!section || !activeNoteId) return null
+    const liveText = normalizeInternalText(section.latestEditorTextRef.current || section.activeNoteText || '')
+    const parentNoteId = section.menuIdentityNoteId ?? activeNoteId
+    if (scope === 'note' || !window.thockdownChapters || !window.thockdownNotes) {
+      return { text: liveText, title: deriveNoteTitleFromText(liveText) }
+    }
+    const notesApi = window.thockdownNotes
+    const chapters = await window.thockdownChapters.listChapters(parentNoteId)
+    const memberIds = [parentNoteId, ...splitChapterFamily(chapters, notes).realChapters.map((chapter) => chapter.chapterNoteId)]
+    const texts = await Promise.all(memberIds.map(async (noteId) => (
+      noteId === activeNoteId ? liveText : normalizeInternalText((await notesApi.loadNote({ id: noteId })).text)
+    )))
+    return {
+      text: texts.map(trimBlankLines).filter((text) => text.length > 0).join('\n\n'),
+      title: deriveNoteTitleFromText(texts[0] ?? ''),
+    }
+  }, [getActiveSection, notes])
+
+  const buildExportHtmlContent = useCallback(async (markdownText: string, title: string) => {
     const exportCss = await buildExportCss(viewStyle as ExportViewStyle, viewFontSize, viewSpacing, viewLetterSpacingEm)
 
     const markdownHtml = renderToStaticMarkup(
@@ -5440,7 +5473,7 @@ function App() {
             remarkPlugins={PREVIEW_MARKDOWN_REMARK_PLUGINS}
             components={createPreviewMarkdownComponents(PREVIEW_MARKDOWN_NOOP_NAVIGATE, PREVIEW_MARKDOWN_NOOP_NAVIGATE)}
           >
-            {currentEditorText}
+            {markdownText}
           </ReactMarkdown>
         </div>
       </div>,
@@ -5450,7 +5483,7 @@ function App() {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>${deriveNoteTitleFromText(section?.activeNoteText || '')}</title>
+<title>${title}</title>
 <base href="${document.location.href}">
 <style>${exportCss}</style>
 </head>
@@ -5458,7 +5491,7 @@ function App() {
 ${markdownHtml}
 </body>
 </html>`
-  }, [getActiveSection, viewFontSize, viewSpacing, viewLetterSpacingEm, viewStyle])
+  }, [viewFontSize, viewSpacing, viewLetterSpacingEm, viewStyle])
 
   const saveSelectedNoteState = useCallback(async (selectedNoteId: string | null) => {
     if (!window.thockdownState) return
@@ -7607,7 +7640,7 @@ ${markdownHtml}
     typingSoundManager.setLayerGain('treble', audioTrebleVolume)
   }, [audioTrebleVolume])
 
-  const handleExportPdf = useCallback(async () => {
+  const handleExportPdf = useCallback(async (scope: ExportScope) => {
     const activeNoteId = getActiveSection()?.activeNoteId
     if (!activeNoteId || isExportingPdf) return
     setIsExportingPdf(true)
@@ -7621,9 +7654,10 @@ ${markdownHtml}
       const folderPath = exportFolder ?? await chooseExportFolder()
       if (!folderPath) return
 
-      const fileName = `${deriveNoteTitleFromText(getActiveSection()?.activeNoteText || '')}.pdf`
-      const htmlContent = await buildExportHtmlContent()
-      const result = await exportPdf(folderPath, fileName, htmlContent)
+      const exported = await buildExportMarkdown(scope)
+      if (!exported) return
+      const htmlContent = await buildExportHtmlContent(exported.text, exported.title)
+      const result = await exportPdf(folderPath, `${exported.title}.pdf`, htmlContent)
 
       if (!result?.ok) {
         console.error('Export PDF failed', result?.error)
@@ -7633,21 +7667,20 @@ ${markdownHtml}
     } finally {
       setIsExportingPdf(false)
     }
-  }, [getActiveSection, exportFolder, isExportingPdf, chooseExportFolder, buildExportHtmlContent])
+  }, [getActiveSection, exportFolder, isExportingPdf, chooseExportFolder, buildExportMarkdown, buildExportHtmlContent])
 
-  const handleExportMd = useCallback(async (forceChooseFolder = false) => {
+  const handleExportMd = useCallback(async (scope: ExportScope) => {
     const activeNoteId = getActiveSection()?.activeNoteId
     if (!activeNoteId || isExportingMd) return
     setIsExportingMd(true)
 
     try {
-      const folderPath = (!exportFolder || forceChooseFolder)
-        ? await chooseExportFolder()
-        : exportFolder
+      const folderPath = exportFolder ?? await chooseExportFolder()
       if (!folderPath) return
 
-      const fileName = `${deriveNoteTitleFromText(getActiveSection()?.activeNoteText || '')}.md`
-      const result = await window.ipcRenderer?.invoke<{ ok: boolean; error?: string }>('export-md', activeNoteId, folderPath, fileName)
+      const exported = await buildExportMarkdown(scope)
+      if (!exported) return
+      const result = await window.ipcRenderer?.invoke<{ ok: boolean; error?: string }>('export-md', folderPath, `${exported.title}.md`, exported.text)
 
       if (!result?.ok) {
         console.error('Export MD failed', result?.error)
@@ -7657,7 +7690,7 @@ ${markdownHtml}
     } finally {
       setIsExportingMd(false)
     }
-  }, [getActiveSection, exportFolder, isExportingMd, chooseExportFolder])
+  }, [getActiveSection, exportFolder, isExportingMd, chooseExportFolder, buildExportMarkdown])
 
   useEffect(() => {
     const activeNoteId = activeSectionSnapshot?.activeNoteId

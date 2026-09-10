@@ -141,7 +141,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 
 - Keeps showing while you hold \`Esc\`; tapping \`Esc\` once more (or clicking outside it) dismisses it without doing anything.
 - Navigate with the arrow keys or \`Tab\`/\`Shift+Tab\`, then \`Enter\`/\`Space\` or a click to run the highlighted action. Running an action closes the menu -- unless it's something that carries on *inside* the menu, in which case the menu stays up and its cells change to whatever comes next.
-- Currently wired up: New Note, New Chapter, Export PDF, Export MD, Help (opens this page -- see [The User Guide]($#the-user-guide)). New Note and Help always work; New Chapter and the two Export actions grey out with no note open (or one that can't take them, like a read-only auto-generated chapter). The remaining grid cells are reserved for future actions.
+- Currently wired up: New Note, New Chapter, Export, Export All, Help (opens this page -- see [The User Guide]($#the-user-guide)). New Note and Help always work; New Chapter and Export only appear with a note open (New Chapter not for a note that can't take one, like a read-only auto-generated chapter), and Export All only for a note that has chapters -- see [Export All]($#export-all). The remaining grid cells are reserved for future actions.
 
 ### [The User Guide](#the-user-guide)
 
@@ -610,20 +610,23 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 ### [Export to PDF](#export-to-pdf)
 
 > **Where?**
-> The toolbar's export icon, while in preview mode.
+> Hold \`Esc\` → Export (or Export All), while in render view.
 
-*Exports the active note's rendered view as a PDF file.*
-
-- Right-click the export button first to choose a destination folder before exporting.
+*Exports the rendered note as a PDF file.*
 
 ### [Export to Markdown](#export-to-markdown)
 
 > **Where?**
-> The toolbar's export icon, while in edit mode.
+> Hold \`Esc\` → Export (or Export All), while in edit view.
 
 *Exports the raw note text as a \`.md\` file.*
 
-- Right-click the export button to force the folder picker, even if a destination is already remembered.
+### [Export All](#export-all)
+
+- Which format you get follows the view you're in: render view exports PDF, edit view exports Markdown.
+- In a note with chapters, **Export** covers only the chapter (or parent) you're looking at. **Export All** assembles the parent and every chapter, in chapter order, into a single document named after the parent.
+- The auto-generated Table of Contents and Open Items chapters are not included.
+- The first export asks for a destination folder; later exports reuse it.
 `,
   `## Keyboard Shortcuts
 
