@@ -462,6 +462,21 @@ The goal is deterministic behavior with one source of truth per interaction phas
 - The rule is edit view only. The render view lays out blocks of every height
   and has no grid to hold.
 
+### 3d2. In edit view, a click lands on the box under the pointer
+- The cells of 3d are what the reader sees and aims at, so a click selects the
+  box the pointer is over -- the caret goes before that character -- not the
+  nearest boundary between characters, which is what CodeMirror does on its
+  own and which put every right-half click one box too far. A drag selects
+  every box it covers, the box under the pointer included; double and triple
+  clicks keep CodeMirror's word and line selection. One rule for every editor
+  click, in `src/editor/boxPointer.ts`: plain presses and drags, right-click
+  scope cycling and the checkbox caret-click all resolve their position there.
+- The drawn mouse cursor sits exactly on the pointer, everywhere. It used to
+  be drawn 5px right of it to make editor clicks feel accurate, which made
+  every click outside the editor miss by those 5px and was only right at one
+  font size. Accuracy is decided where the click is interpreted, never by
+  moving the cursor's picture -- do not reintroduce an offset there.
+
 ### 3e. A long journey is cut, not endured
 - Travel time is a property of the interaction, not of the distance. A
   scrollbar click across a very large document takes about the same half second

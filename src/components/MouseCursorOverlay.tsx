@@ -240,8 +240,10 @@ export function MouseCursorOverlay({
 
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
 
-      // magical number offset so that we actually have pin point accuracy on the grid.
-      const cx = pos.x * scaleRef.current.x + 5
+      // Drawn exactly at the pointer, everywhere. Editor click accuracy is the
+      // editor's own business (editor/boxPointer.ts) -- an offset here used to
+      // stand in for it, which made every click outside the editor miss.
+      const cx = pos.x * scaleRef.current.x
       const cy = pos.y * scaleRef.current.y
 
       // Cap frame delta so a backgrounded-tab / dropped-frame gap doesn't
@@ -294,9 +296,9 @@ export function MouseCursorOverlay({
       // left-right about the cursor's own center (cx), which reverses the
       // apparent rotation direction while keeping the gradient and stroke
       // geometry (computed with unsigned trailRad/effectiveSpinHz above)
-      // consistent with each other. cx already includes the "pinpoint
-      // accuracy" +5 offset, so mirroring about it leaves the cursor's own
-      // position fixed -- only the orbiting elements around it flip.
+      // consistent with each other. Mirroring about cx, the cursor's own
+      // position, leaves that position fixed -- only the orbiting elements
+      // around it flip.
       if (reverseSpin) {
         ctx!.save()
         ctx!.translate(cx, 0)

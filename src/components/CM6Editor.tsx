@@ -38,6 +38,7 @@ import { resolveCagedScrollTarget } from '../editor/CageMath';
 import { attachRowGridGuard, resolveRowGridCorrection, resolveRowGridDirection, type RowGridGuard } from '../editor/rowGridGuard';
 import { registerScrollBridge } from '../editor/scrollBridge';
 import { resolveThumbRubberBand } from '../editor/scrollThumbRubberBand';
+import { boxMouseSelection, resolveBoxAtCoords } from '../editor/boxPointer';
 import { createCommittedThumbHeight } from '../editor/scrollThumbMetrics';
 import { sampleCurveRampProgress } from '../editor/ScrollCurvePlan';
 import type { ScrollJourneyTiming } from '../editor/scrollJourney';
@@ -3615,6 +3616,10 @@ export function CM6Editor({
         applyTransformResult(view, text, next);
         return true;
       }),
+      // A click selects the box under the pointer and a drag every box it
+      // covers -- see boxPointer.ts for why this, and not the drawn mouse
+      // cursor, is where editor click accuracy is decided.
+      boxMouseSelection,
       EditorView.domEventHandlers({
         // Right-click selection-scope cycling (word -> clause -> sentence ->
         // line -> block on repeated right-clicks in the same spot) -- ported
@@ -3632,7 +3637,7 @@ export function CM6Editor({
         contextmenu: (event, view) => {
           event.preventDefault();
 
-          const clickOffset = view.posAtCoords({ x: event.clientX, y: event.clientY });
+          const clickOffset = resolveBoxAtCoords(view, event.clientX, event.clientY);
           if (clickOffset === null) return true;
 
           // Full-document string, same as Lexical's readCanonicalRootText
@@ -3708,7 +3713,7 @@ export function CM6Editor({
             if (toggleCallback) {
               const currentSelection = view.state.selection.main;
               if (currentSelection.from === currentSelection.to) {
-                const clickOffset = view.posAtCoords({ x: event.clientX, y: event.clientY });
+                const clickOffset = resolveBoxAtCoords(view, event.clientX, event.clientY);
                 if (clickOffset === currentSelection.head) {
                   const text = previousTextRef.current;
                   const selection = toSelectionState(currentSelection);
