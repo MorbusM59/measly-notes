@@ -1,0 +1,56 @@
+// What a stage can ask the world to change.
+//
+// Stages are pure and NEVER write. A stage resolving a choice returns a
+// list of these, and the director applies them to game state in order --
+// which is what keeps every stage testable without a database, keeps
+// persistence in exactly one place, and makes "what did that choice
+// actually do" a value you can print rather than a trail through call
+// sites.
+//
+// The vocabulary is deliberately small and grows only when a screen needs
+// something it cannot say. An effect that exists because it might be useful
+// one day is an effect nobody can delete later.
+
+import type { StatKey } from './stats'
+import type { ModifierKind } from './modifiers'
+import type { JsonObject } from '../core/json'
+
+export type Effect =
+  /**
+   * Opens a new game slot and makes it the active one. Carries no seed and
+   * no id: the director owns the clock, so that a stage -- which must be a
+   * pure function of its inputs to stay replayable -- never sees one.
+   */
+  | { kind: 'startGame' }
+  /** Makes an existing slot active -- "continue previous adventure". */
+  | { kind: 'openGame'; gameId: string }
+  /** Leaves the current slot without ending the game. Back to the welcome screen. */
+  | { kind: 'closeGame' }
+  /** Character creation and stat points. Clamped to the base cap on apply. */
+  | { kind: 'adjustBaseStat'; stat: StatKey; amount: number }
+  /** Unspent stat points. */
+  | { kind: 'grantStatPoints'; amount: number }
+  /** Takes a modifier into the game: holdings, and any on-acquire effect it carries. */
+  | { kind: 'acquireModifier'; modifierKind: ModifierKind; modifierId: string }
+  /** Drops one, by id. Used by end-of-level keep-one-of-each. */
+  | { kind: 'releaseModifier'; modifierKind: ModifierKind; modifierId: string }
+  /** Negative for damage taken, positive for healing. Clamped to 0..max on apply. */
+  | { kind: 'adjustHitPoints'; amount: number }
+  /** Armor after an absorb, written whole because the absorb computed both pools. */
+  | { kind: 'setArmor'; fromItems: number; natural: number }
+  /** Quantized: one unit buys one selection at the start of a level. */
+  | { kind: 'grantExperience'; units: number }
+  | { kind: 'grantGold'; units: number }
+  /** The score. Only ever goes up. */
+  | { kind: 'grantFame'; amount: number }
+  /** Which region this level is being played in, and therefore which pools are in scope. */
+  | { kind: 'setRegion'; regionId: string }
+  | { kind: 'advanceLevel' }
+  /** Ends the game. `defeat` when hit points ran out, `retired` at the player's word. */
+  | { kind: 'endGame'; reason: 'defeat' | 'retired' }
+  /**
+   * Appends to the game's permanent history. ROWS, not columns: new content
+   * introduces a new `kind` and touches no schema, which is what keeps
+   * outcome tracking additive as the game grows.
+   */
+  | { kind: 'recordOutcome'; outcome: string; payload?: JsonObject }

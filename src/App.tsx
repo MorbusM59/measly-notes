@@ -178,8 +178,8 @@ import { truncateTitle } from './shared/textSanitization'
 import { deriveNoteTitleFromText } from './shared/noteTitle'
 import { isNoteSearchQueryActive, matchesNoteSearchQuery } from './shared/noteSearch'
 import { useAdventureEscapeMenu } from './adventure/useAdventureEscapeMenu'
-import { sanitizeAdventureSession } from './adventure/session'
-import type { AdventureSession } from './adventure/types'
+import { sanitizeGameSave } from './adventure/save'
+import type { GameSave } from './adventure/model/gameState'
 import { ESCAPE_HOLD_MS } from './shared/escapeHold'
 import { planSlotViewOpen, type SlotViewKind, type SlotViewsSnapshot } from './shared/slotViews'
 import { HELP_GUIDE_NOTE_IDS, HELP_GUIDE_ROOT_ID } from './shared/helpGuide'
@@ -2274,7 +2274,7 @@ function App() {
    * everything else around it, and a run has exactly one home; see
    * useAdventureEscapeMenu.ts's module comment.
    */
-  const [adventureSession, setAdventureSession] = useState<AdventureSession | null>(null)
+  const [adventureSave, setAdventureSave] = useState<GameSave | null>(null)
   /**
    * Which slot is currently GIVEN OVER to the adventure, and what it was
    * showing first -- the same shape, and the same lifecycle, as guideView
@@ -4259,7 +4259,7 @@ function App() {
     isDoubleSizeMode?: boolean
     reviewGutterVisibleBySection?: Record<string, boolean>
     reviewFlagsVisibleBySection?: Record<string, boolean>
-    adventure?: AdventureSession | null
+    adventure?: GameSave | null
     adventureView?: { sectionId: string; previousNoteId: string | null } | null
   }): PersistedMenuState => {
     const effectiveViewStateByMode = overrides?.sidebarViewStateByMode ?? sidebarViewStateByMode
@@ -4394,7 +4394,7 @@ function App() {
       isDoubleSizeMode: overrides?.isDoubleSizeMode ?? isDoubleSizeMode,
       reviewGutterVisibleBySection: overrides?.reviewGutterVisibleBySection ?? reviewGutterVisibleBySection,
       reviewFlagsVisibleBySection: overrides?.reviewFlagsVisibleBySection ?? reviewFlagsVisibleBySection,
-      adventure: overrides && 'adventure' in overrides ? overrides.adventure ?? null : adventureSession,
+      adventure: overrides && 'adventure' in overrides ? overrides.adventure ?? null : adventureSave,
       adventureView: overrides && 'adventureView' in overrides ? overrides.adventureView ?? null : adventureView,
       // Machine-level performance prefs, deliberately NOT part of
       // UiLayoutLoadout -- these must survive switching between layouts
@@ -4482,7 +4482,7 @@ function App() {
     viewStyle,
     guideView,
     undockedNote,
-    adventureSession,
+    adventureSave,
     adventureView,
   ])
 
@@ -5858,15 +5858,15 @@ ${markdownHtml}
   }, [applySlotViewOpen, selectNote])
 
   /**
-   * Writes a run through the one correct immediate-persist path
+   * Writes a save through the one correct immediate-persist path
    * (persistMenuStateNow, per CLAUDE.md) as well as into React state. Every
-   * committed choice comes through here, so a run is on disk before the
+   * committed choice comes through here, so a game is on disk before the
    * ring has finished repainting -- the game's whole promise is that
    * closing the app mid-adventure costs nothing, and a choice the player
    * made and the app then forgot is the one failure it cannot recover from.
    */
-  const commitAdventureSession = useCallback((next: AdventureSession | null) => {
-    setAdventureSession(next)
+  const commitAdventureSave = useCallback((next: GameSave) => {
+    setAdventureSave(next)
     persistMenuStateNow({ adventure: next })
   }, [persistMenuStateNow])
 
@@ -5892,26 +5892,18 @@ ${markdownHtml}
   }, [applySlotViewOpen, getActiveSection])
 
   /**
-   * Ends the view and gives the slot back what it held. The RUN is
+   * Ends the view and gives the slot back what it held. The SAVE is
    * untouched: leaving is not losing, and the same gesture that opened this
-   * drops straight back into the same step. Only "Close the book" on a
-   * finished run clears the session itself (useAdventureEscapeMenu.ts).
+   * drops straight back into the same screen -- which is the whole point of
+   * persisting the director's stack rather than just the game's numbers
+   * (src/adventure/model/gameState.ts).
    */
-  const closeAdventureView = useCallback(async (options?: { clearRun?: boolean }) => {
+  const closeAdventureView = useCallback(async (): Promise<void> => {
     const pending = adventureView
     if (!pending) return
     setAdventureView(null)
     setIsEscapeHoldPanelOpen(false)
-    if (options?.clearRun) setAdventureSession(null)
-    // ONE persist carrying BOTH changes, not a commit followed by a close.
-    // Two immediate persists in the same synchronous handler is the hazard
-    // persistMenuStateOnce's extraOverrides exists for (CLAUDE.md), and it
-    // bit here exactly as documented: dismissing a finished run wrote
-    // `adventure: null`, and the close that followed it in the same tick
-    // rebuilt its snapshot from state React had not re-rendered yet and put
-    // the finished run straight back. Found live -- "Close the book" left
-    // the run on disk, so the next launch had an ended run to resume.
-    persistMenuStateNow(options?.clearRun ? { adventureView: null, adventure: null } : { adventureView: null })
+    persistMenuStateNow({ adventureView: null })
     const handle = sectionRegistryRef.current.get(pending.sectionId)
     if (!handle) return
     if (pending.previousNoteId) {
@@ -5944,22 +5936,22 @@ ${markdownHtml}
   /**
    * The escape-hold ring's takeover by the adventure game, plus the status
    * the tab bar and chapter bar show around the empty editor -- see
-   * src/escapeMenu/escapeMenuContract.ts. App.tsx supplies the saved run and
-   * the two acts the game cannot perform for itself (persisting a run,
+   * src/escapeMenu/escapeMenuContract.ts. App.tsx supplies the saved game
+   * and the two acts the game cannot perform for itself (persisting a save,
    * handing the slot back); everything else is the module's own.
    */
   // Stable identity, not an inline arrow: this callback is a dependency of
   // the mode the hook memoizes, and a fresh function every render would
   // rebuild that mode every render -- re-rendering both editor sections for
   // nothing on every unrelated state change in this very large component.
-  const handleAdventureLeave = useCallback((options?: { clearRun?: boolean }) => {
-    void closeAdventureView(options)
+  const handleAdventureLeave = useCallback(() => {
+    void closeAdventureView()
   }, [closeAdventureView])
 
   const escapeMenuContribution = useAdventureEscapeMenu({
     isAdventureViewActive: adventureView !== null,
-    session: adventureSession,
-    onCommitSession: commitAdventureSession,
+    save: adventureSave,
+    onCommitSave: commitAdventureSave,
     onLeave: handleAdventureLeave,
   })
 
@@ -6500,15 +6492,15 @@ ${markdownHtml}
             // so this is the only structural check a dev:browser session
             // ever gets -- and a malformed run must degrade to "no saved
             // adventure", not to a crash on launch.
-            const restoredSession = sanitizeAdventureSession(appState.menu.adventure)
-            setAdventureSession(restoredSession)
-            // The view is only restored alongside a run to play in it. A
-            // saved view with no run left (a corrupt session, or one cleared
-            // by a build that no longer ships the game) would come back as a
-            // blank slot the reader has no way to interpret -- so it comes
-            // back as their previous note instead, which is where the view
-            // would have put them on the way out anyway.
-            restoredAdventureView = restoredSession ? appState.menu.adventureView ?? null : null
+            const restoredSave = sanitizeGameSave(appState.menu.adventure)
+            setAdventureSave(restoredSave)
+            // The view comes back whether or not a save did: with no save,
+            // the game opens on its welcome screen, which is a perfectly
+            // legible thing to find in a slot. (It was previously withheld
+            // because a missing run left the ring with nothing to show at
+            // all -- no longer true now that the welcome screen exists
+            // outside of any game.)
+            restoredAdventureView = appState.menu.adventureView ?? null
             setAdventureView(restoredAdventureView)
             restoredGuideView = appState.menu.guideView ?? null
             restoredUndockedNote = appState.menu.undockedNote ?? null

@@ -135,8 +135,7 @@ above for browser mode, and goes with them.
   (`databaseService.assignedIds.test.ts`).
 - Wording only: "legacy proportional split" (`slotWidths.ts` and its tests,
   `App.tsx` ~7071) names a live fallback algorithm; the "CM6 migration" comments
-  (`EditorContract.ts`, `CM6Editor.tsx`) and `adventure/rules/stats.ts` are
-  history, not data paths.
+  (`EditorContract.ts`, `CM6Editor.tsx`) are history, not data paths.
 
 **Why it is suspect.** Pre-release: no install predates the current formats
 except the developer's own, which has already run every one of these by running

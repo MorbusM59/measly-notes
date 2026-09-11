@@ -1,0 +1,30 @@
+// Every stage the director can reach, in one registry.
+//
+// A stage that is not in this list cannot be entered, which makes the list
+// the honest answer to "what is built". Adding a stage is one import and
+// one entry; nothing else in the platform changes.
+
+import { registerStages } from '../core/stage'
+import { welcomeStage, WELCOME_STAGE_ID } from './welcome'
+import { characterCreationStage } from './characterCreation'
+import { regionSelectStage } from './regionSelect'
+import { encounterSelectStage } from './encounterSelect'
+import { underConstructionStage } from './underConstruction'
+import { acquiredItemsStage, acquiredTraitsStage, ACQUIRED_ITEMS_STAGE_ID, ACQUIRED_TRAITS_STAGE_ID } from './holdings'
+
+export const STAGES = registerStages([
+  welcomeStage,
+  characterCreationStage,
+  regionSelectStage,
+  encounterSelectStage,
+  underConstructionStage,
+  acquiredItemsStage,
+  acquiredTraitsStage,
+])
+
+export const ROOT_STAGE_ID = WELCOME_STAGE_ID
+
+export const CORE_STAGE_IDS = {
+  items: ACQUIRED_ITEMS_STAGE_ID,
+  traits: ACQUIRED_TRAITS_STAGE_ID,
+} as const

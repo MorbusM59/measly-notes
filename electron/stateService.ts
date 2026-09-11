@@ -8,7 +8,7 @@ import type {
   SidebarMode,
   WindowState,
 } from '../src/shared/appState';
-import { sanitizeAdventureSession } from '../src/adventure/session';
+import { sanitizeGameSave } from '../src/adventure/save';
 import { isPlaylistSlot } from '../src/shared/audioPlayer';
 import { DEFAULT_GLAZE_SETTINGS, sanitizeGlazeSettings } from '../src/shared/glaze';
 import { DEFAULT_TEXTURE_MATERIALS, TEXTURE_SURFACES, type TextureColorHsva, type TextureMaterialSettings, type TextureMaterialsBySurface, type TextureSurfaceKey } from '../src/textures/types';
@@ -559,10 +559,10 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     chapterBarMode: sanitizeChapterBarMode(input?.chapterBarMode),
     isSidebarVisible: typeof input?.isSidebarVisible === 'boolean' ? input.isSidebarVisible : true,
     // Content-blind on purpose: this side of the bridge can only check that
-    // a saved run is structurally a run. Whether its story still exists is
-    // decided in the renderer, where the content lives -- see
-    // src/adventure/session.ts's module comment.
-    adventure: sanitizeAdventureSession(input?.adventure),
+    // a saved game is structurally a game. Whether the items and regions it
+    // names still EXIST is decided in the renderer, where content lives --
+    // see src/adventure/save.ts's module comment.
+    adventure: sanitizeGameSave(input?.adventure),
     // Same shape as guideView (a section id plus what it was showing), so
     // the same sanitizer -- see PersistedMenuState.adventureView.
     adventureView: sanitizeGuideView(input?.adventureView),

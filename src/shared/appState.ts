@@ -1,4 +1,4 @@
-import type { AdventureSession } from '../adventure/types';
+import type { GameSave } from '../adventure/model/gameState';
 import type { TextureMaterialsBySurface, TextureSurfaceKey } from '../textures/types';
 import type { GlazeSettings } from './glaze';
 
@@ -254,12 +254,12 @@ export interface PersistedMenuState {
    */
   reviewFlagsVisibleBySection?: Record<string, boolean>;
   /**
-   * The saved adventure run (src/adventure), or null when there is none.
+   * The saved adventure game (src/adventure), or null when there is none.
    * Structurally sanitized on both sides of the bridge -- sanitizeMenu in
    * electron/stateService.ts for the real app, and again in App.tsx's
    * restore, since the browser-mode mock never calls sanitizeMenu at all.
    */
-  adventure?: AdventureSession | null;
+  adventure?: GameSave | null;
   /**
    * Which slot the adventure is currently given over to, and what that slot
    * was showing before -- the same shape and lifecycle as `guideView`, for

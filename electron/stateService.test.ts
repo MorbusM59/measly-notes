@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { StateService } from './stateService'
 import { UI_FONT_SCALE_MAX, UI_FONT_SCALE_MIN } from '../src/shared/UiTypography'
-import { createSession } from '../src/adventure/engine'
-import { THE_LONG_MARGIN } from '../src/adventure/content/theLongMargin'
+import { buildCatalog, THOCKQUEST } from '../src/adventure/content'
+import { choose, ensureEntered, type DirectorDeps } from '../src/adventure/core/director'
+import { emptySave } from '../src/adventure/model/gameState'
+import { CORE_STAGE_IDS, ROOT_STAGE_ID, STAGES } from '../src/adventure/stages'
 
 // Regression coverage for the exact bug class this file is prone to:
 // sanitizeMenu (private, routed through by both saveAppState and
@@ -247,21 +249,37 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.menu?.undockedNote).toEqual({ noteId: 'note-3', sectionId: 'section-1', previousNoteId: 'note-2' })
   })
 
-  it('persists a saved adventure run across a save -> fresh-instance load, and drops a corrupt one', async () => {
+  it('persists a saved adventure across a save -> fresh-instance load, and drops a corrupt one', async () => {
     // Same allowlist hazard as every test above, with one extra edge: this
     // field is an object, so "present but structurally wrong" is a real
-    // possibility a boolean never had. A corrupt run must come back as
-    // absent -- the renderer already handles "no saved adventure" and
-    // would otherwise be handed a half-run to play.
-    const run = createSession(THE_LONG_MARGIN, { seed: 4242, nowMs: 1_700_000_000_000 })
+    // possibility a boolean never had. A corrupt save must come back as
+    // absent -- the renderer already handles "no saved adventure" and would
+    // otherwise be handed half a game to play.
+    //
+    // The save under test is a game PART WAY THROUGH, not a fresh one: the
+    // director's stack is what makes "leave at any moment and come back to
+    // the same screen" true, so a round trip that kept the numbers and lost
+    // the stack would pass a weaker test while breaking the actual promise.
+    const deps: DirectorDeps = {
+      stages: STAGES,
+      content: THOCKQUEST,
+      catalog: buildCatalog(THOCKQUEST),
+      rootStageId: ROOT_STAGE_ID,
+      coreStageIds: CORE_STAGE_IDS,
+    }
+    const nowMs = 1_700_000_000_000
+    const started = choose(ensureEntered(emptySave(4242), deps, nowMs), 'welcome:start', deps, nowMs).save
+    const save = choose(started, 'origin:warrior', deps, nowMs).save
+    expect(save.director.stack.length).toBeGreaterThan(0)
+
     const writer = new StateService(dataRoot)
     await writer.saveAppState({
       selectedNoteId: null,
-      menu: { sidebarMode: 'date', selectedMonths: [], selectedYears: [], searchQuery: '', adventure: run },
+      menu: { sidebarMode: 'date', selectedMonths: [], selectedYears: [], searchQuery: '', adventure: save },
     })
 
     const reader = new StateService(dataRoot)
-    expect((await reader.loadAppState()).menu?.adventure).toEqual(run)
+    expect((await reader.loadAppState()).menu?.adventure).toEqual(save)
 
     const corruptWriter = new StateService(dataRoot)
     await corruptWriter.saveAppState({
@@ -271,16 +289,16 @@ describe('StateService app-state field round-trip', () => {
         selectedMonths: [],
         selectedYears: [],
         searchQuery: '',
-        adventure: { ...run, sceneId: 42 } as unknown as typeof run,
+        adventure: { ...save, version: 'not-a-version' } as unknown as typeof save,
       },
     })
 
     const corruptReader = new StateService(dataRoot)
     expect((await corruptReader.loadAppState()).menu?.adventure).toBeNull()
 
-    // The view is a separate field from the run and is dropped just as
+    // The view is a separate field from the save and is dropped just as
     // silently if sanitizeMenu never learns about it -- which would restart
-    // the app with the run intact but the game nowhere on screen.
+    // the app with the game intact but nowhere on screen.
     const viewWriter = new StateService(dataRoot)
     await viewWriter.saveAppState({
       selectedNoteId: null,
@@ -289,7 +307,7 @@ describe('StateService app-state field round-trip', () => {
         selectedMonths: [],
         selectedYears: [],
         searchQuery: '',
-        adventure: run,
+        adventure: save,
         adventureView: { sectionId: 'default', previousNoteId: 'note-1' },
       },
     })
