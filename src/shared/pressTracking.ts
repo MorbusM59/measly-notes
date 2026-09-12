@@ -35,14 +35,26 @@
 // the things this app does with pointers -- and the two now read alike:
 // hover and pressed are both state we own.
 //
-// ## The chain
+// ## The chain, and why only part of it
 //
 // `:active` applies to the whole ancestor chain, not just the element under
-// the pointer, and the stylesheets rely on that (`.tag-pill.suggested`,
-// `.note-tab-pill` and `button` are frequently different nodes in one press).
-// So this marks the target and every ancestor, which is what makes swapping
-// `:active` for `[data-pressed]` a mechanical substitution with no selector
-// rewritten.
+// the pointer, and the stylesheets rely on that (a pill's inner `<span>` is
+// usually what a press actually lands on). So this walks the chain too --
+// but it only WRITES to the elements a `[data-pressed]` rule could match.
+//
+// Marking the whole chain was the first version and it was measurably wrong:
+// a press in the editor marked 20 elements, none of which any rule could
+// style, and a mark-and-clear with the style recalc it forces costs ~0.9ms
+// on a 14-deep chain in an almost empty document. A click can afford that.
+// The keyboard path could not -- every SPACE typed in the editor was paying
+// it, on the keydown path this project has a whole optimization plan about.
+//
+// WHICH elements those are is read out of the stylesheets rather than
+// written down here. A hand-maintained list of "things that can look
+// pressed" is precisely the shape of the drift this codebase keeps being
+// bitten by (see CLAUDE.md on sanitizeMenu): add a `[data-pressed]` rule for
+// a new control, forget the list, and the control silently never looks
+// pressed. Derived from the CSS, that cannot happen.
 
 /**
  * An ATTRIBUTE, not a class, and that is not cosmetic.
@@ -63,28 +75,85 @@ export const PRESSED_ATTRIBUTE = 'data-pressed'
 /** Keys that activate a focused control, and so should look like a press. */
 const ACTIVATION_KEYS = new Set([' ', 'Spacebar', 'Enter'])
 
+/**
+ * Every element a `[data-pressed]` rule could match, as one selector read
+ * out of the stylesheets. Computed once, lazily, on the first press.
+ *
+ * The fallback when the sheets cannot be read (a cross-origin sheet throws
+ * on `.cssRules`) is the ancestor chain unfiltered -- correct but wasteful,
+ * which is the right way round for a fallback.
+ *
+ * In dev, a hot stylesheet reload after this has been computed leaves it
+ * stale until the next full reload. That is a dev-only staleness in a value
+ * that only ever narrows work, so the worst case is a control that misses
+ * its pressed look until you reload -- never a wrong one.
+ */
+let pressableSelector: string | null | undefined
+function resolvePressableSelector(): string | null {
+  if (pressableSelector !== undefined) return pressableSelector
+
+  const subjects = new Set<string>()
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList
+    try {
+      rules = sheet.cssRules
+    } catch {
+      continue
+    }
+    for (const rule of Array.from(rules)) {
+      if (!(rule instanceof CSSStyleRule) || !rule.selectorText.includes(`[${PRESSED_ATTRIBUTE}]`)) continue
+      for (const part of rule.selectorText.split(',')) {
+        const subject = part.trim().replace(`[${PRESSED_ATTRIBUTE}]`, '').replace(/::[\w-]+$/, '').trim()
+        if (subject.length > 0) subjects.add(subject)
+      }
+    }
+  }
+
+  pressableSelector = subjects.size > 0 ? Array.from(subjects).join(',') : null
+  return pressableSelector
+}
+
+/** Elements currently marked, so ending a press never has to search the document. */
+let marked: Element[] = []
+
+function clearAll(): void {
+  for (const node of marked) node.removeAttribute(PRESSED_ATTRIBUTE)
+  marked = []
+}
+
 function markChain(from: EventTarget | null): void {
+  // Always before marking, never only on release: a second button pressed
+  // while the first is held would otherwise strand the first press's marks.
+  clearAll()
+
+  const selector = resolvePressableSelector()
   let node = from instanceof Element ? from : null
   while (node) {
-    node.setAttribute(PRESSED_ATTRIBUTE, '')
+    if (selector === null || node.matches(selector)) {
+      node.setAttribute(PRESSED_ATTRIBUTE, '')
+      marked.push(node)
+    }
     node = node.parentElement
   }
 }
 
-function clearAll(): void {
-  for (const node of document.querySelectorAll(`[${PRESSED_ATTRIBUTE}]`)) {
-    node.removeAttribute(PRESSED_ATTRIBUTE)
-  }
+/** Typing a space in a text field is not activating a control. */
+function isTextEntry(node: Element | null): boolean {
+  if (!node) return true
+  if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) return true
+  return node instanceof HTMLElement && node.isContentEditable
 }
 
 /**
  * Installs the tracking. Idempotent, and never removed: it is a property of
  * the document for the app's whole life, not something a component owns.
  *
- * Clearing sweeps the document rather than remembering what was marked --
- * a press can end in more ways than it can begin (a release anywhere, a
- * drag starting, the window losing focus, the pointer being cancelled), and
- * a sweep cannot leave a straggler behind the way a remembered list can.
+ * A press can end in more ways than it can begin -- a release anywhere, a
+ * drag starting, the window losing focus, the pointer being cancelled -- so
+ * every one of those clears. Clearing works from a remembered list rather
+ * than a document-wide query: the query was a full tree walk on every
+ * mouseup, and a list cannot strand anything as long as marking clears
+ * first, which it does.
  */
 let installed = false
 export function installPressTracking(): void {
@@ -112,6 +181,7 @@ export function installPressTracking(): void {
   // dropping it would have traded one gap for another.
   window.addEventListener('keydown', (event) => {
     if (event.repeat || !ACTIVATION_KEYS.has(event.key)) return
+    if (isTextEntry(document.activeElement)) return
     markChain(document.activeElement)
   }, { capture: true })
   window.addEventListener('keyup', (event) => {
