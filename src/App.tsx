@@ -9327,6 +9327,21 @@ ${markdownHtml}
         return
       }
 
+      // Escape IS the render-mode control, so it does whatever that control
+      // is currently for -- see EditorSection's `exitSlotOverlay`. In a note
+      // that is the other view; in the guide there is no other view, so it
+      // is the way out.
+      //
+      // A MODE never reaches here: a mode owning a slot means the ring is up
+      // (`isEscapeRingUp`), and this Escape already lowered it above -- which
+      // ends the mode through `onDismiss`. Same key, same position, same
+      // outcome, by two paths that meet rather than by two rules.
+      if (activeSection?.exitSlotOverlay) {
+        event.preventDefault()
+        activeSection.exitSlotOverlay()
+        return
+      }
+
       if (activeSection?.isForcedPreviewNote) return
 
       event.preventDefault()

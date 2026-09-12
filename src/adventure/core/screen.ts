@@ -49,10 +49,14 @@ export interface Screen {
 
 /**
  * The ring stays readable only up to a point, and a stage that offers more
- * than this is a content problem rather than a layout one. Nine leaves room
- * for the three the director always adds (see director.ts).
+ * than this is a content problem rather than a layout one.
+ *
+ * It was NINE, leaving room for the three the director added to every
+ * screen. The director adds none now, so the whole budget is the stage's --
+ * the same twelve, spent entirely on the question being asked instead of
+ * three cells' worth of standing furniture.
  *
  * PROVISIONAL: chosen from the design conversation and not yet checked
  * against the rendered dial at twelve cells.
  */
-export const MAX_STAGE_CHOICES = 9
+export const MAX_STAGE_CHOICES = 12

@@ -10,7 +10,6 @@ import { characterCreationStage } from './characterCreation'
 import { regionSelectStage } from './regionSelect'
 import { encounterSelectStage } from './encounterSelect'
 import { underConstructionStage } from './underConstruction'
-import { acquiredItemsStage, acquiredTraitsStage, ACQUIRED_ITEMS_STAGE_ID, ACQUIRED_TRAITS_STAGE_ID } from './holdings'
 
 export const STAGES = registerStages([
   welcomeStage,
@@ -18,13 +17,6 @@ export const STAGES = registerStages([
   regionSelectStage,
   encounterSelectStage,
   underConstructionStage,
-  acquiredItemsStage,
-  acquiredTraitsStage,
 ])
 
 export const ROOT_STAGE_ID = WELCOME_STAGE_ID
-
-export const CORE_STAGE_IDS = {
-  items: ACQUIRED_ITEMS_STAGE_ID,
-  traits: ACQUIRED_TRAITS_STAGE_ID,
-} as const

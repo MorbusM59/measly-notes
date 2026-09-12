@@ -59,6 +59,16 @@ export interface SectionHandle extends
   isPreviewMode: boolean
   /** True while the active note is a synthetic auto-TOC/Open Items chapter -- hard-locked to render view, toggle disabled. */
   isForcedPreviewNote: boolean
+  /**
+   * Non-null when this slot is showing something a view toggle makes no
+   * sense for -- the User Guide, or a mode that has taken the slot over --
+   * in which case the render-mode control is an EXIT instead. Published
+   * here because Escape IS that control and the key handler lives in App:
+   * one answer, two callers, so they cannot drift apart. Built in
+   * EditorSection; see its own comment for why a mode exits by lowering the
+   * ring rather than by a route of its own.
+   */
+  exitSlotOverlay: (() => void) | null
   setIsPreviewMode: Dispatch<SetStateAction<boolean>>
   setActiveNoteId: Dispatch<SetStateAction<string | null>>
   /** Switches which note this section shows -- the section's own, not a shared/parameterized one (see the handover doc's design decision). */

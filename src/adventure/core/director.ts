@@ -1,11 +1,16 @@
 // The master: it decides which stage is current, composes the ring, and is
 // the only thing in the game that writes.
 //
-// Everything the player sees is one Screen, and every screen is built the
-// same way: the stage on top of the stack supplies the question and its
-// options, and the director adds the options that are always there. A
-// stage therefore never has to remember to offer "leave the game", and
-// never gets to decide not to.
+// Everything the player sees is one Screen, and the stage on top of the
+// stack supplies all of it. The director USED to add cells of its own --
+// acquired items, acquired traits, leave -- to every screen; it no longer
+// adds any. Three permanent cells cost three of the twelve the dial can
+// hold, on every screen, to say things that are either always available
+// elsewhere (what you are carrying now lives on the timeline strip, always
+// visible, rather than behind a cell and a screen) or needed on exactly one
+// screen (leaving, which the welcome stage offers as an ordinary choice).
+// What is left here is sequencing and nothing else, which is what this file
+// always claimed to be.
 //
 // A STACK, not a current stage, because the design has interludes: looking
 // at your traits is reachable from every screen and must give you back the
@@ -25,29 +30,16 @@ import type { Effect } from '../model/effects'
 import type { Content } from '../content'
 import type { JsonObject } from './json'
 import type { RngState } from './rng'
-import type { Choice, Screen } from './screen'
+import type { Screen } from './screen'
 import type { StageContext, StageModule, StageRegistry, Transition } from './stage'
 
 export interface DirectorDeps {
   stages: StageRegistry
   content: Content
   catalog: ReadonlyMap<string, Modifier>
-  /** Where an empty stack starts. The welcome screen, today. */
+  /** Where an empty stack starts, and what opening the view puts on top. */
   rootStageId: string
-  /** Stages the always-present core cells push. */
-  coreStageIds: { items: string; traits: string }
 }
-
-/**
- * The cells the director contributes to every screen. Ids are namespaced so
- * that a stage can never accidentally collide with one -- a stage choice
- * called "leave" must not close the game view.
- */
-export const CORE_CHOICE_IDS = {
-  items: 'core:items',
-  traits: 'core:traits',
-  leave: 'core:leave',
-} as const
 
 export function buildContext(save: GameSave, deps: DirectorDeps): StageContext {
   const game = activeGame(save)
@@ -86,11 +78,26 @@ function commit(
   return { save: next, rng }
 }
 
+/**
+ * Patches the director, and returns the SAME save when the patch changes
+ * nothing.
+ *
+ * Identity is load-bearing here rather than an optimisation: the host
+ * commits (and therefore persists) exactly when `choose` hands back a
+ * different save, so a transition that genuinely changes nothing --
+ * leaving, an unrecognised choice, a stage that declines -- must come back
+ * identical or every one of them writes a byte-identical save to disk. It
+ * is also what makes "reports leaving as a host action and changes nothing
+ * itself" a testable claim instead of a description.
+ */
 function withDirector(
   save: GameSave,
   next: Partial<GameSave['director']>,
 ): GameSave {
-  return { ...save, director: { ...save.director, ...next } }
+  const merged = { ...save.director, ...next }
+  const keys = Object.keys(next) as (keyof GameSave['director'])[]
+  const changed = keys.some((key) => merged[key] !== save.director[key])
+  return changed ? { ...save, director: merged } : save
 }
 
 /**
@@ -122,27 +129,46 @@ function enterStage(
 }
 
 /**
- * Puts the player somewhere to be, if they are nowhere. Idempotent, and
- * called when the view opens rather than while it renders -- entering a
- * stage can roll, and a roll during render is the one thing determinism
- * cannot survive (see core/rng.ts).
+ * What opening the view puts on screen: ALWAYS the root stage, pushed on top
+ * of whatever was already there.
+ *
+ * Coming back to the exact screen you left is what the persisted stack is
+ * for, and it stays true -- but it is not what a player wants the moment
+ * they open the view. Re-entering a fight mid-swing with no idea how you got
+ * there is disorienting, and there is no way back out to "start a new one"
+ * from inside it. So the entry screen goes ON TOP: the run underneath is
+ * untouched, and answering "continue" is a `pop` back into it, exactly the
+ * screen, exactly the roll state. Nothing is discarded to offer the choice.
+ *
+ * The root frame is told whether it landed on top of a suspended run
+ * (`hasSuspendedRun`), because that is a fact about the stack and a stage
+ * does not read the stack -- it reads what it was entered with.
+ *
+ * THIS IS AN EVENT, NOT A CONDITION, and the name says so because getting
+ * that wrong is exactly what happened: its predecessor was "put the player
+ * somewhere if they are nowhere", which is a condition and was therefore
+ * safe to re-check on every save change -- which is what its one caller
+ * does. Re-checking THIS on every save change pushes the entry screen back
+ * on top after every choice, so the player can never leave it. It is called
+ * once per opening (see useAdventureEscapeMenu), and the root-already-on-top
+ * guard below is a second belt for a double-invoked effect, not the thing
+ * that makes it correct.
+ *
+ * Called when the view OPENS rather than during render, because entering a
+ * stage may roll, and a roll during render is the one thing determinism
+ * cannot survive (core/rng.ts).
  */
-export function ensureEntered(save: GameSave, deps: DirectorDeps, nowMs: number): GameSave {
-  if (save.director.stack.length > 0) return save
-  return enterStage(save, deps.rootStageId, {}, 0, deps, nowMs)
-}
-
-/** The core cells, in their fixed places: informational first, the way out last. */
-function coreChoices(context: StageContext): Choice[] {
-  const choices: Choice[] = []
-  if (context.game) {
-    choices.push(
-      { id: CORE_CHOICE_IDS.items, label: 'Acquired Items', icon: 'fa-solid fa-sack-xmark' },
-      { id: CORE_CHOICE_IDS.traits, label: 'Acquired Traits', icon: 'fa-solid fa-scroll' },
-    )
-  }
-  choices.push({ id: CORE_CHOICE_IDS.leave, label: 'Leave the game', icon: 'fa-solid fa-xmark' })
-  return choices
+export function enterEntryScreen(save: GameSave, deps: DirectorDeps, nowMs: number): GameSave {
+  const frame = topFrame(save)
+  if (frame?.stageId === deps.rootStageId) return save
+  return enterStage(
+    save,
+    deps.rootStageId,
+    { hasSuspendedRun: save.director.stack.length > 0 },
+    save.director.stack.length,
+    deps,
+    nowMs,
+  )
 }
 
 /**
@@ -165,7 +191,7 @@ export function currentScreen(save: GameSave, deps: DirectorDeps): Screen | null
     // underneath is presenting exactly what it was before.
     screenKey: `${save.director.stack.length}:${frame.stageId}:${presentation.screenKey ?? frame.stageId}`,
     narration: save.director.narration,
-    choices: [...presentation.choices, ...coreChoices(context)],
+    choices: presentation.choices,
   }
 }
 
@@ -223,6 +249,16 @@ function applyTransition(
       return { save: withDirector(narrated, { stack }), hostAction: null }
     }
 
+    case 'reset':
+      // The only transition that discards frames BELOW it. Starting a new
+      // adventure from the entry screen has to clear the suspended run it
+      // was offered on top of; `replace` swaps one frame and would leave
+      // that run buried under the new one, reachable by a pop nobody meant.
+      return {
+        save: enterStage(narrated, transition.stageId, transition.input ?? {}, 0, deps, nowMs),
+        hostAction: null,
+      }
+
     case 'leave':
       return { save: narrated, hostAction: 'leave' }
   }
@@ -243,13 +279,6 @@ export function choose(save: GameSave, choiceId: string, deps: DirectorDeps, now
 
   const context = buildContext(save, deps)
   const depth = save.director.stack.length - 1
-
-  if (choiceId === CORE_CHOICE_IDS.leave) return { save, hostAction: 'leave' }
-  if (choiceId === CORE_CHOICE_IDS.items || choiceId === CORE_CHOICE_IDS.traits) {
-    if (!context.game) return { save, hostAction: null }
-    const stageId = choiceId === CORE_CHOICE_IDS.items ? deps.coreStageIds.items : deps.coreStageIds.traits
-    return { save: enterStage(save, stageId, {}, depth + 1, deps, nowMs), hostAction: null }
-  }
 
   const stage = stageOf(deps, frame.stageId)
   if (!stage) return { save, hostAction: null }

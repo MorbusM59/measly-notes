@@ -5,9 +5,9 @@ import path from 'node:path'
 import { StateService } from './stateService'
 import { UI_FONT_SCALE_MAX, UI_FONT_SCALE_MIN } from '../src/shared/UiTypography'
 import { buildCatalog, THOCKQUEST } from '../src/adventure/content'
-import { choose, ensureEntered, type DirectorDeps } from '../src/adventure/core/director'
+import { choose, enterEntryScreen, type DirectorDeps } from '../src/adventure/core/director'
 import { emptySave } from '../src/adventure/model/gameState'
-import { CORE_STAGE_IDS, ROOT_STAGE_ID, STAGES } from '../src/adventure/stages'
+import { ROOT_STAGE_ID, STAGES } from '../src/adventure/stages'
 
 // Regression coverage for the exact bug class this file is prone to:
 // sanitizeMenu (private, routed through by both saveAppState and
@@ -274,10 +274,9 @@ describe('StateService app-state field round-trip', () => {
       content: THOCKQUEST,
       catalog: buildCatalog(THOCKQUEST),
       rootStageId: ROOT_STAGE_ID,
-      coreStageIds: CORE_STAGE_IDS,
     }
     const nowMs = 1_700_000_000_000
-    const started = choose(ensureEntered(emptySave(4242), deps, nowMs), 'welcome:start', deps, nowMs).save
+    const started = choose(enterEntryScreen(emptySave(4242), deps, nowMs), 'welcome:start', deps, nowMs).save
     const save = choose(started, 'origin:warrior', deps, nowMs).save
     expect(save.director.stack.length).toBeGreaterThan(0)
 

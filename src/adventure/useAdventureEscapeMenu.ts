@@ -15,7 +15,7 @@
 // slot-level view exactly like the User Guide's, which is what makes the
 // game appear over an EMPTY editor rather than on top of somebody's note.
 
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   EMPTY_ESCAPE_MENU_CONTRIBUTION,
   type EscapeMenuCell,
@@ -23,10 +23,10 @@ import {
   type EscapeMenuMode,
 } from '../escapeMenu/escapeMenuContract'
 import { buildCatalog, THOCKQUEST } from './content'
-import { choose, currentScreen, ensureEntered, type DirectorDeps } from './core/director'
+import { choose, currentScreen, enterEntryScreen, type DirectorDeps } from './core/director'
 import { emptySave, type GameSave } from './model/gameState'
 import { createSeed } from './core/rng'
-import { CORE_STAGE_IDS, ROOT_STAGE_ID, STAGES } from './stages'
+import { ROOT_STAGE_ID, STAGES } from './stages'
 import { statusReadouts, statusSubject } from './status'
 
 const CATALOG = buildCatalog(THOCKQUEST)
@@ -36,7 +36,6 @@ const DEPS: DirectorDeps = {
   content: THOCKQUEST,
   catalog: CATALOG,
   rootStageId: ROOT_STAGE_ID,
-  coreStageIds: CORE_STAGE_IDS,
 }
 
 function regionNameOf(regionId: string): string | null {
@@ -71,21 +70,33 @@ export interface AdventureEscapeMenuOptions {
 export function useAdventureEscapeMenu(options: AdventureEscapeMenuOptions): EscapeMenuContribution {
   const { isAdventureViewActive, save, onCommitSave, onLeave } = options
 
+  // Read through refs by the opening effect below, so that effect can depend
+  // on the OPENING alone. Depending on the save would re-run it after every
+  // choice -- which is the whole failure `enterEntryScreen` documents --
+  // and depending on the callback would make correctness hinge on how well
+  // the caller memoizes it.
+  const saveRef = useRef(save)
+  saveRef.current = save
+  const commitRef = useRef(onCommitSave)
+  commitRef.current = onCommitSave
+
   /**
-   * Puts the player somewhere to be. Runs on OPENING the view rather than
-   * during render, because entering a stage may roll -- and a roll during
-   * render would make the draw order depend on how many times React
-   * re-rendered, which is the one thing a replayable game cannot survive
-   * (core/rng.ts). It is idempotent, so a re-render that re-runs it is
-   * harmless.
+   * OPENING the view puts the entry screen on top of whatever was there.
+   *
+   * Once per opening, which is why this effect depends on nothing but the
+   * opening: it is an event, not a condition to be maintained. Entering a
+   * stage may roll, and a roll during render would make the draw order
+   * depend on how many times React re-rendered -- the one thing a replayable
+   * game cannot survive (core/rng.ts) -- so it happens here rather than in
+   * the render below.
    */
   useEffect(() => {
     if (!isAdventureViewActive) return
     const now = Date.now()
-    const current = save ?? emptySave(createSeed(now))
-    const entered = ensureEntered(current, DEPS, now)
-    if (entered !== current || save === null) onCommitSave(entered)
-  }, [isAdventureViewActive, save, onCommitSave])
+    const current = saveRef.current ?? emptySave(createSeed(now))
+    const opened = enterEntryScreen(current, DEPS, now)
+    if (opened !== current || saveRef.current === null) commitRef.current(opened)
+  }, [isAdventureViewActive])
 
   const handleChoice = useCallback(
     (choiceId: string) => {

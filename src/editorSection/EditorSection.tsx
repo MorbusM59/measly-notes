@@ -1695,6 +1695,45 @@ export function EditorSection({
     headlineRule: activeHeadlineRule,
   })
 
+  /**
+   * WHAT THIS SLOT IS SHOWING -- derived, every render, from the record plus
+   * this slot's own active note (src/shared/slotOverlay.ts). The single
+   * answer every consumer below reads, and the reason this component no
+   * longer carries a pair of "have I seen it yet" latches that watched the
+   * note and told App to retract a flag.
+   *
+   * The guide is matched against its whole FAMILY rather than one note id,
+   * so clicking through its chapters keeps the guide open: a chapter of the
+   * guide is still the guide, and the bar must not flip back to the
+   * collection underneath halfway through reading.
+   */
+  const occupancy = useMemo(
+    () => occupancyOf(sectionId, activeNoteId, slotOverlay),
+    [sectionId, activeNoteId, slotOverlay],
+  )
+  const isShowingGuide = occupancy.kind === 'guide'
+  const isShowingUndockedNote = occupancy.kind === 'undocked'
+
+  /**
+   * What the slot's render-mode control means right now -- non-null when
+   * this slot is showing something a view toggle makes no sense for, and
+   * therefore shows an EXIT instead.
+   *
+   * One answer, read by both the button and the Escape key, because Escape
+   * IS that button: teaching each of them separately about the guide and
+   * about modes is the shape that drifts apart.
+   *
+   * A mode exits by LOWERING THE RING rather than by a route of its own. A
+   * mode and its ring are one unit (escapeMenuContract.ts) and lowering it
+   * already ends the mode through `onDismiss`, so a second path to the same
+   * place would be a second thing to keep correct.
+   */
+  const exitSlotOverlay = useMemo<(() => void) | null>(() => {
+    if (escapeMenu?.activeMode) return onEscapeHoldPanelClose
+    if (isShowingGuide) return onCloseSlotOverlay
+    return null
+  }, [escapeMenu?.activeMode, onEscapeHoldPanelClose, isShowingGuide, onCloseSlotOverlay])
+
   const currentSectionHandle: SectionHandle = {
     ...editorSectionMountRest,
     // Destructured out of editorSectionMountRest above (activateNote writes
@@ -1812,6 +1851,7 @@ export function EditorSection({
     applyEditRestoreSnapshot,
     bindings,
     toggleRenderViewMode,
+    exitSlotOverlay,
     applyProgrammaticEditorText,
     sectionId,
     activeNoteId,
@@ -1985,24 +2025,6 @@ export function EditorSection({
    * The bar goes blank for it -- no identity, no tabs, no prompt -- and the
    * ordinary section picker becomes the way to file it.
    */
-  /**
-   * WHAT THIS SLOT IS SHOWING -- derived, every render, from the record plus
-   * this slot's own active note (src/shared/slotOverlay.ts). The single
-   * answer every consumer below reads, and the reason this component no
-   * longer carries a pair of "have I seen it yet" latches that watched the
-   * note and told App to retract a flag.
-   *
-   * The guide is matched against its whole FAMILY rather than one note id,
-   * so clicking through its chapters keeps the guide open: a chapter of the
-   * guide is still the guide, and the bar must not flip back to the
-   * collection underneath halfway through reading.
-   */
-  const occupancy = useMemo(
-    () => occupancyOf(sectionId, activeNoteId, slotOverlay),
-    [sectionId, activeNoteId, slotOverlay],
-  )
-  const isShowingGuide = occupancy.kind === 'guide'
-  const isShowingUndockedNote = occupancy.kind === 'undocked'
 
   // Reported rather than inferred by the parent, because this is the only
   // place that knows this slot's active note as it changes. The note being
@@ -2040,19 +2062,18 @@ export function EditorSection({
     // Same gesture, two verbs, decided by state: an undocked note is set
     // aside (the note is not this slot's to rename), otherwise the section
     // itself is renamed.
-    // Closing the guide is the same gesture as setting an undocked note
-    // aside, because it is the same thing: an unpinned note leaving the slot
-    // it borrowed.
-    if (isShowingGuide) {
-      onCloseSlotOverlay()
-      return
-    }
+    //
+    // Closing the GUIDE used to be a third verb here, and is not any more:
+    // the guide now has a visible exit where the render-mode toggle sits,
+    // and a hidden gesture duplicating a visible control is exactly what
+    // docs/user-workflow-design.md forbids.
     if (isShowingUndockedNote) {
       onSetAsideUndockedNote()
       return
     }
     startRenamingSection()
-  }, [isShowingGuide, onCloseSlotOverlay, isShowingUndockedNote, onSetAsideUndockedNote, startRenamingSection])
+  }, [isShowingUndockedNote, onSetAsideUndockedNote, startRenamingSection])
+
 
   const handleSectionPickerCandidateClick = useCallback((candidateId: string) => {
     if (deletionPrimedSectionId === candidateId) {
@@ -2204,6 +2225,7 @@ export function EditorSection({
         onCancelSectionRename={cancelSectionRename}
         onIdentityClick={handleIdentityClick}
         onIdentityContextMenu={handleIdentityContextMenu}
+        exitSlotOverlay={exitSlotOverlay}
         isSectionPickerOpen={isSectionPickerOpen}
         swapCandidates={swapCandidates}
         onSectionPickerCandidateClick={handleSectionPickerCandidateClick}

@@ -82,6 +82,20 @@ export type Transition =
       effects?: readonly Effect[]
       rng: RngState
     }
+  /**
+   * Clear the WHOLE stack and start again at this stage. Its own kind
+   * rather than a flag on `replace`, because every other transition here
+   * preserves what it did not touch and starting over is exactly the act
+   * that does not.
+   */
+  | {
+      kind: 'reset'
+      stageId: string
+      input?: JsonObject
+      narration?: string
+      effects?: readonly Effect[]
+      rng: RngState
+    }
   /** Close the whole game view and give the editor slot back. The one thing only the host can do. */
   | { kind: 'leave'; effects?: readonly Effect[]; rng: RngState }
 

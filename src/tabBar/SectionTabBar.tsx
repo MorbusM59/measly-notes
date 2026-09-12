@@ -29,6 +29,13 @@ export interface SectionTabBarProps {
   isForcedPreviewNote: boolean
   /** Flips this slot between edit and render view. */
   onToggleRenderViewMode: () => void
+  /**
+   * Non-null when this slot is showing something a view toggle makes no
+   * sense for -- the User Guide, or a mode that has taken the slot over.
+   * The toggle becomes an EXIT then, in the same place, doing the same
+   * thing Escape does: in a note Escape switches view, here it leaves.
+   */
+  exitSlotOverlay: (() => void) | null
   /** Opens a new slot immediately to the right of this one. */
   onCreateSlot: () => void
   /** Closes this slot (only ever called for non-leftmost slots). */
@@ -110,6 +117,7 @@ export function SectionTabBar({
   isPreviewMode,
   isForcedPreviewNote,
   onToggleRenderViewMode,
+  exitSlotOverlay,
   onCreateSlot,
   onCloseSlot,
   onCreateNote,
@@ -217,14 +225,12 @@ export function SectionTabBar({
             <button
               type="button"
               className={`tag-pill section-identity-tab${isSectionPickerOpen ? ' is-active' : ''}`}
-              onClick={modeStatus ? undefined : onIdentityClick}
-              data-secondary-press={modeStatus ? 'none' : 'action'}
-              onContextMenu={modeStatus ? undefined : onIdentityContextMenu}
+              onClick={modeStatus || isShowingGuide ? undefined : onIdentityClick}
+              data-secondary-press={modeStatus || isShowingGuide ? 'none' : 'action'}
+              onContextMenu={modeStatus || isShowingGuide ? undefined : onIdentityContextMenu}
               data-tooltip={
-                modeStatus
+                modeStatus || isShowingGuide
                   ? undefined
-                  : isShowingGuide
-                  ? 'Right click: Close the User Guide.'
                   : isShowingUndockedNote
                   ? `Left click: Pick a collection for this note.\nRight click: Return to ${sectionName ?? '···'}.`
                   : 'Left click: Pick a collection for this slot.\nRight click: Rename this collection.'
@@ -255,9 +261,7 @@ export function SectionTabBar({
                   state goes here and narration goes to the bar below. */}
               {modeStatus ? (
                 <EscapeMenuReadouts status={modeStatus} />
-              ) : isShowingGuide ? (
-                <span className="tabbar-tag-hint tabbar-guide-hint">Right click the button to the left to close this guide.</span>
-              ) : isShowingUndockedNote && !isSectionPickerOpen ? null : isSectionPickerOpen ? (
+              ) : isShowingGuide ? null : isShowingUndockedNote && !isSectionPickerOpen ? null : isSectionPickerOpen ? (
                 <div className="tabbar-section-picker" aria-live="polite">
                   {activeNoteId || sectionName !== null || pinnedTabs.length > 0 ? (
                     <button
@@ -412,7 +416,14 @@ export function SectionTabBar({
           </div>
         </div>
 
-      {/* Edit/render toggle -- a per-slot control, so it lives here at the
+      {/* Edit/render toggle, or EXIT when the slot is showing the guide or a
+          mode -- one control, because Escape activates this position and
+          Escape means the same thing in both cases: leave what this slot is
+          currently doing. In a note that is the other view; in the guide or
+          the game there is no other view, so it is the way out. It was a
+          dead disabled pen in the guide before, which said nothing.
+
+          A per-slot control, so it lives here at the
           slot's own edge rather than in the chapter bar (which speaks for one
           note's internals). Active means edit mode, so a note that can't leave
           render view (auto-TOC, Open Items, timeless) reads as plain inactive
@@ -420,21 +431,33 @@ export function SectionTabBar({
           on. Sitting immediately left of the add-slot "+" also lets the two
           read together as slot-level actions: this is the writing window, and
           that makes another one. */}
-      <button
-        type="button"
-        className={`btn-icon section-render-mode-toggle${!isForcedPreviewNote && !isPreviewMode ? ' is-active' : ''}`}
-        data-tooltip={isForcedPreviewNote
-          ? 'This note is always shown in render view'
-          : (isPreviewMode ? 'Switch to Edit Mode (Esc)' : 'Switch to Render View (Esc)')}
-        aria-label={isForcedPreviewNote
-          ? 'This note is always shown in render view'
-          : (isPreviewMode ? 'Switch to Edit Mode' : 'Switch to Render View')}
-        aria-pressed={!isForcedPreviewNote && !isPreviewMode}
-        disabled={isForcedPreviewNote}
-        onClick={onToggleRenderViewMode}
-      >
-        <span className="fa-solid fa-pen-to-square" aria-hidden="true" />
-      </button>
+      {exitSlotOverlay ? (
+        <button
+          type="button"
+          className="btn-icon section-render-mode-toggle section-overlay-exit"
+          data-tooltip="Close this and go back (Esc)"
+          aria-label="Close this and go back"
+          onClick={exitSlotOverlay}
+        >
+          <span className="fa-solid fa-arrow-right-from-bracket" aria-hidden="true" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={`btn-icon section-render-mode-toggle${!isForcedPreviewNote && !isPreviewMode ? ' is-active' : ''}`}
+          data-tooltip={isForcedPreviewNote
+            ? 'This note is always shown in render view'
+            : (isPreviewMode ? 'Switch to Edit Mode (Esc)' : 'Switch to Render View (Esc)')}
+          aria-label={isForcedPreviewNote
+            ? 'This note is always shown in render view'
+            : (isPreviewMode ? 'Switch to Edit Mode' : 'Switch to Render View')}
+          aria-pressed={!isForcedPreviewNote && !isPreviewMode}
+          disabled={isForcedPreviewNote}
+          onClick={onToggleRenderViewMode}
+        >
+          <span className="fa-solid fa-pen-to-square" aria-hidden="true" />
+        </button>
+      )}
 
       {canCreateSlot ? (
         <button

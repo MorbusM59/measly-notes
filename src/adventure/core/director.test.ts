@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildCatalog, THOCKQUEST, validateContent } from '../content'
-import { choose, CORE_CHOICE_IDS, currentScreen, ensureEntered, type DirectorDeps } from './director'
+import { choose, currentScreen, enterEntryScreen, type DirectorDeps } from './director'
 import { emptySave, type GameSave } from '../model/gameState'
-import { CORE_STAGE_IDS, ROOT_STAGE_ID, STAGES } from '../stages'
+import { ROOT_STAGE_ID, STAGES } from '../stages'
 import { MAX_STAGE_CHOICES } from './screen'
 
 const DEPS: DirectorDeps = {
@@ -10,13 +10,12 @@ const DEPS: DirectorDeps = {
   content: THOCKQUEST,
   catalog: buildCatalog(THOCKQUEST),
   rootStageId: ROOT_STAGE_ID,
-  coreStageIds: CORE_STAGE_IDS,
 }
 
 const NOW = 1_700_000_000_000
 
 function start(seed = 4242): GameSave {
-  return ensureEntered(emptySave(seed), DEPS, NOW)
+  return enterEntryScreen(emptySave(seed), DEPS, NOW)
 }
 
 function screenOf(save: GameSave) {
@@ -25,10 +24,13 @@ function screenOf(save: GameSave) {
   return screen
 }
 
-/** The first choice that is the stage's own rather than one the director adds. */
+/**
+ * The first choice that advances the game. Every choice is the stage's own
+ * now -- the director contributes none -- but the entry screen's way OUT is
+ * not a step forward, and a walk that took it would end on the first move.
+ */
 function firstStageChoiceId(save: GameSave): string {
-  const coreIds = new Set<string>(Object.values(CORE_CHOICE_IDS))
-  const choice = screenOf(save).choices.find((candidate) => !coreIds.has(candidate.id))
+  const choice = screenOf(save).choices.find((candidate) => candidate.id !== 'welcome:leave')
   if (!choice) throw new Error('no stage choice on offer')
   return choice.id
 }
@@ -57,42 +59,69 @@ describe('director', () => {
     expect(first.director.stack).toHaveLength(1)
     expect(first.director.stack[0].stageId).toBe(ROOT_STAGE_ID)
     // Idempotent, because it runs on a React effect that can re-run.
-    expect(ensureEntered(first, DEPS, NOW)).toBe(first)
+    expect(enterEntryScreen(first, DEPS, NOW)).toBe(first)
   })
 
-  it('adds the way out to every screen, and the two interludes once a game exists', () => {
+  it('offers the way out on the entry screen, and only there', () => {
     const welcome = start()
-    const welcomeIds = screenOf(welcome).choices.map((choice) => choice.id)
-    expect(welcomeIds).toContain(CORE_CHOICE_IDS.leave)
-    // Nothing to look at before a game exists, so nothing is offered.
-    expect(welcomeIds).not.toContain(CORE_CHOICE_IDS.items)
+    expect(screenOf(welcome).choices.map((choice) => choice.id)).toContain('welcome:leave')
 
+    // Everywhere else the way out is the slot's own exit button. Three
+    // standing cells on every screen was the cost this replaced.
     const inGame = playForward(welcome, 1).save
-    const inGameIds = screenOf(inGame).choices.map((choice) => choice.id)
-    expect(inGameIds).toEqual(expect.arrayContaining([CORE_CHOICE_IDS.items, CORE_CHOICE_IDS.traits, CORE_CHOICE_IDS.leave]))
+    expect(screenOf(inGame).choices.map((choice) => choice.id)).not.toContain('welcome:leave')
   })
 
   it('reports leaving as a host action and changes nothing itself', () => {
     const save = start()
-    const result = choose(save, CORE_CHOICE_IDS.leave, DEPS, NOW)
+    const result = choose(save, 'welcome:leave', DEPS, NOW)
     expect(result.hostAction).toBe('leave')
     expect(result.save).toBe(save)
   })
 
-  it('returns an interlude to exactly the screen it was opened from', () => {
-    const playing = playForward(start(), 3).save
+  it('re-opening lands on the entry screen without disturbing the run underneath', () => {
+    // The property item 1 exists for: the persisted stack still means
+    // "exactly where you were", but that is offered as a CHOICE rather than
+    // dropped on the player mid-swing.
+    const playing = playForward(start(88), 4).save
+    const reopened = enterEntryScreen(playing, DEPS, NOW)
+
+    expect(screenOf(reopened).stageId).toBe(ROOT_STAGE_ID)
+    expect(reopened.director.stack).toHaveLength(playing.director.stack.length + 1)
+    // Untouched, frame for frame -- not re-entered, not re-rolled.
+    expect(reopened.director.stack.slice(0, -1)).toEqual(playing.director.stack)
+    // Idempotent while it is already on top.
+    expect(enterEntryScreen(reopened, DEPS, NOW)).toBe(reopened)
+  })
+
+  it('continues into exactly the screen that was left, roll state and all', () => {
+    const playing = playForward(start(88), 4).save
     const before = screenOf(playing)
 
-    const opened = choose(playing, CORE_CHOICE_IDS.items, DEPS, NOW).save
-    expect(opened.director.stack).toHaveLength(playing.director.stack.length + 1)
-    expect(screenOf(opened).stageId).toBe(CORE_STAGE_IDS.items)
+    const resumed = choose(enterEntryScreen(playing, DEPS, NOW), 'welcome:continue', DEPS, NOW).save
 
-    const closed = choose(opened, 'holdings:back', DEPS, NOW).save
-    const after = screenOf(closed)
+    expect(resumed.director.stack).toEqual(playing.director.stack)
+    const after = screenOf(resumed)
     expect(after.stageId).toBe(before.stageId)
     expect(after.choices.map((choice) => choice.id)).toEqual(before.choices.map((choice) => choice.id))
-    // The stage underneath never learned it was interrupted.
-    expect(closed.director.stack).toEqual(playing.director.stack)
+  })
+
+  it('starting a new adventure clears the suspended run rather than burying it', () => {
+    // `reset`, not `replace`. With `replace` the old run would still be
+    // sitting underneath, reachable by a pop nobody meant to offer.
+    const playing = playForward(start(88), 4).save
+    const started = choose(enterEntryScreen(playing, DEPS, NOW), 'welcome:start', DEPS, NOW).save
+
+    expect(started.director.stack).toHaveLength(1)
+    expect(started.director.stack[0].stageId).not.toBe(ROOT_STAGE_ID)
+  })
+
+  it('offers continuing only when there is something to continue', () => {
+    const fresh = start()
+    expect(screenOf(fresh).choices.map((choice) => choice.id)).not.toContain('welcome:continue')
+
+    const reopened = enterEntryScreen(playForward(fresh, 2).save, DEPS, NOW)
+    expect(screenOf(reopened).choices.map((choice) => choice.id)).toContain('welcome:continue')
   })
 
   it('ignores a choice that was not on offer rather than corrupting the game', () => {
@@ -100,23 +129,12 @@ describe('director', () => {
     expect(choose(save, 'nonsense:choice', DEPS, NOW).save).toBe(save)
   })
 
-  it('never leaves the player nowhere: popping past the bottom lands on the root stage', () => {
-    // The interlude is the only stage that pops today, so it is opened at
-    // the root -- where there is nothing underneath to go back to.
-    const playing = playForward(start(), 1).save
-    const opened = choose(playing, CORE_CHOICE_IDS.items, DEPS, NOW).save
-    const popped = choose(opened, 'holdings:back', DEPS, NOW).save
-    expect(popped.director.stack.length).toBeGreaterThan(0)
-    expect(screenOf(popped)).toBeTruthy()
-  })
-
   it('keeps every screen inside the ring budget', () => {
+    // The whole budget is the stage's now, so this counts every cell the
+    // dial is asked to hold rather than only the stage's share of it.
     let save = start()
-    const coreIds = new Set<string>(Object.values(CORE_CHOICE_IDS))
     for (let index = 0; index < 12; index += 1) {
-      const screen = screenOf(save)
-      const stageChoices = screen.choices.filter((choice) => !coreIds.has(choice.id))
-      expect(stageChoices.length).toBeLessThanOrEqual(MAX_STAGE_CHOICES)
+      expect(screenOf(save).choices.length).toBeLessThanOrEqual(MAX_STAGE_CHOICES)
       save = choose(save, firstStageChoiceId(save), DEPS, NOW).save
     }
   })
@@ -154,7 +172,7 @@ describe('the promises the platform is built on', () => {
   })
 
   it('survives being written to disk and read back at EVERY screen along the way', () => {
-    // "Leave the game" is a cell on every screen, so every screen has to
+    // The player can close the view at any screen, so every screen has to
     // round trip. A stage that put a closure, a Map or an undefined into
     // its state would break exactly one screen, for exactly the player who
     // quit on it.

@@ -24,7 +24,7 @@ channels:
 
 | Channel | Carries |
 | --- | --- |
-| the ring | one question's choices, as icon + short label |
+| the ring | one question's choices, as icon + short label — ALL of them the stage's own |
 | the tab bar | the stats readout — or, while a choice is focused, that choice's own effects |
 | the chapter bar | narration: what just happened, and the frame for what is being asked |
 
@@ -64,13 +64,46 @@ player: a stat check (`model/checks.ts`), an armor absorb (`model/armor.ts`),
 stat resolution (`model/modifiers.ts`). Enemy generation and combat
 resolution will be services.
 
+### The director contributes no cells
+
+It used to add three to every screen — acquired items, acquired traits, leave.
+Three of the twelve the dial can hold, on every screen, to say things that
+either belong somewhere always-visible (what you are carrying is a strip of
+pills on the chrome, not a cell and a screen behind it) or are needed on
+exactly one screen (leaving, which the welcome stage offers as an ordinary
+choice; everywhere else the way out is the slot's own exit button). What is
+left in `director.ts` is sequencing and nothing else, which is what it always
+claimed to be — and `MAX_STAGE_CHOICES` became the whole dial rather than a
+share of it.
+
 ### A stack, not a current stage
 
-Looking at your traits is reachable from every screen and must give back the
-screen you were on; a fight has decisions inside it that are not the fight.
-One "current stage" could only express that by making every stage save and
-restore its own suspended state — the same mechanism written once per stage
-instead of once in the director.
+A fight has decisions inside it that are not the fight, and an ending must
+give back the screen underneath. One "current stage" could only express that
+by making every stage save and restore its own suspended state — the same
+mechanism written once per stage instead of once in the director.
+
+### Opening is an event, not a condition
+
+Opening the view pushes the ENTRY SCREEN on top of whatever was there, so the
+first question is always "continue, or begin again". The suspended run is
+untouched underneath: continuing is a `pop` straight back into the exact
+frame and the exact roll state, and starting fresh is `reset`, the one
+transition that discards frames below itself.
+
+That resolves the tension between two things that both had to be true — the
+stack exists so a player can be dropped back exactly where they were, and
+being dropped back mid-swing into a fight you have forgotten, with no way out
+to start another game, is not what anyone wants on opening a view.
+
+**`enterEntryScreen` is an EVENT.** Its predecessor was a condition — "put the
+player somewhere if they are nowhere" — which was safe to re-check on every
+save change, and its one caller is an effect that does exactly that. Pushing
+the entry screen under those conditions puts it back on top after every
+choice, and the player can never leave it. Caught live, not by a test: the
+hook's effect depends on the OPENING alone, reading the save and the commit
+callback through refs so neither a new save nor a re-created callback can
+re-fire it.
 
 ### Three rules the types enforce
 
@@ -188,8 +221,9 @@ an item carried over counts as a fresh acquisition.
 
 Built and exercised end to end: the director, the stack, the effect
 vocabulary, the save and its sanitizer, stats, modifiers, armor, checks,
-determinism, and the stages for welcome, character creation, region select,
-the encounter hub, and the two acquired-\* interludes.
+determinism, and the stages for welcome, character creation, region select
+and the encounter hub. The two acquired-\* interludes are GONE — what you
+carry belongs on the chrome, always visible, not behind a permanent cell.
 
 **Not built, on purpose**: hunting, exploring, chance encounters, combat and
 loot. Their rules are still being written — the action economy, what the
@@ -213,10 +247,15 @@ These block a playable game and want answers rather than guesses.
    Needs an additive field on the shared contract.
 2. **Readouts have no icons.** The design's status line is written in icons;
    the contract's readout is a short label and a value.
-3. **Motes: spent or banked?** Experience buys traits at the start of a level
-   *and* accumulates toward a stat point at `10 + 5 × points acquired`.
-   Whether spending on a trait also consumes progress toward the threshold is
-   undecided, so the tab bar does not show "motes until next point".
+3. **Motes — DECIDED, not yet built.** One earning stream, two stored facts:
+   `experienceEarned` (monotonic) and `experienceSpentOnTraits`. The spendable
+   balance is `earned − spentOnTraits` and has nothing to do with stats. Stat
+   points read `earned` alone: available when `earned ≥ experienceToNextStatPoint`,
+   which starts at 10 and grows by `5 × pointsAcquired` on each allocation
+   (10, 15, 25, 40, 60, 85 …). The gauge shows
+   `(earned − (next − 5 × pointsAcquired)) / (5 × pointsAcquired)` — with the
+   first span read as 10 rather than `5 × 0`, or it divides by zero before the
+   first point.
 4. **Resilience.** The design writes hit points as `50 + 15 × Resilience`, and
    Resilience is not one of the six stats — but the formula is written under
    Might, and is read against Might here. Seventh stat, or a slip?
@@ -233,9 +272,14 @@ These block a playable game and want answers rather than guesses.
 9. **Regions** currently carry a name and nothing else: which encounters and
     monsters each brings into scope is unspecified.
 10. **A second game slot.** The save is shaped for it (`games` is a list,
-    `activeGameId` says which is live), and "Continue previous adventure"
-    re-enters at the encounter hub rather than at the exact screen left,
-    because leaving a game currently discards its stack rather than
-    suspending it into its row.
+    `activeGameId` says which is live). Continuing now resumes the EXACT
+    screen, because leaving no longer discards the stack — it is suspended
+    under the entry screen. What is still missing is more than one of them:
+    the stack is the director's, not the game row's, so a second live game
+    would have nowhere to keep its own.
 11. **Armor decay's curve.** "A chance based on luck" is specified; the curve
     is not. `ARMOR_DECAY_TUNING` is a labelled placeholder, not a tuned value.
+12. **Fame — shaped, not numbered.** Fame is the score, driven by TOTAL GOLD
+    accumulated, and getting progressively harder as it rises: the run's
+    tension is meant to be between growing the character with stat points and
+    converting power into gold, and gold into score. The curve is not written.

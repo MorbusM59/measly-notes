@@ -124,13 +124,14 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 ### [Edit and Preview Modes](#edit-and-preview-modes)
 
 > **Where?**
-> The pen icon at the left of the toolbar, or \`Esc\`.
+> The pen icon at the right of the tab bar, next to the "+", or \`Esc\`.
 
 *Toggles between the raw Markdown you type and the rendered, formatted view.*
 
 - Preview renders GitHub-Flavored Markdown: headings, bold/italic/strikethrough, lists (including task checklists with ☐/☑), tables, blockquotes, syntax-highlighted code blocks, horizontal rules, images, and links.
 - A task checklist's box is clickable right there in preview, same as [clicking its caret in edit mode]($HELP§TOOLBAR-FORMATTING#formatting-group) — it's the same checkbox either way, so the note's own text (and edit mode's view of it) updates immediately.
 - \`Esc\` also blurs a focused field (like search) before it starts toggling modes, so it's safe to hit repeatedly.
+- **In a slot that isn't showing a note** — the User Guide, or the adventure — there is no other view to switch to, so the same button becomes an **exit** and closes what the slot is showing. \`Esc\` follows it, because \`Esc\` *is* that button: one key, one position, one meaning — leave whatever this slot is currently doing.
 
 ### [Quick Actions Menu](#quick-actions-menu)
 
@@ -150,10 +151,11 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 
 *This page, opened as an ordinary (timeless, read-only) note in whichever slot you triggered it from.*
 
-- Opens exactly like clicking any note in the sidebar does -- as a temporary tab, replacing whatever that slot was showing. Leave it the same way too: pick another note, click a pinned tab, or open a different note from the sidebar. There's no dedicated close gesture any more.
+- Opens exactly like clicking any note in the sidebar does -- as a temporary tab, replacing whatever that slot was showing. Leave it with the **exit button** where that slot's [edit/render toggle]($HELP§NOTES-EDITING#edit-and-preview-modes) normally sits, or with \`Esc\`, which is the same button. Picking another note, a pinned tab, or anything from the sidebar also leaves it, the ordinary way.
 - Browsable with the same chapter bar every note with chapters uses -- click a chapter pill to jump to it, or the bookmark icon for a full table of contents.
 - Always render-only: nothing here can be edited, renamed, tagged, archived, or deleted.
-- **Right-click** this button and you get something else entirely: a small choose-your-path adventure. The button lights up and turns into a flame, the slot is set aside (whatever it was showing comes back afterwards), and the quick actions menu opens over the empty editor with your choices on it. Each cell is one choice and the menu stays up as you make them; where you are is written across the tab bar above, and how you're doing on the bar below. Leave with the \`X\` cell, by pressing \`Esc\`, or by pressing the button again -- the menu is the game here, so putting it away puts the game away with it. The run is saved where it stands, and right-clicking again drops you straight back into it. The flame cell starts a new one over the top.
+- **Right-click** this button and you get something else entirely: a small choose-your-path adventure. The button lights up and turns into a flame, the slot is set aside (whatever it was showing comes back afterwards), and the quick actions menu opens over the empty editor with your choices on it. Each cell is one choice and the menu stays up as you make them; where you are is written across the tab bar above, and how you're doing on the bar below. Leave with the exit button where that slot's edit/render toggle normally sits, by pressing \`Esc\`, or by pressing the flame button again -- the menu is the game here, so putting it away puts the game away with it. There's also a **Leave the game** choice on the opening screen, for anyone who arrived by accident and wants straight back out.
+- **Coming back always starts at the opening screen**, offering to continue or to begin again. Continuing puts you back on the exact screen you left, mid-decision if that's where you were; starting a new adventure clears the old one. The run is saved where it stands, so leaving is never a cost.
 
 ### [Scrollbar Navigation](#scrollbar-navigation)
 
