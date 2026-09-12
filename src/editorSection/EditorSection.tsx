@@ -41,7 +41,7 @@ import { hashNormalizedText } from '../shared/hashText'
 import type { PreviewMarkdownBlock, PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
 import type { SectionHandle } from './sectionRegistry'
 import { buildPersistedBlockMap, restorePersistedBlockMap } from '../editor/persistedBlockMap'
-import { splitMarkdownIntoPreviewBlocksIncremental } from '../editor/PreviewBlockSplit'
+import { requestFullBlockSplit } from '../editor/blockSplitClient'
 
 /** Same seed text as App.tsx's own NEW_NOTE_TEMPLATE (createNote) -- kept as its own local copy rather than a shared import to avoid a circular dependency (App.tsx is what mounts EditorSection). */
 const NEW_NOTE_TEMPLATE = '# '
@@ -789,11 +789,15 @@ export function EditorSection({
       // Measured on a 320KB note: 1.6s in the snapshot build, then another
       // 1.7s in the prewarm half a second later. Same parse, twice, on the
       // first open of every large note.
-      previewBlockSplitCacheRef.current = splitMarkdownIntoPreviewBlocksIncremental(hydratedText, null)
-      previewBlocksCacheRef.current = {
-        text: hydratedText,
-        blocks: previewBlockSplitCacheRef.current.blocks,
-      }
+      // OFF THE MAIN THREAD (editor/blockSplitClient.ts). This is the one
+      // parse a reader waits through, and on a large note it was 1.6 seconds
+      // of frozen app -- no scroll, no sidebar, no window controls -- on the
+      // first open. `activateNote` is already async and already behind the
+      // render view's fade, so awaiting a worker costs the same wall time
+      // and spends none of it frozen.
+      const parsed = await requestFullBlockSplit(hydratedText)
+      previewBlockSplitCacheRef.current = parsed
+      previewBlocksCacheRef.current = { text: hydratedText, blocks: parsed.blocks }
     }
     if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
       console.log('[preview-block-cache] activation', {

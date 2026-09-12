@@ -31,7 +31,6 @@ import { buildTransformResult } from '../editor/TransformResult'
 import { readPreviewEdgePaddingPx, readPreviewLineHeightPx } from './previewBlockGeometry'
 import {
   splitMarkdownIntoPreviewBlocks,
-  splitMarkdownIntoPreviewBlocksIncremental,
   type PreviewMarkdownBlock,
   type PreviewBlockSplitCache,
 } from '../editor/PreviewBlockSplit'
@@ -58,6 +57,7 @@ import { traceSettle } from './previewSettleTrace'
 import { createDocumentCommitCoalescer } from './documentCommitCoalescer'
 import { buildPersistedBlockMap } from '../editor/persistedBlockMap'
 import type { NoteUiStatePayload } from '../shared/noteLifecycle'
+import { requestFullBlockSplit } from '../editor/blockSplitClient'
 
 /**
  * Throwaway checkpoint logger for the commit-to-paint input-lag
@@ -2329,15 +2329,18 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         // Use a single requestIdleCallback or setTimeout(0) boundary so the
         // parse doesn't run synchronously inside this effect and block the
         // initial note paint/focus.
+        // Off the main thread too. It is a BACKGROUND warm-up, so blocking
+        // the reader for it would be the least defensible freeze of all --
+        // and the one the idle callback below only defers rather than avoids.
         const run = () => {
-          try {
-            const splitCache = splitMarkdownIntoPreviewBlocksIncremental(currentText, previewBlockSplitCacheRef.current)
-            previewBlockSplitCacheRef.current = splitCache
-            previewBlocksCacheRef.current = { text: currentText, blocks: splitCache.blocks }
-            debugLogPreviewBlockCache('background prewarm completed', { textLength: currentText.length, blocks: splitCache.blocks.length, ranges: splitCache.ranges.length })
-          } catch (error) {
-            console.warn('Failed to prewarm preview blocks', error)
-          }
+          void requestFullBlockSplit(currentText)
+            .then((splitCache) => {
+              if (previewBlockPrewarmTextRef.current !== currentText) return
+              previewBlockSplitCacheRef.current = splitCache
+              previewBlocksCacheRef.current = { text: currentText, blocks: splitCache.blocks }
+              debugLogPreviewBlockCache('background prewarm completed', { textLength: currentText.length, blocks: splitCache.blocks.length, ranges: splitCache.ranges.length })
+            })
+            .catch((error) => { console.warn('Failed to prewarm preview blocks', error) })
         }
         if (typeof window.requestIdleCallback === 'function') {
           window.requestIdleCallback(run, { timeout: 2000 })

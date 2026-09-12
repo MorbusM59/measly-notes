@@ -14,6 +14,33 @@ export default defineConfig(({ mode }) => {
   const isBrowserOnlyDev = mode === 'browser'
 
   return {
+    resolve: {
+      alias: {
+        // micromark's entity decoder ships TWO builds, and its `browser`
+        // export condition points at the DOM one -- `index.dom.js` does
+        // `document.createElement('i')` AT MODULE SCOPE and decodes `&amp;`
+        // by letting the browser do it. Vite pre-bundles deps once for the
+        // whole app, so a WORKER importing the markdown parser inherits that
+        // resolution and dies on evaluation with "document is not defined".
+        //
+        // Found the hard way: the block-split worker fell back to the main
+        // thread silently, its error handler retiring it exactly as designed,
+        // and the freeze it existed to remove was still there. An A/B with
+        // workers disabled produced the same 1.6s frozen stretch, which is
+        // what gave it away.
+        //
+        // The package publishes a `worker` condition pointing at the pure
+        // build for precisely this, but a per-worker resolution would leave
+        // the rule true on one thread and not the other. Aliasing states the
+        // rule once instead: THE MARKDOWN PARSER DOES NOT DEPEND ON THE DOM.
+        // The pure build is a lookup table -- a few KB of entities against a
+        // parser that can then run anywhere, deterministically.
+        'decode-named-character-reference': path.resolve(
+          __dirname,
+          'node_modules/decode-named-character-reference/index.js',
+        ),
+      },
+    },
     build: {
       // Lets the perf harness (scripts/perf/) resolve real function names
       // from a CDP JS-sampling profile of the production Electron build --

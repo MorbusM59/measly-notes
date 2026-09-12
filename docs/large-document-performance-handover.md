@@ -3981,8 +3981,43 @@ every large note. Now 1.6s once, then ~8ms forever.
   `normalizeInternalText` (CRLF→LF, tabs→3 spaces, BOM). Substituting one
   would silently invalidate every record.
 
-**Still open:** the prewarm runs inside `requestIdleCallback` but never reads
-its deadline, does not chunk, and is not on a worker. It matters less now
-that the cold parse happens once on the activation path rather than twice,
-but a document large enough still blocks the main thread for as long as it
-takes. That is the remaining structural item for large documents.
+### The cold parse is off the main thread (done)
+
+`editor/blockSplit.worker.ts` + `blockSplitClient.ts`. Text in, line ranges
+out — the split was already pure, so nothing had to be made safe to move it.
+Both cold-parse callers use it: `activateNote` (which awaits it, already
+being async and already behind the render view's fade) and the background
+prewarm. The INCREMENTAL split stays on the main thread deliberately: it
+reparses the changed span plus one neighbouring block, which is small by
+construction and has to land in the same frame as the keystroke.
+
+Measured on a 320KB note, by recording animation-frame gaps during a cold
+open — the longest gap IS the longest stretch the UI could not respond:
+
+| | longest frozen stretch | frames > 100ms |
+| --- | --- | --- |
+| worker off (main thread) | 1634ms | 1 |
+| worker on | **97ms** | **0** |
+
+Same wall time for the parse; none of it frozen.
+
+**The trap, for whoever moves the next thing to a worker.** The first version
+looked correct, built, ran, and did nothing: the worker died on evaluation and
+its error handler retired it exactly as designed, so every request quietly
+took the main-thread fallback and the freeze was still there. The A/B with
+workers disabled produced the SAME 1634ms, which is the only reason it was
+caught rather than shipped.
+
+The cause was `decode-named-character-reference`, a micromark dependency
+whose `browser` export condition points at a build that does
+`document.createElement('i')` at module scope. Vite pre-bundles deps once for
+the whole app, so the worker inherited the browser resolution. It is aliased
+in `vite.config.ts` to the pure build for every thread, because the rule
+worth stating is that the markdown parser does not depend on the DOM — not
+that one worker needs a special resolution. Verified in the production build
+too: `blockSplit.worker-*.js` is emitted and no bundle contains the DOM
+decoder.
+
+**Still open:** nothing chunks the parse itself. A document large enough will
+keep a worker busy for seconds — which no longer freezes anything, so this is
+now about how long a reader waits rather than whether the app responds.
