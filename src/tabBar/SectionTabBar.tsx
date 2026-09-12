@@ -218,6 +218,7 @@ export function SectionTabBar({
               type="button"
               className={`tag-pill section-identity-tab${isSectionPickerOpen ? ' is-active' : ''}`}
               onClick={modeStatus ? undefined : onIdentityClick}
+              data-secondary-press={modeStatus ? 'none' : 'action'}
               onContextMenu={modeStatus ? undefined : onIdentityContextMenu}
               data-tooltip={
                 modeStatus
@@ -292,6 +293,7 @@ export function SectionTabBar({
                         type="button"
                         className={`tag-pill section-picker-item${isDeletionPrimed ? ' deletion-primed' : ''}`}
                         onClick={() => onSectionPickerCandidateClick(candidate.id)}
+                        data-secondary-press="action"
                         onContextMenu={(event) => onSectionPickerCandidateContextMenu(event, candidate.id)}
                         onMouseLeave={() => onSectionPickerCandidateMouseLeave(candidate.id)}
                         data-tooltip={isDeletionPrimed ? `Click again to permanently delete "${candidate.name}"` : `Swap in "${candidate.name}" -- right-click to delete`}
@@ -337,6 +339,7 @@ export function SectionTabBar({
                           className={`tag-pill note-tab-pill temp is-active${isGhost ? ' ghost' : ''}${isPrimed ? ' unpin-primed' : ''}${isPinArming ? ' pin-arming' : ''}${isUnpinArming ? ' unpin-arming' : ''}`}
                           style={{ '--temp-tab-pin-hold-ms': `${TEMP_TAB_PIN_HOLD_MS}ms` } as CSSProperties}
                           onClick={() => handleTabClick(tempTabNoteId)}
+                          data-secondary-press="action"
                           onContextMenu={handleTabContextMenu}
                           onMouseDown={(event) => {
                             handleTempTabMouseDown(event, tempTabNoteId)
@@ -387,6 +390,7 @@ export function SectionTabBar({
                           onDragEnd={handleTabDragEnd}
                           onDrop={(event) => handleTabDrop(event, index)}
                           onClick={() => handleTabClick(tab.noteId)}
+                          data-secondary-press="action"
                           onContextMenu={handleTabContextMenu}
                           onMouseDown={(event) => handleTabMouseDown(event, tab.noteId)}
                           onMouseUp={(event) => handleTabMouseUp(event, tab.noteId)}

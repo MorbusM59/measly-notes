@@ -479,6 +479,7 @@ export function SectionEditorArea({
                 ref={previewScrollbarTrackRef}
                 className="thockdown-scroll-track"
                 onMouseDown={handlePreviewTrackMouseDown}
+                data-secondary-press="action"
                 onContextMenu={handlePreviewTrackContextMenu}
               >
                 <div
@@ -568,6 +569,7 @@ export function SectionEditorArea({
               aria-pressed={showLineNumbers || showReviewFlags}
               data-tooltip="Left-click: toggle line numbers + review flags. Right-click: toggle review flags only."
               onClick={onToggleReviewGutter}
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 event.preventDefault()
                 onToggleReviewFlags()

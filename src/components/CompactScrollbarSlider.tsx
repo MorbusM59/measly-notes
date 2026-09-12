@@ -191,6 +191,7 @@ export function CompactScrollbarSlider({
         setIsDragging(false)
       }}
       onPointerCancel={() => setIsDragging(false)}
+      data-secondary-press="action"
       onContextMenu={(event) => {
         event.preventDefault()
         if (disabled) return

@@ -989,6 +989,7 @@ export function SidebarOptionsPanel({
           onMouseLeave={() => {
             clearColorArmTimer()
           }}
+          data-secondary-press="action"
           onContextMenu={(event) => {
             event.preventDefault()
             clearColorArmTimer()
@@ -1029,6 +1030,7 @@ export function SidebarOptionsPanel({
         onMouseLeave={() => {
           clearColorArmTimer()
         }}
+        data-secondary-press="action"
         onContextMenu={(event) => {
           event.preventDefault()
           clearColorArmTimer()
@@ -1296,6 +1298,7 @@ export function SidebarOptionsPanel({
                 handleCustomLoadoutSlotRightMouseUp(event, entry.id)
               }}
               onMouseLeave={handleCustomLoadoutSlotMouseLeave}
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 handleCustomLoadoutSlotContextMenu(event, entry.id)
               }}
@@ -1319,6 +1322,7 @@ export function SidebarOptionsPanel({
             data-tooltip={resetCustomLayoutPrimed ? 'Click again to reset custom layout to defaults' : 'Reset custom layout to defaults'}
             aria-label={resetCustomLayoutPrimed ? 'Confirm reset custom layout to defaults' : 'Reset custom layout to defaults'}
             onClick={() => void resetCustomLoadout()}
+            data-secondary-press="none"
             onContextMenu={(event) => event.preventDefault()}
           >
             <span className="fa-solid fa-rotate-left" aria-hidden="true" />
@@ -1365,6 +1369,7 @@ export function SidebarOptionsPanel({
                 clearColorArmTimer()
               }}
               onMouseLeave={clearColorArmTimer}
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 event.preventDefault()
                 clearColorArmTimer()
@@ -1402,6 +1407,7 @@ export function SidebarOptionsPanel({
                 clearColorArmTimer()
               }}
               onMouseLeave={clearColorArmTimer}
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 event.preventDefault()
                 clearColorArmTimer()
@@ -1439,6 +1445,7 @@ export function SidebarOptionsPanel({
                 clearColorArmTimer()
               }}
               onMouseLeave={clearColorArmTimer}
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 event.preventDefault()
                 clearColorArmTimer()
@@ -1485,6 +1492,7 @@ export function SidebarOptionsPanel({
                 clearColorArmTimer()
               }}
               onMouseLeave={clearColorArmTimer}
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 event.preventDefault()
                 clearColorArmTimer()
@@ -1507,6 +1515,7 @@ export function SidebarOptionsPanel({
                 clearColorArmTimer()
               }}
               onMouseLeave={clearColorArmTimer}
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 event.preventDefault()
                 clearColorArmTimer()
@@ -1533,6 +1542,7 @@ export function SidebarOptionsPanel({
                   clearColorArmTimer()
                 }}
                 onMouseLeave={clearColorArmTimer}
+                data-secondary-press="action"
                 onContextMenu={(event) => {
                   event.preventDefault()
                   clearColorArmTimer()
@@ -1591,6 +1601,7 @@ export function SidebarOptionsPanel({
                     aria-label={`Texture seed ${texturePreviewMaterial.seed}. Left click to randomize. Right click to edit.`}
                     data-tooltip="Left click: random seed. Right click: edit seed."
                     onClick={randomizeTextureSeed}
+                    data-secondary-press="action"
                     onContextMenu={(event) => {
                       event.preventDefault()
                       startTextureSeedEdit()
@@ -1635,6 +1646,7 @@ export function SidebarOptionsPanel({
               onLostPointerCapture={(event) => {
                 stopTextureControlDrag('granularity', event)
               }}
+              data-secondary-press="none"
               onContextMenu={(event) => {
                 event.preventDefault()
               }}
@@ -1679,6 +1691,7 @@ export function SidebarOptionsPanel({
               onLostPointerCapture={(event) => {
                 stopTextureControlDrag('smoothness', event)
               }}
+              data-secondary-press="none"
               onContextMenu={(event) => {
                 event.preventDefault()
               }}
@@ -1729,6 +1742,7 @@ export function SidebarOptionsPanel({
             onMouseLeave={() => {
               clearColorArmTimer()
             }}
+            data-secondary-press="action"
             onContextMenu={(event) => {
               event.preventDefault()
               clearColorArmTimer()
@@ -1815,6 +1829,7 @@ export function SidebarOptionsPanel({
                   aria-label={`Linear glaze seed ${glazeSettings.linearSeed}. Left click to randomize. Right click to edit.`}
                   data-tooltip="Left click: random seed. Right click: edit seed."
                   onClick={randomizeGlazeLinearSeed}
+                  data-secondary-press="action"
                   onContextMenu={(event) => {
                     event.preventDefault()
                     startGlazeLinearSeedEdit()
@@ -1891,6 +1906,7 @@ export function SidebarOptionsPanel({
                   aria-label={`Radial glaze seed ${glazeSettings.radialSeed}. Left click to randomize. Right click to edit.`}
                   data-tooltip="Left click: random seed. Right click: edit seed."
                   onClick={randomizeGlazeRadialSeed}
+                  data-secondary-press="action"
                   onContextMenu={(event) => {
                     event.preventDefault()
                     startGlazeRadialSeedEdit()
@@ -2201,6 +2217,7 @@ export function SidebarOptionsPanel({
             onMouseDown={(event) => startCursorColorCopyHold('center', event)}
             onMouseUp={(event) => { if (event.button !== 2) return; clearCursorColorArmTimer() }}
             onMouseLeave={clearCursorColorArmTimer}
+            data-secondary-press="action"
             onContextMenu={(event) => { event.preventDefault(); clearCursorColorArmTimer() }}
           ><span className="options-color-swatch-glyph fa-regular fa-circle-dot" aria-hidden="true" /></button>
           <button
@@ -2212,6 +2229,7 @@ export function SidebarOptionsPanel({
             onMouseDown={(event) => startCursorColorCopyHold('halo', event)}
             onMouseUp={(event) => { if (event.button !== 2) return; clearCursorColorArmTimer() }}
             onMouseLeave={clearCursorColorArmTimer}
+            data-secondary-press="action"
             onContextMenu={(event) => { event.preventDefault(); clearCursorColorArmTimer() }}
           ><span className="options-color-swatch-glyph fa-solid fa-circle" aria-hidden="true" /></button>
 
@@ -2292,6 +2310,7 @@ export function SidebarOptionsPanel({
             onMouseDown={(event) => startCursorColorCopyHold('dot', event)}
             onMouseUp={(event) => { if (event.button !== 2) return; clearCursorColorArmTimer() }}
             onMouseLeave={clearCursorColorArmTimer}
+            data-secondary-press="action"
             onContextMenu={(event) => { event.preventDefault(); clearCursorColorArmTimer() }}
           ><span className="options-color-swatch-glyph fa-solid fa-spinner" aria-hidden="true" /></button>
           <button
@@ -2303,6 +2322,7 @@ export function SidebarOptionsPanel({
             onMouseDown={(event) => startCursorColorCopyHold('trail', event)}
             onMouseUp={(event) => { if (event.button !== 2) return; clearCursorColorArmTimer() }}
             onMouseLeave={clearCursorColorArmTimer}
+            data-secondary-press="action"
             onContextMenu={(event) => { event.preventDefault(); clearCursorColorArmTimer() }}
           ><span className="options-color-swatch-glyph fa-solid fa-cancer" aria-hidden="true" /></button>
 
@@ -2541,6 +2561,7 @@ export function SidebarOptionsPanel({
             onMouseDown={(event) => startCaretColorCopyHold('outline', event)}
             onMouseUp={(event) => { if (event.button !== 2) return; clearCaretColorArmTimer() }}
             onMouseLeave={clearCaretColorArmTimer}
+            data-secondary-press="action"
             onContextMenu={(event) => { event.preventDefault(); clearCaretColorArmTimer() }}
           ><span className="options-color-swatch-glyph fa-regular fa-square" aria-hidden="true" /></button>
           <button
@@ -2552,6 +2573,7 @@ export function SidebarOptionsPanel({
             onMouseDown={(event) => startCaretColorCopyHold('halo', event)}
             onMouseUp={(event) => { if (event.button !== 2) return; clearCaretColorArmTimer() }}
             onMouseLeave={clearCaretColorArmTimer}
+            data-secondary-press="action"
             onContextMenu={(event) => { event.preventDefault(); clearCaretColorArmTimer() }}
           ><span className="options-color-swatch-glyph fa-solid fa-square" aria-hidden="true" /></button>
 

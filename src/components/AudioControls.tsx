@@ -871,6 +871,7 @@ export const AudioControls = memo(function AudioControls({
           data-tooltip="Left-click: rewind 20%. Right-click: previous song. Hold: scrub back, crossing into the previous song."
           aria-label="Rewind or previous song"
           onClick={() => { void handleSeekActivate(-1) }}
+          data-secondary-press="action"
           onContextMenu={handleSeekContextMenu}
           onPointerDown={(e) => handleSeekPointerDown(e, -1)}
           onPointerUp={(e) => handleSeekPointerUp(e, -1)}
@@ -889,6 +890,7 @@ export const AudioControls = memo(function AudioControls({
           aria-label="Favourite or skip current song"
           aria-pressed={currentSong?.priority === 0}
           onClick={() => { void handleFavoriteLeft() }}
+          data-secondary-press="action"
           onContextMenu={handleFavoriteContextMenu}
           onPointerDown={handleFavPointerDown}
           onPointerUp={(e) => { void handleFavPointerUp(e) }}
@@ -903,6 +905,7 @@ export const AudioControls = memo(function AudioControls({
           data-tooltip="Left-click: forward 20%. Right-click: next song. Hold: scrub forward, crossing into the next song."
           aria-label="Fast forward or next song"
           onClick={() => { void handleSeekActivate(1) }}
+          data-secondary-press="action"
           onContextMenu={handleSeekContextMenu}
           onPointerDown={(e) => handleSeekPointerDown(e, 1)}
           onPointerUp={(e) => handleSeekPointerUp(e, 1)}
@@ -1010,6 +1013,7 @@ export const AudioControls = memo(function AudioControls({
                 aria-label={PLAYLIST_SLOT_THEMES[slot]}
                 aria-pressed={isActive}
                 onClick={() => { void handleSlotLeftClick(slot) }}
+                data-secondary-press="action"
                 onContextMenu={(e) => { void handleSlotContextMenu(e, slot) }}
                 onPointerDown={(e) => handleSlotPointerDown(e, slot)}
                 onPointerUp={(e) => { void handleSlotPointerUp(e, slot) }}

@@ -21,10 +21,10 @@
 //
 // The app has real right-click semantics nearly everywhere -- rename, close,
 // archive, the adventure. A secondary press is a DIFFERENT GESTURE here, and
-// it should never read as an activation of the control it lands on. Trying to
-// un-stick the browser's state after the fact would be treating the symptom;
-// what is actually wrong is that the styling asked the browser to infer a
-// gesture it does not model the way this app means it.
+// the browser cannot tell whether the control it landed on means anything by
+// it. Trying to un-stick the browser's state after the fact would be treating
+// the symptom; what is actually wrong is that the styling asked the browser to
+// infer a gesture it does not model the way this app means it.
 //
 // So the app says it instead. `:active` appears nowhere in the stylesheets:
 // with nothing selecting on it, Chromium's stuck state has nothing to style,
@@ -55,6 +55,61 @@
 // bitten by (see CLAUDE.md on sanitizeMenu): add a `[data-pressed]` rule for
 // a new control, forget the list, and the control silently never looks
 // pressed. Derived from the CSS, that cannot happen.
+
+// ## What a secondary press is allowed to look like
+//
+// The first version of this refused to mark a secondary press at all, which
+// read correctly for the many buttons where a right-click means nothing --
+// and wrongly for every button where it means something, which is a lot of
+// them here. The predicate was never "which mouse button"; it is **does this
+// control do anything with this gesture**, and only the control knows.
+//
+// Three ways to find out, at press time:
+//
+// 1. Ask the `contextmenu` event: `defaultPrevented` says truthfully that
+//    something handled it. But Chromium on WINDOWS fires that event on mouse
+//    UP, so the feedback would arrive after the gesture on the primary
+//    platform, and at a different moment on each OS.
+// 2. Read React's fiber props for an `onContextMenu`. Internal API, and it
+//    cannot tell a real handler from one that only suppresses the menu.
+// 3. Have the control say so.
+//
+// Only (3) survives, so `SECONDARY_PRESS_ATTRIBUTE` is that declaration --
+// and it is required at EVERY `onContextMenu` site, `"none"` included, so a
+// site cannot be merely undecided. That is enforced by
+// `pressTracking.contract.test.ts`, which parses the JSX rather than
+// grepping it, because the alternative is the hand-maintained list this
+// codebase keeps being bitten by (CLAUDE.md, on `sanitizeMenu`): wire a new
+// right-click action, forget the attribute, and the control silently stops
+// acknowledging half its gestures.
+
+/**
+ * Declares what a SECONDARY (right) press on this control means.
+ *
+ * - `"action"` -- it does something, so it gets the pressed look.
+ * - `"none"` -- it only suppresses the native menu, or nothing at all. No
+ *   pressed look: an empty gesture must read as empty.
+ *
+ * Required alongside every `onContextMenu`, and may be computed where the
+ * handler is (`cond ? 'action' : 'none'`) -- what the test forbids is the
+ * absence of a decision, not a conditional one.
+ *
+ * Read with `closest()`, because a press lands on a pill's inner span.
+ */
+export const SECONDARY_PRESS_ATTRIBUTE = 'data-secondary-press'
+const SECONDARY_PRESS_SELECTOR = `[${SECONDARY_PRESS_ATTRIBUTE}]`
+
+/**
+ * What a secondary press on this element means, taking the NEAREST
+ * declaration -- an inner `"none"` shadows an outer `"action"`, which is not
+ * a nicety: a note-list row is right-click-actionable and its save/close/
+ * archive buttons sit inside it and deliberately swallow the gesture. Reading
+ * "is there an `action` anywhere above me" would light exactly those.
+ */
+function secondaryPressMeaning(target: EventTarget | null): string | null {
+  if (!(target instanceof Element)) return null
+  return target.closest(SECONDARY_PRESS_SELECTOR)?.getAttribute(SECONDARY_PRESS_ATTRIBUTE) ?? null
+}
 
 /**
  * An ATTRIBUTE, not a class, and that is not cosmetic.
@@ -195,9 +250,15 @@ export function installPressTracking(): void {
   installed = true
 
   window.addEventListener('pointerdown', (event) => {
-    // The PRIMARY button only. This one line is the whole fix: a secondary
-    // press is a different gesture and never looks like an activation.
-    if (event.button !== 0) return
+    if (event.button === 0) {
+      markChain(event.target)
+      return
+    }
+    // A secondary press acknowledges itself only where the control declared
+    // that it means something. Every other button (middle, back, forward)
+    // has no gesture in this app and gets nothing.
+    if (event.button !== 2) return
+    if (secondaryPressMeaning(event.target) !== 'action') return
     markChain(event.target)
   }, { capture: true })
 
@@ -224,5 +285,43 @@ export function installPressTracking(): void {
   window.addEventListener('keyup', (event) => {
     if (!ACTIVATION_KEYS.has(event.key)) return
     clearAll()
+  }, { capture: true })
+
+  if (import.meta.env.DEV) installUndeclaredSecondaryPressWarning()
+}
+
+/**
+ * The half of the contract a parser cannot see.
+ *
+ * `pressTracking.contract.test.ts` proves that every `onContextMenu` in the
+ * JSX made a decision, which is most of the app -- but right-press behaviour
+ * can also be wired through `onMouseDown`, and three controls do exactly that
+ * (the snapshot timeline, the present-state circle, the sound-level readout).
+ * Those declare it from the hook that wires the behaviour, which is where it
+ * belongs; this is what says so when a fourth one does not.
+ *
+ * The signal is a `contextmenu` somebody CALLED `preventDefault()` on, from
+ * an element with no declaration above it at all. `"none"` is silent, which
+ * is the point -- a declared non-gesture is a decision, not a gap.
+ *
+ * Read after the dispatch rather than during it: a capture listener sees
+ * `defaultPrevented` as false because the handler has not run yet, and a
+ * bubble listener never runs at all for the handlers that `stopPropagation`.
+ * A microtask queued from capture reads the finished event.
+ *
+ * Dev only, and `contextmenu` is a rare event, so it costs nothing anywhere.
+ */
+function installUndeclaredSecondaryPressWarning(): void {
+  window.addEventListener('contextmenu', (event) => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    queueMicrotask(() => {
+      if (!event.defaultPrevented || secondaryPressMeaning(target) !== null) return
+      console.warn(
+        `[pressTracking] a right-click was handled on an element with no ${SECONDARY_PRESS_ATTRIBUTE}, `
+        + `so it will never look pressed. Declare "action" (or "none") where the behaviour is wired.`,
+        target,
+      )
+    })
   }, { capture: true })
 }

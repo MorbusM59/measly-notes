@@ -165,6 +165,7 @@ export function TagBar({ tabs, persistenceReady, activeNoteId, identityNoteId, n
             // switch rather than a one-way door the reader has to find another
             // way out of.
             onClick={toggleSuggestedTagsExpanded}
+            data-secondary-press="action"
             onContextMenu={(event: MouseEvent<HTMLButtonElement>) => {
               event.preventDefault()
               if (!identityNoteId) return
@@ -188,6 +189,7 @@ export function TagBar({ tabs, persistenceReady, activeNoteId, identityNoteId, n
         {isSuggestedTagsExpanded ? (
           <div
             className={`tabbar-tabs-scroll-shell${suggestedTagsCanScrollLeft ? ' fade-left' : ''}${suggestedTagsCanScrollRight ? ' fade-right' : ''}`}
+            data-secondary-press="action"
             onContextMenu={(event) => {
               event.preventDefault()
               toggleSuggestedTagsExpanded()
@@ -221,6 +223,7 @@ export function TagBar({ tabs, persistenceReady, activeNoteId, identityNoteId, n
           <>
             <div
               className="tabbar-tag-input"
+              data-secondary-press="action"
               onContextMenu={(event) => {
                 event.preventDefault()
                 toggleSuggestedTagsExpanded()
@@ -289,6 +292,7 @@ export function TagBar({ tabs, persistenceReady, activeNoteId, identityNoteId, n
                           }}
                           onDrop={(event) => handleTagDrop(event, index)}
                           onClick={() => handleTagChipClick(tagName)}
+                          data-secondary-press="action"
                           onContextMenu={(event) => handleTagContextMenu(event, tagName)}
                           onMouseLeave={() => handleTagChipMouseLeave(tagName)}
                           data-tooltip={deletePrimedTagName === tagName ? 'Click again to delete or move cursor away to cancel' : 'Click to arm deletion, right-click to rename'}

@@ -84,6 +84,11 @@ export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) 
       onPointerUp,
       onPointerLeave,
       onPointerCancel: onPointerLeave,
+      // The whole gesture is a right press, so it must look pressed for one
+      // (see `shared/pressTracking.ts`). Declared in the bundle rather than
+      // at the call site because it is a property of this behaviour, and
+      // because the source-level check cannot see through a `{...spread}`.
+      'data-secondary-press': 'action' as const,
     },
   }
 }

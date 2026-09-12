@@ -224,6 +224,7 @@ export function AccordionSection({
         <summary
           className={`sidebar-options-section-heading${headingClassName ? ` ${headingClassName}` : ''}`}
           onClick={handleClick}
+          data-secondary-press="action"
           onContextMenu={handleContextMenu}
         >
           <span

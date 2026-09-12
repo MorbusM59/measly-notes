@@ -396,6 +396,7 @@ export function ChapterBar({
                       onMouseDown={isInteractionDisabled ? undefined : (event) => onChapterPillMouseDown(event, chapter.chapterNoteId)}
                       onMouseUp={isInteractionDisabled ? undefined : (event) => onChapterPillMouseUp(event, chapter.chapterNoteId)}
                       onMouseLeave={isInteractionDisabled ? undefined : () => onChapterPillMouseLeave(chapter.chapterNoteId)}
+                      data-secondary-press={isInteractionDisabled ? 'none' : 'action'}
                       onContextMenu={isInteractionDisabled ? undefined : onChapterPillContextMenu}
                       data-tooltip={isGhost ? `${label} (archived)` : label}
                     >

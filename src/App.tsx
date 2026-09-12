@@ -1405,6 +1405,7 @@ const NoteListItem = memo(function NoteListItem({
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
+      data-secondary-press="action"
       onContextMenu={handleContextMenu}
       tabIndex={0}
     >
@@ -1434,6 +1435,7 @@ const NoteListItem = memo(function NoteListItem({
                   onClick={handleSaveClick}
                   onMouseDown={(event) => event.stopPropagation()}
                   onMouseUp={(event) => event.stopPropagation()}
+                  data-secondary-press="none"
                   onContextMenu={(event) => event.stopPropagation()}
                 >
                   <span className="fa-solid fa-floppy-disk" aria-hidden="true" />
@@ -1450,6 +1452,7 @@ const NoteListItem = memo(function NoteListItem({
                   onClick={handleCloseClick}
                   onMouseDown={(event) => event.stopPropagation()}
                   onMouseUp={(event) => event.stopPropagation()}
+                  data-secondary-press="none"
                   onContextMenu={(event) => event.stopPropagation()}
                 >
                   <span className="fa-solid fa-xmark" aria-hidden="true" />
@@ -1468,6 +1471,7 @@ const NoteListItem = memo(function NoteListItem({
                   onClick={handleArchiveClick}
                   onMouseDown={(event) => event.stopPropagation()}
                   onMouseUp={(event) => event.stopPropagation()}
+                  data-secondary-press="none"
                   onContextMenu={(event) => event.stopPropagation()}/>
               </div>
 
@@ -1481,6 +1485,7 @@ const NoteListItem = memo(function NoteListItem({
                   onClick={handleTrashClick}
                   onMouseDown={(event) => event.stopPropagation()}
                   onMouseUp={(event) => event.stopPropagation()}
+                  data-secondary-press="none"
                   onContextMenu={(event) => event.stopPropagation()}/>
               </div>
             </>
@@ -9646,6 +9651,7 @@ ${markdownHtml}
                       data-tooltip={label}
                       aria-label={label}
                       onClick={mode === 'options' ? toggleSidebarOptionsMenu : () => handleViewModeButtonClick(mode)}
+                      data-secondary-press={mode === 'trash' || mode === 'find' ? 'action' : 'none'}
                       onContextMenu={
                         mode === 'trash'
                           ? activeSection?.handleTrashViewButtonContextMenu
@@ -9765,6 +9771,7 @@ ${markdownHtml}
                             type="button"
                             className={`find-hit-item${isInView ? ' is-in-view' : ''}`}
                             onClick={() => getActiveSection()?.handleJumpToDocumentFindHit(hit)}
+                            data-secondary-press="action"
                             onContextMenu={(event) => {
                               event.preventDefault()
                               getActiveSection()?.replaceDocumentFindHit(hit)
@@ -10182,6 +10189,7 @@ ${markdownHtml}
                 <div className="date-filter-rail" aria-label="Date filters">
                   <div
                     className="date-filter-line"
+                    data-secondary-press="action"
                     onContextMenu={handleMonthRowContextMenu}
                   >
                     {FILTER_MONTHS.map((month) => (
@@ -10190,6 +10198,7 @@ ${markdownHtml}
                         type="button"
                         className={`date-filter-chip${selectedMonths.has(month) ? ' is-active' : ''}`}
                         onClick={(event) => handleMonthToggle(month, event)}
+                        data-secondary-press="action"
                         onContextMenu={(event) => event.preventDefault()}
                       >
                         {month}
@@ -10198,6 +10207,7 @@ ${markdownHtml}
                   </div>
                   <div
                     className="date-filter-line"
+                    data-secondary-press="action"
                     onContextMenu={handleYearRowContextMenu}
                   >
                     {FILTER_YEARS.map((year) => (
@@ -10206,6 +10216,7 @@ ${markdownHtml}
                         type="button"
                         className={`date-filter-chip${selectedYears.has(year) ? ' is-active' : ''}`}
                         onClick={(event) => handleYearToggle(year, event)}
+                        data-secondary-press="action"
                         onContextMenu={(event) => event.preventDefault()}
                       >
                         {year === 'older' ? 'Older' : year}
@@ -10306,6 +10317,7 @@ ${markdownHtml}
                     }
                     aria-pressed={guideSectionId !== null || adventureSectionId !== null}
                     onClick={() => void handleHelpGuideToggle()}
+                    data-secondary-press="action"
                     onContextMenu={(event) => {
                       event.preventDefault()
                       void handleHelpGuideContextMenu()
@@ -10384,6 +10396,7 @@ ${markdownHtml}
                   <div
                     className="editor-section-divider"
                     onMouseDown={handleDividerMouseDown(editorSections[index - 1].id, entry.id)}
+                    data-secondary-press="action"
                     onContextMenu={handleDividerContextMenu(editorSections[index - 1].id, entry.id)}
                     data-tooltip="Drag to resize -- right-click to split evenly"
                   />

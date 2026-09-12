@@ -5659,6 +5659,7 @@ export function CM6Editor({
         ref={scrollbarTrackRef}
         className="thockdown-scroll-track"
         onMouseDown={handleTrackMouseDown}
+        data-secondary-press="action"
         onContextMenu={handleTrackContextMenu}
       >
         <div
@@ -5833,6 +5834,7 @@ export function CM6Editor({
             className="absolute"
             style={{ top: halfLineHeightPx, left: immersiveScrollColumnLeftPx, width: cellWidthPx, height: immersiveTrackRows * lineHeightPx, zIndex: 11 }}
             onMouseDown={handleGridTrackMouseDown}
+            data-secondary-press="action"
             onContextMenu={handleTrackContextMenu}
           />
         </>
@@ -5953,6 +5955,7 @@ export function CM6Editor({
                   cursor: 'pointer',
                 }}
                 onClick={() => handleGutterFlagClick(row.line)}
+                data-secondary-press="action"
                 onContextMenu={(event) => handleGutterFlagContextMenu(row.line, event)}
               >
                 {flag ? (flag.severity === 'warning' ? '!' : '?') : ''}
@@ -5992,6 +5995,7 @@ export function CM6Editor({
                 color: 'var(--color-editor-edit-text)',
               }}
               onClick={() => requestFlagJump('up', topFlagArrowElRef.current)}
+              data-secondary-press="action"
               onContextMenu={(event) => handleGutterFlagContextMenu(reviewGutterEdgeLines.topLine, event)}
             >
               <span className="fa-solid fa-up-long" aria-hidden="true" />
@@ -6016,6 +6020,7 @@ export function CM6Editor({
                 color: 'var(--color-editor-edit-text)',
               }}
               onClick={() => requestFlagJump('down', bottomFlagArrowElRef.current)}
+              data-secondary-press="action"
               onContextMenu={(event) => handleGutterFlagContextMenu(reviewGutterEdgeLines.bottomLine, event)}
             >
               <span className="fa-solid fa-down-long" aria-hidden="true" />

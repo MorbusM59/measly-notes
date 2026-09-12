@@ -67,6 +67,14 @@ export interface HoldToAdjustHandlers {
   onPointerUp: (event: ReactPointerEvent) => void
   onPointerCancel: (event: ReactPointerEvent) => void
   onContextMenu: (event: ReactMouseEvent) => void
+  /**
+   * A right press IS a gesture here (it raises), so the control has to look
+   * pressed for one -- see `shared/pressTracking.ts`. Declared in the bundle
+   * rather than at the call site because it is a property of this behaviour,
+   * not of whoever mounts it: every consumer gets it, and the source-level
+   * check cannot see through a `{...spread}` to ask for it.
+   */
+  'data-secondary-press': 'action'
 }
 
 interface ActiveHold {
@@ -203,5 +211,6 @@ export function useHoldToAdjust(options: HoldToAdjustOptions): HoldToAdjustHandl
     onPointerUp: handlePointerUp,
     onPointerCancel: handlePointerCancel,
     onContextMenu: handleContextMenu,
+    'data-secondary-press': 'action',
   }
 }
