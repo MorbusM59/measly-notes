@@ -152,6 +152,7 @@ Principles for every UI decision in this space:
 3. **Absence teaches boundaries.** The absence of a tag control on a section is a lesson. Don't soften a deliberate restriction with a "helpful" shortcut that blurs it.
 4. **One obvious path, escape hatches second.** Retrieve → assemble → close sidebar is the highway. Power moves (split panes, named sections, tag-order editing) stay available but must never compete for the beginner's attention.
 5. **Never explain in-app what layout could have shown.** Explanatory text in the UI is a design failure that's been paid for in prose. The User Guide exists for depth; the interface itself should be self-evident.
+6. **A hidden gesture never duplicates a visible control.** Where a row shows Archive and Trash buttons, a right-press-hold that archives and deletes is not a convenience — it is the same two actions with no affordance, so a stray right-click files a note away and the user goes looking for it. The gesture belongs exactly where the buttons cannot go: the Category and Archive **tree cards**, which have no room for them. Stated once, in `noteRightPressAction` (`editorSection/useNoteProtectionActions.ts`), and read both by the row that declares whether a right press means anything and by the handler that acts on it — the two cannot disagree. The exception proves the rule: *restoring* stays available on every layout, because no view renders a restore button, so the quick right-click is not a duplicate of anything.
 
 ---
 

@@ -24,10 +24,12 @@ function sample(direction: -1 | 1, elapsedSec: number, maxImpact = CURSOR_CLICK_
 }
 
 describe('the confirmation twitch', () => {
-  it('is half as long as the click response it borrows its shape from', () => {
+  it('runs at the click response\'s own duration, not a fraction of it', () => {
+    // Pinned because it was HALF, and the halving was dropped by feel rather
+    // than by reasoning -- exactly the kind of decision that drifts back.
     for (const speedX of [0, 0.25, 0.6, 0.9, 1]) {
       const clickDurationSec = resolveCursorClickDurationSec(speedX)
-      expect(cursorTwitchDurationSec(clickDurationSec)).toBeCloseTo(clickDurationSec / 2, 10)
+      expect(cursorTwitchDurationSec(clickDurationSec)).toBeCloseTo(clickDurationSec, 10)
     }
   })
 

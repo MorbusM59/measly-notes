@@ -422,13 +422,15 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 ### [Right-Click-Hold Note Gesture](#right-click-hold-note-gesture)
 
 > **Where?**
-> Right-click and hold anywhere on a note row in the sidebar.
+> Right-click and hold on a note card in the Category or Archive tree.
 
-*A one-handed alternative to the Archive/Trash icons, with a built-in confirm step.*
+*How to archive or delete a note in the tree views, where the cards have no room for buttons.*
 
-- A quick tap (released fast) on an already-archived or already-deleted note immediately restores it to normal — see [Restoring from Archive or Trash]($#restoring-from-archive-or-trash).
-- Holding past a short threshold arms the row (it highlights) for its next action: archive for a normal note, straight to permanent deletion for one that's already archived or deleted.
-- A left-click on the armed row confirms the action; moving the pointer away cancels it.
+- **Only in the tree views.** The flat lists — Date, Find, Trash — put an Archive and a Trash button on every row, and those are the way to do it there. A hidden gesture doing the same thing beside a visible button is a way to file a note away by accident and then wonder where it went, so it isn't offered.
+- Holding past a short threshold arms the card (it highlights) for its next action: archive for a normal note, straight to permanent deletion for one that's already archived.
+- A left-click on the armed card confirms the action; moving the pointer away cancels it.
+- The halo of the [animated cursor]($HELP§SETTINGS#mouse-options), if you have it on, fills as you hold and is full at the moment the gesture arms.
+- A quick tap (released fast) on an already-archived or already-deleted note restores it instead, and that one works **everywhere**, tree or list — see [Restoring from Archive or Trash]($#restoring-from-archive-or-trash). No view has a restore button, so it is the only way back.
 
 ### [Restoring from Archive or Trash](#restoring-from-archive-or-trash)
 

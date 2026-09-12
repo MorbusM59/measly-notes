@@ -177,7 +177,16 @@ export function cursorClickReleaseTailDurationSec(skew: number, durationSec: num
 // rather than as a confirmation of the first.
 
 /**
- * Half the click response's, so the excursion reads as a spike.
+ * The click response's own duration.
+ *
+ * It was half of it -- a twitch should read as a spike, and half was the
+ * reasoned guess. In the app it read as clipped rather than sharp, so the
+ * halving was dropped by FEEL, which is the only instrument that can settle
+ * a question like this one.
+ *
+ * The seam stays even though it now returns its argument: this is where that
+ * decision lives, and inlining it would leave the next person to re-derive
+ * that the two durations are equal on purpose rather than by omission.
  *
  * Not floored away from zero: the speed slider at its maximum means "no
  * animation", and a twitch of zero length should be exactly that rather than

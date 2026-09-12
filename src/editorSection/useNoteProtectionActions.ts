@@ -48,6 +48,47 @@ export interface UseNoteProtectionActionsOptions {
  * tag-mutation + external-file-save actions they trigger. Extracted
  * verbatim from App.tsx with zero behavior change.
  */
+/**
+ * What a right press on a note row means -- the ONE statement of it, read
+ * both by the row (to declare whether the gesture does anything at all, see
+ * `shared/pressTracking.ts`) and by the handler below (to decide what to do).
+ *
+ * `hasOwnActionButtons` is the whole reason this takes an argument. The flat
+ * note rows (Date, Find, Trash) carry archive and trash BUTTONS; the tree
+ * cards (Category, Archive) do not, because there is no room for them. A
+ * right-press-hold that archives or deletes is therefore a duplicate control
+ * on one and the only control on the other -- and the duplicate is worse than
+ * redundant: it has no visible affordance, so a stray right-click on a row
+ * that already offers buttons could file a note away with nothing to say it
+ * had happened.
+ *
+ * Restoring is not in that bargain and stays everywhere: no view renders a
+ * restore BUTTON, so the quick right-click is the only way back out of Trash
+ * or the Archive.
+ */
+export type NoteRightPressAction = 'arm-removal' | 'restore'
+
+export function noteRightPressAction(
+  note: NoteSummary | undefined,
+  hasOwnActionButtons: boolean,
+): NoteRightPressAction | null {
+  if (!note || isExternalNote(note)) return null
+
+  const isNoteDeleted = isDeletedNote(note)
+  const isNoteArchived = isArchivedNote(note)
+  // Chapters have no tag life of their own -- archiving/deleting only makes
+  // sense on their parent note (see the tag-bar identity comment in
+  // useSectionTabs.ts). The exception is a chapter already sitting detached
+  // (Trash, or an Archive-tree fold-out row): it needs the same quick
+  // right-click restore a deleted/archived note gets, so only block chapters
+  // that are not currently protected either way. A plain, unprotected chapter
+  // can still surface here via search results.
+  if (isChapterOnlyNote(note) && !isNoteDeleted && !isNoteArchived) return null
+
+  if (isNoteDeleted || isNoteArchived) return 'restore'
+  return hasOwnActionButtons ? null : 'arm-removal'
+}
+
 export function useNoteProtectionActions({
   notes,
   activeNoteId,
@@ -494,35 +535,27 @@ export function useNoteProtectionActions({
     }
   }, [activeNoteId, cancelPendingSave, clearNoteArmTimer, externalNoteOriginalTextByIdRef, setNotes, setActiveNoteId, setActiveNoteText, onNotePermanentlyDeleted])
 
-  const handleNoteRightPressStart = useCallback((noteId: string, event: MouseEvent<HTMLDivElement>) => {
+  const handleNoteRightPressStart = useCallback((
+    noteId: string,
+    event: MouseEvent<HTMLDivElement>,
+    hasOwnActionButtons: boolean,
+  ) => {
     event.preventDefault()
 
     const summary = notes.find((note) => note.id === noteId)
-    const isExternal = summary ? isExternalNote(summary) : false
-    const isNoteDeleted = summary ? isDeletedNote(summary) : false
-    const isNoteArchived = summary ? isArchivedNote(summary) : false
-    // Chapters have no tag life of their own -- archiving/deleting only
-    // makes sense on their parent note (see the tag-bar identity comment in
-    // useSectionTabs.ts). The exception is a chapter already sitting
-    // detached (Trash, or an Archive-tree fold-out row): it needs the same
-    // quick-right-click restore gesture a deleted/archived note gets, so
-    // only block chapters that aren't currently protected either way. A
-    // plain, unprotected chapter can still surface here via search results.
-    const isChapterOnly = summary ? isChapterOnlyNote(summary) : false
-    if (isExternal || (isChapterOnly && !isNoteDeleted && !isNoteArchived)) {
-      return
-    }
+    const action = noteRightPressAction(summary, hasOwnActionButtons)
+    if (!action) return
 
     clearNoteArmTimer()
-    if (isNoteArchived || isNoteDeleted) {
+    if (action === 'restore') {
       setPrimedNoteActionState(null)
     } else {
       setPrimedNoteActionState({ noteId, action: 'archive' })
     }
 
-    const quickReleaseAction: ProtectedQuickReleaseAction = isNoteDeleted
-      ? 'remove-deleted'
-      : (isNoteArchived ? 'remove-archived' : null)
+    const quickReleaseAction: ProtectedQuickReleaseAction = action === 'restore'
+      ? (summary && isDeletedNote(summary) ? 'remove-deleted' : 'remove-archived')
+      : null
 
     // No hold at all in trash mode -- the gesture means something else
     // there, so there is nothing to arm and nothing to acknowledge.

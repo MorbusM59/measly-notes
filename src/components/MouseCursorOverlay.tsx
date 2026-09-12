@@ -498,7 +498,19 @@ export function MouseCursorOverlay({
       ensureLoopRunning()
     }
 
-    function handleWindowMouseDown(event: MouseEvent) {
+    // POINTER events, not mouse events -- `mousedown`/`mouseup` are
+    // compatibility events, synthesized after the pointer event and
+    // suppressed entirely when anything cancels it. Several controls here do
+    // (the music transport buttons, the snapshot timeline's hold-to-branch),
+    // and on every one of them the click response was simply dead: no
+    // deformation on press, and therefore no twitch on a completed hold
+    // either, since the twitch reverses whatever the press is doing and there
+    // was nothing to reverse. A window-capture listener runs before the
+    // target's own handler, so the cancel cannot reach it.
+    //
+    // Second time this exact substitution was needed; `shared/pressTracking.ts`
+    // carries the same note and the measurement behind it.
+    function handleWindowMouseDown(event: PointerEvent) {
       if (event.button !== 0 && event.button !== 2) return
       const direction: -1 | 1 = event.button === 0 ? -1 : 1
 
@@ -511,7 +523,7 @@ export function MouseCursorOverlay({
       ensureLoopRunning()
     }
 
-    function handleWindowMouseUp(event: globalThis.MouseEvent) {
+    function handleWindowMouseUp(event: PointerEvent) {
       if (event.button !== 0 && event.button !== 2) return
       const press = clickPressRef.current
       if (!press || press.button !== event.button) return
@@ -594,16 +606,16 @@ export function MouseCursorOverlay({
     // the cursor keeps tracking regardless of what happens further down.
     window.addEventListener('pointermove', handlePointerMove, { passive: true, capture: true })
     document.addEventListener('mouseleave', handleDocumentMouseLeave)
-    window.addEventListener('mousedown', handleWindowMouseDown, { capture: true })
-    window.addEventListener('mouseup', handleWindowMouseUp, { capture: true })
+    window.addEventListener('pointerdown', handleWindowMouseDown, { capture: true })
+    window.addEventListener('pointerup', handleWindowMouseUp, { capture: true })
     window.addEventListener('resize', updateCanvasResolution)
     watchDpr()
 
     return () => {
       window.removeEventListener('pointermove', handlePointerMove, { capture: true })
       document.removeEventListener('mouseleave', handleDocumentMouseLeave)
-      window.removeEventListener('mousedown', handleWindowMouseDown, { capture: true })
-      window.removeEventListener('mouseup', handleWindowMouseUp, { capture: true })
+      window.removeEventListener('pointerdown', handleWindowMouseDown, { capture: true })
+      window.removeEventListener('pointerup', handleWindowMouseUp, { capture: true })
       window.removeEventListener('resize', updateCanvasResolution)
       stopWatchingDpr()
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)

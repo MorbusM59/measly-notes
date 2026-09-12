@@ -244,6 +244,7 @@ import {
 } from './textures/types'
 import { TEXTURE_ALGORITHM_VERSION, TEXTURE_REPEAT_TILE_SIZE, useTextureSurface } from './textures/useTextureSurface'
 import { armHold, HOLD_CONFIRM_MS } from './shared/holdTiming'
+import { noteRightPressAction } from './editorSection/useNoteProtectionActions'
 
 const NEW_NOTE_TEMPLATE = '# '
 const FALLBACK_NEW_NOTE_TITLE = 'Untitled'
@@ -1227,7 +1228,7 @@ type NoteListItemProps = {
   onArchiveClick?: (noteId: string) => void
   onTrashClick?: (noteId: string) => void
   primedAction?: NotePrimedAction | null
-  onRightPressStart: (noteId: string, event: MouseEvent<HTMLDivElement>) => void
+  onRightPressStart: (noteId: string, event: MouseEvent<HTMLDivElement>, hasOwnActionButtons: boolean) => void
   onRightPressEnd: (noteId: string, event: MouseEvent<HTMLDivElement>) => void
   onMouseLeave?: (noteId: string) => void
   isTrashMode?: boolean
@@ -1333,6 +1334,13 @@ const NoteListItem = memo(function NoteListItem({
     ? `$ ${chapterParentTitle ?? createdDate}`
     : null
 
+  // The flat rows carry archive/trash BUTTONS and the tree cards have no room
+  // for them, which is the whole of what decides whether a right press on a
+  // row means anything -- see `noteRightPressAction`, which both this and the
+  // handler read, so the declaration and the behaviour cannot disagree.
+  const hasActionColumns = !isTreeVariant
+  const rightPressAction = noteRightPressAction(note, hasActionColumns)
+
   const handleMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 2) return
 
@@ -1340,8 +1348,8 @@ const NoteListItem = memo(function NoteListItem({
     event.stopPropagation()
     if (isExternal) return
 
-    onRightPressStart(note.id, event)
-  }, [note.id, onRightPressStart, isExternal])
+    onRightPressStart(note.id, event, hasActionColumns)
+  }, [note.id, onRightPressStart, isExternal, hasActionColumns])
 
   const handleMouseUp = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 2) return
@@ -1370,7 +1378,6 @@ const NoteListItem = memo(function NoteListItem({
     event.dataTransfer.setData(NOTE_DRAG_MIME_TYPE, serializeNoteDragPayload({ noteId: note.id, sourceSectionId: null }))
   }, [note.id])
 
-  const hasActionColumns = !isTreeVariant
   const isArchived = isArchivedNote(note)
   const isDeleted = isDeletedNote(note)
   // A chapter can now carry its own 'archived'/'deleted' protected tag (see
@@ -1409,7 +1416,7 @@ const NoteListItem = memo(function NoteListItem({
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
-      data-secondary-press="action"
+      data-secondary-press={rightPressAction ? 'action' : 'none'}
       onContextMenu={handleContextMenu}
       tabIndex={0}
     >
@@ -1522,7 +1529,7 @@ type CategoryTreeViewProps = {
   onSelect: (noteId: string) => void
   onPrimedLeftClick: (noteId: string) => void
   primedNoteActionById: Map<string, NotePrimedAction>
-  onNoteRightPressStart: (noteId: string, event: MouseEvent<HTMLDivElement>) => void
+  onNoteRightPressStart: (noteId: string, event: MouseEvent<HTMLDivElement>, hasOwnActionButtons: boolean) => void
   onNoteRightPressEnd: (noteId: string, event: MouseEvent<HTMLDivElement>) => void
   onNoteMouseLeave?: (noteId: string) => void
   /** Archive mode only: a non-self-archived parent's own archived chapters, keyed by parent note id -- see App.tsx's own doc comment on the memo that builds this. Undefined in Category mode, where chapters never appear at all. */
@@ -9741,7 +9748,7 @@ ${markdownHtml}
                               onTrashClick={activeSection?.handleTrashClick}
                               isTrashMode={sidebarMode === 'trash'}
                               primedAction={activeSection?.primedNoteActionById.get(note.id) ?? null}
-                              onRightPressStart={(noteId, event) => getActiveSection()?.handleNoteRightPressStart(noteId, event)}
+                              onRightPressStart={(noteId, event, hasOwnActionButtons) => getActiveSection()?.handleNoteRightPressStart(noteId, event, hasOwnActionButtons)}
                               onRightPressEnd={(noteId, event) => getActiveSection()?.handleNoteRightPressEnd(noteId, event)}
                               onMouseLeave={activeSection?.handleNoteMouseLeave}
                             />
@@ -10086,7 +10093,7 @@ ${markdownHtml}
                           onSelect={handleSelectNote}
                           onPrimedLeftClick={(noteId) => getActiveSection()?.handlePrimedNoteLeftClick(noteId)}
                           primedNoteActionById={activeSection?.primedNoteActionById ?? EMPTY_MAP}
-                          onNoteRightPressStart={(noteId, event) => getActiveSection()?.handleNoteRightPressStart(noteId, event)}
+                          onNoteRightPressStart={(noteId, event, hasOwnActionButtons) => getActiveSection()?.handleNoteRightPressStart(noteId, event, hasOwnActionButtons)}
                           onNoteRightPressEnd={(noteId, event) => getActiveSection()?.handleNoteRightPressEnd(noteId, event)}
                           onNoteMouseLeave={activeSection?.handleNoteMouseLeave}
                           archivedChaptersByParentId={sidebarMode === 'archive' ? archivedChaptersByParentId : undefined}
