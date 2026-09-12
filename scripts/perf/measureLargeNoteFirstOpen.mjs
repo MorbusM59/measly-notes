@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Where the time goes when a LARGE, NEVER-OPENED note is first opened --
 // the imported-2MB-file case.
 //
@@ -7,57 +8,99 @@
 // attributes that remainder, because "chunk the mount" is only the right fix
 // if the mount is where the time is.
 //
-// KNOW WHAT THIS INSTRUMENT CANNOT SEE. Against `dev:browser` the browser
-// mock (src/dev/installBrowserMockBridges.ts) serializes its ENTIRE store to
+// TWO TARGETS, ONE MEASUREMENT. The measurement body below runs against
+// whichever page it is handed; only the launch differs. That is deliberate --
+// the whole point of having both targets is that their numbers are
+// comparable, which two separately-maintained scripts would not stay.
+//
+//   --target=electron  (default) a real electron-builder-packaged build.
+//                      The trustworthy one. Needs xvfb:
+//                        xvfb-run -a node scripts/perf/measureLargeNoteFirstOpen.mjs
+//                      (or `npm run perf:first-open`, which wraps that).
+//   --target=browser   `npm run dev:browser` under Chromium. Fast, and USEFUL
+//                      ONLY FOR ORDERING.
+//
+// KNOW WHAT THE BROWSER TARGET CANNOT SEE. The browser mock
+// (src/dev/installBrowserMockBridges.ts) serializes its ENTIRE store to
 // localStorage on every write -- including the multi-megabyte note under
 // test -- so `persistStore`/`setItem`/`clone` show up as a large, note-size-
 // PROPORTIONAL cost that does not exist in the real app, where the same
 // writes are SQLite over IPC. Measured at ~177ms of 1131ms on a 1953KB note,
 // plus an unknown share of the unattributable `(program)` bucket. Because it
-// scales with the note, it cannot be subtracted as a constant.
+// scales with the note, it cannot be subtracted as a constant. So read that
+// target's ORDERING of app-level frames, and take absolute numbers and
+// native buckets from the packaged target only.
 //
-// So read this script's ORDERING of app-level frames, and do not trust its
-// absolute numbers or its native buckets. For a real answer, run it against
-// a packaged Electron build.
-//
-// Run: node scripts/perf/measureLargeNoteFirstOpen.mjs [targetChars]
+// Flags:
+//   --target=electron|browser
+//   --chars=2000000     size of the synthetic note
+//   --skip-build        (electron only) reuse the existing
+//                       release/<version>/linux-unpacked build instead of
+//                       repackaging first. A stale package silently measures
+//                       old code, so omit this unless you just built.
 
-import { chromium } from 'playwright'
+import { chromium, _electron } from 'playwright'
+import { spawnSync } from 'node:child_process'
+import { existsSync, rmSync, mkdtempSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import {
+  REPO_ROOT,
   startDevServer,
   waitForAppReady,
   startCdpJsProfile,
 } from './perfHarness.mjs'
 
-const TARGET_CHARS = Number(process.argv[2] ?? 2_000_000)
 const PORT = 5251
 
-const server = await startDevServer(PORT)
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
-const page = await browser.newPage()
+function parseArgs(argv) {
+  const args = { target: 'electron', chars: 2_000_000, skipBuild: false }
+  for (const raw of argv) {
+    const [key, value] = raw.replace(/^--/, '').split('=')
+    if (key === 'skip-build') args.skipBuild = true
+    else if (key === 'target') args.target = value
+    else if (key === 'chars') args.chars = Number(value)
+    else throw new Error(`unknown flag "${raw}"`)
+  }
+  if (!['electron', 'browser'].includes(args.target)) {
+    throw new Error(`--target must be electron|browser, got "${args.target}"`)
+  }
+  if (!Number.isFinite(args.chars) || args.chars <= 0) {
+    throw new Error(`--chars must be a positive number, got "${args.chars}"`)
+  }
+  return args
+}
 
-try {
-  await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' })
-  await waitForAppReady(page).catch(() => {})
+// ---------------------------------------------------------------- the measurement
+
+/** Seeds a large note WITHOUT opening it, reloads, then profiles the first open. */
+async function measureFirstOpen(page, targetChars, label) {
   await page.waitForTimeout(1500)
 
-  const kb = await page.evaluate(async (targetChars) => {
+  const { noteId, kb } = await page.evaluate(async (chars) => {
     let text = '# Imported Report\n\n'
-    while (text.length < targetChars) {
+    while (text.length < chars) {
       text += `## Section ${text.length}\n\nA paragraph of prose long enough to wrap in a real editor window.\n\n- alpha\n- beta\n\n`
     }
     const note = await window.thockdownNotes.createNote({ title: 'Imported Report' })
     await window.thockdownNotes.saveNote({ id: note.id, text })
-    return Math.round(text.length / 1024)
-  }, TARGET_CHARS)
+    return { noteId: note.id, kb: Math.round(text.length / 1024) }
+  }, targetChars)
   console.log(`note: ${kb} KB, never opened`)
 
-  await page.reload({ waitUntil: 'networkidle' })
+  await page.reload()
+  await waitForAppReady(page).catch(() => {})
   await page.waitForTimeout(2000)
+
+  // By id, not .first() -- a real packaged run starts on a fresh database and
+  // therefore seeds the User Guide family, so the first row is not ours.
+  const row = page.locator(`.note-list-item[data-note-id="${noteId}"]`)
+  await row.waitFor({ timeout: 30000 })
 
   const profile = await startCdpJsProfile(page)
   const started = Date.now()
-  await page.locator('.note-list-item').first().click()
+  await row.click()
   await page.waitForFunction(
     () => (document.querySelector('.cm-content')?.textContent ?? '').includes('Imported Report'),
     null,
@@ -67,12 +110,92 @@ try {
   await page.waitForTimeout(500)
   const { totalMs, entries } = await profile.stop()
 
+  console.log(`\ntarget=${label} chars=${targetChars}`)
   console.log(`time to first text: ${firstText}ms   (profiled ${Math.round(totalMs)}ms total)\n`)
   console.log('self time, hottest first:')
-  for (const row of entries.slice(0, 20)) {
-    console.log(`  ${String(Math.round(row.ms)).padStart(6)}ms  ${row.name}`)
+  for (const entry of entries.slice(0, 20)) {
+    console.log(`  ${String(Math.round(entry.ms)).padStart(6)}ms  ${entry.name}`)
   }
-} finally {
-  await browser.close()
-  server.stop?.()
 }
+
+// ---------------------------------------------------------------- the two launches
+
+async function runBrowser(args) {
+  const server = await startDevServer(PORT)
+  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+  try {
+    const page = await browser.newPage()
+    await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' })
+    await waitForAppReady(page).catch(() => {})
+    await measureFirstOpen(page, args.chars, 'browser-mock')
+  } finally {
+    await browser.close()
+    server.stop?.()
+  }
+}
+
+function buildPackagedApp() {
+  console.error('[perf] building renderer + electron main/preload (npx vite build)...')
+  let result = spawnSync('npx', ['vite', 'build'], { cwd: REPO_ROOT, stdio: 'inherit' })
+  if (result.status !== 0) throw new Error(`vite build failed with exit code ${result.status}`)
+
+  console.error('[perf] packaging via electron-builder (--linux dir)...')
+  result = spawnSync('npx', ['electron-builder', '--linux', 'dir'], { cwd: REPO_ROOT, stdio: 'inherit' })
+  if (result.status !== 0) throw new Error(`electron-builder failed with exit code ${result.status}`)
+}
+
+/** Same DB-readiness race as measureInputLagElectronPackaged.mjs -- see that file. */
+async function waitForDatabaseReady(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  let lastError
+  while (Date.now() < deadline) {
+    try {
+      await page.evaluate(() => window.thockdownNotes.listNotes())
+      return
+    } catch (err) {
+      lastError = err
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+  }
+  throw new Error(`Electron app's database never became ready: ${lastError}`)
+}
+
+async function runElectron(args) {
+  const pkg = JSON.parse(await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'))
+  const executablePath = path.join(REPO_ROOT, 'release', pkg.version, 'linux-unpacked', pkg.name)
+
+  if (!args.skipBuild) buildPackagedApp()
+  else if (!existsSync(executablePath)) {
+    throw new Error(`--skip-build was given but no existing package was found at ${executablePath} -- run once without --skip-build first.`)
+  }
+  if (!existsSync(executablePath)) {
+    throw new Error(`packaged executable not found at ${executablePath} after build`)
+  }
+  if (!process.env.DISPLAY) {
+    console.error('[perf] WARNING: $DISPLAY is unset -- this needs `xvfb-run -a` (the npm script does it).')
+  }
+
+  // A packaged build's data root is app.getPath('userData')/data, and userData
+  // derives from --user-data-dir, so a fresh temp dir is an isolated, empty DB.
+  const userDataDir = mkdtempSync(path.join(tmpdir(), 'thockdown-first-open-perf-'))
+  console.error(`[perf] launching the packaged app at ${executablePath}...`)
+  const app = await _electron.launch({
+    executablePath,
+    args: ['--no-sandbox', `--user-data-dir=${userDataDir}`],
+    cwd: REPO_ROOT,
+  })
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await waitForDatabaseReady(page, 20000)
+    await measureFirstOpen(page, args.chars, 'electron-packaged')
+  } finally {
+    await app.close()
+    rmSync(userDataDir, { recursive: true, force: true })
+  }
+}
+
+const args = parseArgs(process.argv.slice(2))
+if (args.target === 'browser') await runBrowser(args)
+else await runElectron(args)
+process.exit(0)
