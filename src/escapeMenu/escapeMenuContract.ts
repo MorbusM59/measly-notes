@@ -120,6 +120,15 @@ export interface EscapeMenuMode {
   /** Everything that does not belong in the ring -- see above. */
   status?: EscapeMenuModeStatus
   /**
+   * A MODE AND ITS RING ARE ONE UNIT, and this is one half of saying so.
+   *
+   * The other half is not a field at all: while a mode owns a slot, the ring
+   * is UP by derivation (App.tsx's `isEscapeRingUp`), not because whoever
+   * opened it also remembered to raise it. That direction matters on
+   * restore, where a persisted overlay comes back and a transient "the
+   * reader raised it" flag does not -- an overlay that could exist without
+   * its ring is half a mode, occupying a slot with nothing in it.
+   *
    * What it means for this mode when the RING GOES DOWN -- Escape, or a cell
    * that does not keep the menu open.
    *

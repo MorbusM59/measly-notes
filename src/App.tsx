@@ -5986,14 +5986,14 @@ ${markdownHtml}
    * plays over a blank editor, not on top of somebody's note. Mirrors
    * openGuideViewHere in every respect except the last step.
    *
-   * Raises the escape-hold ring on the way in, because the ring IS the
-   * game's interface: arriving at a blank editor and having to discover a
-   * hold gesture would be a puzzle the game never intended to pose.
+   * Does NOT raise the ring itself. A mode owning a slot IS an open ring
+   * (SectionEditorArea.tsx), so raising it here would be a second, weaker
+   * copy of that rule -- and the copy is what let a reload restore the
+   * overlay without it.
    */
   const openAdventureViewHere = useCallback(async () => {
     const handle = getActiveSection()
     if (!openOverlayHere('adventure')) return
-    setIsEscapeHoldPanelOpen(true)
     await handle?.clearActiveNote().catch(() => undefined)
   }, [getActiveSection, openOverlayHere])
 
@@ -6058,6 +6058,28 @@ ${markdownHtml}
   // conditional or effect-based one would let the handler above read a stale
   // mode for a frame, which for a dismissal is a frame that matters.
   escapeMenuModeRef.current = escapeMenuContribution.activeMode
+
+  /**
+   * WHETHER THE RING IS UP -- the one answer, which everything asks.
+   *
+   * `isEscapeHoldPanelOpen` alone means "the reader raised it", and that is
+   * not the whole story: a mode owning a slot IS an open ring
+   * (escapeMenuContract.ts), because the ring is that mode's entire
+   * interface rather than a menu over something else. So a mode implies the
+   * ring, and the two are one unit.
+   *
+   * Reloading with the adventure up is what exposed the gap: the overlay is
+   * persisted and came back, the raised flag is transient session state and
+   * did not, so the slot returned occupied with nothing in it -- half a
+   * mode. Deriving it here rather than re-raising the flag on restore is the
+   * difference between the state being unrepresentable and it merely being
+   * fixed on one path.
+   *
+   * This cannot deadlock against the converse rule (lowering the ring runs
+   * the mode's onDismiss, which ends the mode): closing removes the mode in
+   * the same action, and the mode's absence is what lets the ring stay down.
+   */
+  const isEscapeRingUp = isEscapeHoldPanelOpen || escapeMenuContribution.activeMode !== null
 
   /**
    * The window control is a TOGGLE, and a toggle that is lit always goes out
@@ -9102,9 +9124,11 @@ ${markdownHtml}
           // EscapeHoldPanel.tsx), and this scheduled focus call -- deferred
           // via setTimeout+rAF, so it lands a moment later -- would
           // otherwise steal focus back into the editor out from under it,
-          // which reads to the panel as a genuine loss of focus and closes
-          // it entirely (see EscapeHoldPanel.tsx's handleRingBlur).
-          if (!isEscapeHoldPanelOpen) {
+          // leaving the ring up but unfocused (see EscapeHoldPanel.tsx's
+          // handleRingFocusOut, which only recovers focus that went nowhere
+          // -- focus stolen INTO the editor is a real destination and would
+          // not be given back).
+          if (!isEscapeRingUp) {
             sectionRegistryRef.current.get(targetSectionId)?.scheduleFocusEditorInEditMode()
           }
           return
@@ -9228,7 +9252,7 @@ ${markdownHtml}
           return
         }
 
-        if (isEscapeHoldPanelOpen) {
+        if (isEscapeRingUp) {
           if (!event.repeat) {
             escapeFreshCycleWhilePanelOpenRef.current = true
           }
@@ -9282,7 +9306,7 @@ ${markdownHtml}
         return
       }
 
-      if (isEscapeHoldPanelOpen) {
+      if (isEscapeRingUp) {
         event.preventDefault()
         return
       }
@@ -9309,7 +9333,7 @@ ${markdownHtml}
     editorSections,
     getActiveSection,
     handleEscapeHoldPanelClose,
-    isEscapeHoldPanelOpen,
+    isEscapeRingUp,
     isFindMode,
     isImmersiveMode,
     isReplaceMode,
@@ -9369,9 +9393,8 @@ ${markdownHtml}
       // into whichever section a click just activated and refocuses its
       // own top cell (EscapeHoldPanel.tsx), and this scheduled call would
       // otherwise steal focus back into that section's editor out from
-      // under it a moment later, reading to the panel as a genuine loss of
-      // focus and closing it.
-      if (isEscapeHoldPanelOpen) return
+      // under it a moment later, leaving the ring up but unfocused.
+      if (isEscapeRingUp) return
 
       event.preventDefault()
       targetSection.scheduleFocusEditorInEditMode()
@@ -9379,7 +9402,7 @@ ${markdownHtml}
 
     window.addEventListener('mousedown', onMouseDownCapture, true)
     return () => window.removeEventListener('mousedown', onMouseDownCapture, true)
-  }, [getActiveSection, isAllowedNonEditorFocusTarget, isEscapeHoldPanelOpen])
+  }, [getActiveSection, isAllowedNonEditorFocusTarget, isEscapeRingUp])
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -10448,7 +10471,7 @@ ${markdownHtml}
                   spellCheckEditEnabled={spellCheckEnabled}
                   spellCheckRenderEnabled={spellCheckEnabled}
                   highlightSearchColor={highlightColors.search}
-                  isEscapeHoldPanelOpen={isEscapeHoldPanelOpen}
+                  isEscapeHoldPanelOpen={isEscapeRingUp}
                   onEscapeHoldPanelClose={handleEscapeHoldPanelClose}
                   onEscapeHoldCreateNote={createNote}
                   onEscapeHoldCreateChapter={activeSection?.handleCreateChapter ?? noopAsync}

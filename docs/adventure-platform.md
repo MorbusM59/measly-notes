@@ -107,6 +107,13 @@ that does not keep the menu open — otherwise left the slot occupied by an
 empty editor with the window control still lit: a view whose effects the
 player can see but which they cannot reach.
 
+And the ring cannot be missing while the game is up either: a mode owning a
+slot IS an open ring, derived rather than arranged by whoever opened it
+(`App.tsx`'s `isEscapeRingUp`). Reloading mid-game is what exposed the
+difference — the overlay is persisted and came back, "the reader raised the
+ring" is transient and did not, so the slot returned occupied with nothing
+in it.
+
 The converse holds too, and it is the same observation from the other side:
 **a note arriving in a slot lowers the ring.** In a note the text is the
 content and the ring is a menu over it; for a mode the ring *is* the content.

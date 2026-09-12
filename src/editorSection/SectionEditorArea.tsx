@@ -279,7 +279,10 @@ export function SectionEditorArea({
 
   // Gates both the escape-hold panel's own visibility and the shared
   // .editor-empty-state box's visibility below -- see the box's own render
-  // for why it's the same node either way.
+  // for why it's the same node either way. `isEscapeHoldPanelOpen` already
+  // accounts for a mode owning a slot (App.tsx's isEscapeRingUp); deriving
+  // that a second time here would give this component a private opinion
+  // about whether the ring is up, which is how Escape stopped closing it.
   const isEscapeHoldActive = isEscapeHoldPanelOpen && isSectionActive
   const isEmptyStateVisible = !activeNoteId || isEscapeHoldActive
 
