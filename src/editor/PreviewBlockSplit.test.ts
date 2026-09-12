@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   splitMarkdownIntoPreviewBlocks,
   splitMarkdownIntoPreviewBlocksIncremental,
+  splitPreviewBlockRangesProgressively,
+  restorePreviewBlockSplitCacheFromRanges,
   type PreviewBlockSplitCache,
 } from './PreviewBlockSplit'
 
@@ -464,5 +466,87 @@ describe('splitMarkdownIntoPreviewBlocksIncremental', () => {
 
   it.each([7, 99])('matches a full parse after every step of a long randomized edit sequence on a dense many-short-blocks corpus (seed %i)', (seed) => {
     runDenseFuzzSequence(seed, 350)
+  })
+})
+
+describe('splitPreviewBlockRangesProgressively', () => {
+  // The whole point of delivering the split in pieces is that the pieces add
+  // up to the same answer. A chunk boundary that lands inside a
+  // forward-unbounded construct would produce a WRONG block, not a late one,
+  // so this is a correctness test rather than a performance one -- and it is
+  // driven at a 3-line first chunk so that even these small corpora cross
+  // dozens of boundaries, which the production 256-line chunk never would.
+  function expectProgressiveMatchesFullParse(text: string, label: string) {
+    for (const firstChunkLines of [1, 3, 7, 64]) {
+      const ranges = [...splitPreviewBlockRangesProgressively(text, firstChunkLines)].flat()
+      const groundTruth = splitMarkdownIntoPreviewBlocksIncremental(text, null)
+      expect(ranges, `${label} @ firstChunkLines=${firstChunkLines}`).toEqual(groundTruth.ranges)
+      expect(
+        restorePreviewBlockSplitCacheFromRanges(text, ranges).blocks,
+        `${label} blocks @ firstChunkLines=${firstChunkLines}`,
+      ).toEqual(groundTruth.blocks)
+    }
+  }
+
+  it('tiles a document exactly, whatever the chunk size', () => {
+    expectProgressiveMatchesFullParse('', 'empty')
+    expectProgressiveMatchesFullParse('just one paragraph', 'single block')
+    expectProgressiveMatchesFullParse('# Title\n\nBody.\n\n## Next\n\nMore.\n\n', 'headings')
+  })
+
+  it('never cuts a forward-unbounded construct in half', () => {
+    // A fence long enough to span several chunks at every size tested, which
+    // is the case the last-range discard exists for.
+    const fenceBody = Array.from({ length: 40 }, (_, i) => `line ${i} inside the fence`).join('\n')
+    expectProgressiveMatchesFullParse(`Intro.\n\n\`\`\`js\n${fenceBody}\n\`\`\`\n\nAfter.\n`, 'long code fence')
+    expectProgressiveMatchesFullParse(`Intro.\n\n<div>\n${fenceBody}\n</div>\n\nAfter.\n`, 'long html block')
+    // An UNCLOSED fence swallows the rest of the document -- the extreme of
+    // the same hazard, where every window keeps producing one range.
+    expectProgressiveMatchesFullParse(`Intro.\n\n\`\`\`js\n${fenceBody}\n`, 'unclosed code fence')
+  })
+
+  it('respects the backward-dependent constructs the head buffer exists for', () => {
+    expectProgressiveMatchesFullParse('A paragraph\n===\n\nAnother paragraph\n---\n\nEnd.\n', 'setext headings')
+    expectProgressiveMatchesFullParse('A paragraph\n- interrupting list item\n- second\n\nEnd.\n', 'list interrupting a paragraph')
+    expectProgressiveMatchesFullParse(
+      '> quoted\n> lazily continued\nstill lazy\n\nOut.\n',
+      'lazy blockquote continuation',
+    )
+  })
+
+  it('carries document-wide definitions into every block, as the whole-document parse does', () => {
+    expectProgressiveMatchesFullParse(
+      'See [ref] and [^fn].\n\nMiddle paragraph.\n\n[ref]: https://example.com\n\n[^fn]: A footnote.\n',
+      'definitions below the blocks that reference them',
+    )
+  })
+
+  it('matches a full parse across randomized mixed-construct corpora', () => {
+    // A local generator rather than the incremental suite's: those helpers are
+    // scoped to that describe block, and the shapes that matter here are
+    // different anyway -- what stresses a CHUNK boundary is long constructs
+    // and dense short ones in the same document, not an edit sequence.
+    const makeRng = (seed: number) => () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed / 0x7fffffff
+    }
+    const pieces = (rng: () => number) => {
+      const out: string[] = []
+      for (let i = 0; i < 60; i += 1) {
+        const roll = rng()
+        if (roll < 0.3) out.push(`Paragraph ${i} with some filler words.`)
+        else if (roll < 0.45) out.push(`## Heading ${i}`)
+        else if (roll < 0.6) out.push(`- item a\n- item b\n- item c`)
+        else if (roll < 0.72) out.push(`\`\`\`js\nconst x = ${i}\nfor (;;) break\n\`\`\``)
+        else if (roll < 0.8) out.push(`> quoted ${i}\n> continued\nlazy tail`)
+        else if (roll < 0.88) out.push(`Setext ${i}\n===`)
+        else if (roll < 0.94) out.push(`[ref${i}]: https://example.com/${i}`)
+        else out.push(`| a | b |\n| - | - |\n| ${i} | ${i + 1} |`)
+      }
+      return `${out.join('\n\n')}\n`
+    }
+    for (const seed of [1, 7, 20260912]) {
+      expectProgressiveMatchesFullParse(pieces(makeRng(seed)), `mixed corpus seed ${seed}`)
+    }
   })
 })

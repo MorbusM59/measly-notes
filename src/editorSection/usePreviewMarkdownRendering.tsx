@@ -673,54 +673,67 @@ export function usePreviewMarkdownRendering({
    *     the text simply arrives, rather than appearing as raw source and
    *     then reflowing into formatted blocks.
    */
-  const [workerSplit, setWorkerSplit] = useState<PreviewBlockSplitCache | null>(null)
+  const [workerSplit, setWorkerSplit] = useState<{ cache: PreviewBlockSplitCache; isComplete: boolean } | null>(null)
   const splitState = useMemo(
     () => {
       const cache = splitCacheRef.current
       const start = typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-input-lag') === '1' ? performance.now() : 0
       const incremental = splitPreviewBlocksWithoutFullParse(splitSourceText, cache)
-      const resolved = incremental ?? (workerSplit?.text === splitSourceText ? workerSplit : null)
+      const fromWorker = workerSplit?.cache.text === splitSourceText ? workerSplit : null
+      const resolved = incremental ? { cache: incremental, isComplete: true } : fromWorker
       if (typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
         console.log('[preview-block-cache] usePreviewMarkdownRendering split', {
           renderedLength: splitSourceText.length,
           hasMatchingCache: cache?.text === splitSourceText,
           cacheTextLength: cache?.text.length,
           ranges: cache?.ranges.length,
-          source: incremental ? 'incremental' : resolved ? 'worker' : 'pending',
-          resultRanges: resolved?.ranges.length ?? 0,
+          source: incremental ? 'incremental' : fromWorker ? (fromWorker.isComplete ? 'worker' : 'worker-partial') : 'pending',
+          resultRanges: resolved?.cache.ranges.length ?? 0,
           elapsedMs: Number((performance.now() - start).toFixed(2)),
         })
       }
-      if (resolved) return { cache: resolved, isPending: false }
-      return { cache: { text: splitSourceText, ranges: [], blocks: [] } as PreviewBlockSplitCache, isPending: true }
+      if (resolved) return resolved
+      return { cache: { text: splitSourceText, ranges: [], blocks: [] } as PreviewBlockSplitCache, isComplete: false }
     },
     [splitSourceText, splitCacheRef, workerSplit],
   )
   const splitResult = splitState.cache
 
-  // The only producer of a full split. Asking for the text this render is
-  // pending on -- not for whatever the last effect saw -- so a note switched
-  // away from mid-parse simply stops being waited for.
+  /**
+   * The only producer of a full split, and the thing that keeps a partial one
+   * arriving.
+   *
+   * `isComplete` is the dependency rather than "is there anything yet",
+   * deliberately: an instalment must not tear this effect down and restart
+   * it, or the second instalment would arrive to a cancelled listener and the
+   * document would stop filling in halfway. It re-runs exactly twice per
+   * text -- once to ask, once when the answer is whole.
+   */
   useEffect(() => {
-    if (!splitState.isPending) return
+    if (splitState.isComplete) return
     let cancelled = false
-    void requestFullBlockSplit(splitSourceText).then((cache) => {
-      if (!cancelled) setWorkerSplit(cache)
+    void requestFullBlockSplit(splitSourceText, (partial) => {
+      if (!cancelled) setWorkerSplit({ cache: partial, isComplete: false })
+    }).then((cache) => {
+      if (!cancelled) setWorkerSplit({ cache, isComplete: true })
     })
     return () => { cancelled = true }
-  }, [splitState.isPending, splitSourceText])
+  }, [splitState.isComplete, splitSourceText])
 
   // Committed in an effect, not during the useMemo above, so this cache
   // update never happens during a render React might discard (Strict Mode's
   // double-invoke, an interrupted concurrent render) -- only once this
-  // result has actually become what's on screen. A PENDING result is never
-  // committed: it describes no blocks, and seeding the incremental path with
-  // it would make the next keystroke diff against a document it thinks is
-  // empty.
+  // result has actually become what's on screen.
+  //
+  // An INCOMPLETE result is never committed. It describes the top of the
+  // document and nothing below it, so the incremental path would diff the
+  // next keystroke against a document it believes ends early, and
+  // buildPersistedBlockMap would write that truncation to the database as if
+  // it were the note's map.
   useLayoutEffect(() => {
-    if (splitState.isPending) return
+    if (!splitState.isComplete) return
     splitCacheRef.current = splitResult
-  }, [splitState.isPending, splitResult, splitCacheRef])
+  }, [splitState.isComplete, splitResult, splitCacheRef])
   const previewBlocks = splitResult.blocks
 
   // Mirrors `previewBlocks` for callbacks below that resolve a block index

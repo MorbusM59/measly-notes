@@ -77,7 +77,7 @@ describe('the block split contract', () => {
   it('keeps every full-document parse off the main thread', () => {
     const offenders: string[] = []
     for (const file of sourceFiles(SRC)) {
-      const path = relative(SRC, file).replaceAll('\\', '/')
+      const path = relative(SRC, file).split('\\').join('/')
       if (ALLOWED.has(path)) continue
       for (const imported of totalSplitImports(file)) {
         offenders.push(`${path} imports ${imported}`)

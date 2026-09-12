@@ -27,8 +27,23 @@
 
 import { splitMarkdownIntoPreviewBlocksIncremental, restorePreviewBlockSplitCacheFromRanges, type PreviewBlockSplitCache } from './PreviewBlockSplit'
 import type { PreviewBlockSplitRangesMessage, PreviewBlockSplitRequest } from './blockSplitMessages'
+import type { PersistedPreviewBlockCache } from '../shared/noteLifecycle'
 
-type Pending = { resolve: (cache: PreviewBlockSplitCache) => void; text: string }
+type PartialListener = (cache: PreviewBlockSplitCache) => void
+
+type Pending = {
+  resolve: (cache: PreviewBlockSplitCache) => void
+  text: string
+  /** Accumulated across this id's delta messages; tiles the document only at `done`. */
+  ranges: PersistedPreviewBlockCache['ranges']
+  /**
+   * A SET, because the answer is shared by text (below) while the wish to
+   * watch it arrive is per-caller: the background prewarm only wants the
+   * finished map, the preview pane wants every instalment, and whichever of
+   * them asked first must not decide that for the other.
+   */
+  listeners: Set<PartialListener>
+}
 
 let worker: Worker | null | undefined
 let nextRequestId = 1
@@ -38,18 +53,27 @@ const pending = new Map<number, Pending>()
 // itself -- and parsing a 2MB document twice because two of them asked is
 // the same waste whether it happens on a worker or here.
 const inFlightByText = new Map<string, Promise<PreviewBlockSplitCache>>()
+/** The same entries as `pending`, keyed the way a joining caller can find them. */
+const pendingByText = new Map<string, Pending>()
 
 function ensureWorker(): Worker | null {
   if (worker !== undefined) return worker
   try {
     const created = new Worker(new URL('./blockSplit.worker.ts', import.meta.url), { type: 'module' })
     created.onmessage = (event: MessageEvent<PreviewBlockSplitRangesMessage>) => {
-      const { id, ranges } = event.data
+      const { id, ranges, done } = event.data
       const request = pending.get(id)
       if (!request) return
+      if (ranges.length > 0) request.ranges.push(...ranges)
+      const cache = restorePreviewBlockSplitCacheFromRanges(request.text, request.ranges)
+      if (!done) {
+        for (const listener of request.listeners) listener(cache)
+        return
+      }
       pending.delete(id)
+      pendingByText.delete(request.text)
       inFlightByText.delete(request.text)
-      request.resolve(restorePreviewBlockSplitCacheFromRanges(request.text, ranges))
+      request.resolve(cache)
     }
     created.onerror = () => {
       // One failure retires the worker for the session: whatever broke it is
@@ -59,6 +83,7 @@ function ensureWorker(): Worker | null {
         request.resolve(splitMarkdownIntoPreviewBlocksIncremental(request.text, null))
       }
       pending.clear()
+      pendingByText.clear()
       inFlightByText.clear()
       worker = null
     }
@@ -75,17 +100,37 @@ function ensureWorker(): Worker | null {
  * Always resolves -- there is no error path a caller could do anything useful
  * with, since the answer is derivable here too, just slowly.
  */
-export function requestFullBlockSplit(text: string): Promise<PreviewBlockSplitCache> {
+export function requestFullBlockSplit(
+  text: string,
+  /**
+   * Called with every instalment as it lands -- ranges from the top of the
+   * document down, each covering more of it than the last. Never called
+   * after the promise resolves; the resolved value is the same cache the
+   * final instalment would have carried.
+   */
+  onPartial?: PartialListener,
+): Promise<PreviewBlockSplitCache> {
   const active = ensureWorker()
   if (!active) return Promise.resolve(splitMarkdownIntoPreviewBlocksIncremental(text, null))
 
   const alreadyRunning = inFlightByText.get(text)
-  if (alreadyRunning) return alreadyRunning
+  if (alreadyRunning) {
+    if (onPartial) pendingByText.get(text)?.listeners.add(onPartial)
+    return alreadyRunning
+  }
 
   const id = nextRequestId
   nextRequestId += 1
+  const entry: Pending = {
+    resolve: () => {},
+    text,
+    ranges: [],
+    listeners: onPartial ? new Set([onPartial]) : new Set(),
+  }
   const answer = new Promise<PreviewBlockSplitCache>((resolve) => {
-    pending.set(id, { resolve, text })
+    entry.resolve = resolve
+    pending.set(id, entry)
+    pendingByText.set(text, entry)
     const request: PreviewBlockSplitRequest = { id, text }
     active.postMessage(request)
   })

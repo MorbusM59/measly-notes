@@ -18,7 +18,7 @@
 // construction and needs to be synchronous to keep a keystroke's result in
 // the same frame as the keystroke. Only the cold full parse comes here.
 
-import { splitMarkdownIntoPreviewBlocksIncremental } from './PreviewBlockSplit'
+import { splitPreviewBlockRangesProgressively } from './PreviewBlockSplit'
 import type { PreviewBlockSplitRangesMessage, PreviewBlockSplitRequest } from './blockSplitMessages'
 
 const workerScope = self as DedicatedWorkerGlobalScope
@@ -28,7 +28,18 @@ workerScope.onmessage = (event: MessageEvent<PreviewBlockSplitRequest>) => {
   // Ranges only. The blocks are text slices, and shipping a second copy of
   // the whole document back across the boundary would cost more than the
   // line split that reconstitutes them on the other side.
-  const { ranges } = splitMarkdownIntoPreviewBlocksIncremental(text, null)
-  const response: PreviewBlockSplitRangesMessage = { id, ranges }
-  workerScope.postMessage(response)
+  //
+  // Sent in order and in pieces, smallest first: a reader waiting on a 2MB
+  // note should get the top of it in a few milliseconds rather than the
+  // whole of it in seconds. See splitPreviewBlockRangesProgressively for why
+  // a chunk discards its own last range and why the windows double.
+  for (const ranges of splitPreviewBlockRangesProgressively(text)) {
+    const partial: PreviewBlockSplitRangesMessage = { id, ranges, done: false }
+    workerScope.postMessage(partial)
+  }
+  // A separate terminal message rather than a flag on the last chunk: the
+  // generator cannot know which chunk is last until it has tried to produce
+  // another, and an empty message costs nothing next to the parse.
+  const complete: PreviewBlockSplitRangesMessage = { id, ranges: [], done: true }
+  workerScope.postMessage(complete)
 }

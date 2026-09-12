@@ -122,6 +122,90 @@ function fullSplit(text: string): PreviewBlockSplitCache {
   return { text, ranges, blocks: materializeBlocks(ranges, lines) }
 }
 
+/**
+ * How many lines the first chunk parses. ~50 blocks' worth of ordinary prose
+ * -- enough to fill any screen, small enough to be imperceptible.
+ */
+export const PROGRESSIVE_FIRST_CHUNK_LINES = 256
+
+/**
+ * The same split, delivered in order and in pieces, so a reader can start
+ * reading the top of a large document while the rest of it is still being
+ * parsed.
+ *
+ * Each `yield` is a run of finished ranges, absolute to the document, and
+ * concatenating every yield gives ranges that tile it exactly -- the same
+ * invariant `rangesAreContiguous` checks for the incremental path.
+ *
+ * ## Why a chunk may not keep its own last range
+ *
+ * A cut between lines is not a safe boundary. CommonMark has
+ * forward-UNBOUNDED constructs -- an unclosed fence, an HTML block -- that
+ * absorb lines until their own terminator, however far away that is. So each
+ * non-final chunk DISCARDS the last range its parse produced and the next
+ * chunk restarts at that range's first line.
+ *
+ * That is sufficient, and the reason is worth stating because it is not
+ * obvious: any construct that reaches the cut has, by definition, swallowed
+ * every line from where it began to the end of the window, so its parse
+ * produced exactly one range covering all of that -- which IS the last range,
+ * and is therefore the one discarded. A construct that does not reach the cut
+ * is fully contained and correctly resolved.
+ *
+ * The backward direction needs nothing extra, for the reason the incremental
+ * path's head buffer already documents: CommonMark's backward dependency (a
+ * setext underline, a list interrupting a paragraph) never reaches further
+ * than one line and never crosses a top-level boundary -- and each chunk
+ * begins at exactly such a boundary, inductively back to line 1.
+ *
+ * ## Why the windows double
+ *
+ * Re-materializing blocks costs O(document) each time the consumer receives
+ * one, so a fixed chunk size would make the whole delivery O(n^2) in the
+ * number of chunks. Doubling makes it O(log n) deliveries and O(n) total
+ * work, while keeping the FIRST one small, which is the only one a reader is
+ * waiting on.
+ *
+ * A window that produces nothing to keep is a single construct spanning all
+ * of it; the window grows until the construct ends or the document does.
+ * That is a scan extending until the information is present -- it always
+ * terminates, at the end of the document -- not a retry hoping for a
+ * different answer.
+ */
+export function* splitPreviewBlockRangesProgressively(
+  text: string,
+  /** Overridden only by tests, to drive many boundaries through small corpora. */
+  firstChunkLines: number = PROGRESSIVE_FIRST_CHUNK_LINES,
+): Generator<PreviewBlockRange[], void, undefined> {
+  const lines = text.split('\n')
+  const totalLines = lines.length
+  let startLine0 = 0
+  let chunkLines = Math.max(1, firstChunkLines)
+
+  while (startLine0 < totalLines) {
+    let windowLines = chunkLines
+    for (;;) {
+      const endLine0 = Math.min(totalLines, startLine0 + windowLines)
+      const isFinalWindow = endLine0 >= totalLines
+      const windowLineCount = endLine0 - startLine0
+      const windowRanges = parseStructuralRanges(
+        lines.slice(startLine0, endLine0).join('\n'),
+        windowLineCount,
+      )
+      // The final window has no cut after it, so nothing there is suspect.
+      const keep = isFinalWindow ? windowRanges : windowRanges.slice(0, -1)
+      if (keep.length === 0) {
+        windowLines *= 2
+        continue
+      }
+      yield keep.map((range) => shiftRange(range, startLine0))
+      startLine0 += keep[keep.length - 1].rangeEndLine1
+      break
+    }
+    chunkLines *= 2
+  }
+}
+
 /** Schema version for PersistedPreviewBlockCache. Bump whenever the range/block shape changes. */
 export const PREVIEW_BLOCK_CACHE_VERSION = 1
 
@@ -254,11 +338,19 @@ function shiftRange(range: PreviewBlockRange, delta: number): PreviewBlockRange 
  * ranges fail the contiguity check (defensive; should never trigger given
  * the above, but a broken splice is worse than a slow one).
  */
-/** Throwaway diagnostic for the incremental-split fallback investigation -- see CM6Editor.tsx's debugInputLagEnabled. */
-function debugLogFallback(reason: string): void {
+/**
+ * Why the incremental path declined -- see CM6Editor.tsx's
+ * debugInputLagEnabled.
+ *
+ * It used to say "-> fullSplit", which stopped being true when this function
+ * started returning null instead of parsing: the caller now asks the worker.
+ * Naming the wrong consequence in a diagnostic is worse than naming none,
+ * because the diagnostic is what someone reads instead of the code.
+ */
+function debugLogDeclined(reason: string): void {
   if (typeof window === 'undefined') return
   if (window.localStorage.getItem('thockdown:debug-input-lag') !== '1') return
-  console.log(`[input-lag] splitMarkdownIntoPreviewBlocksIncremental -> fullSplit (${reason})`)
+  console.log(`[input-lag] splitPreviewBlocksWithoutFullParse -> null, worker will parse (${reason})`)
 }
 
 export function splitPreviewBlocksWithoutFullParse(
@@ -266,7 +358,7 @@ export function splitPreviewBlocksWithoutFullParse(
   previous: PreviewBlockSplitCache | null,
 ): PreviewBlockSplitCache | null {
   if (previous === null) {
-    debugLogFallback('no previous cache')
+    debugLogDeclined('no previous cache')
     return null
   }
   if (text === previous.text) {
@@ -314,7 +406,7 @@ export function splitPreviewBlocksWithoutFullParse(
 
   if (headKeepCount === 0 && tailKeepCount === 0) {
     // Nothing safely reusable -- not worth the bookkeeping over a full reparse.
-    debugLogFallback(`headKeepCount=0 tailKeepCount=0 (headRangeCount=${headRangeCount} tailRangeCount=${tailRangeCount} totalRanges=${ranges.length} prefixLen=${prefixLen} suffixLen=${suffixLen})`)
+    debugLogDeclined(`headKeepCount=0 tailKeepCount=0 (headRangeCount=${headRangeCount} tailRangeCount=${tailRangeCount} totalRanges=${ranges.length} prefixLen=${prefixLen} suffixLen=${suffixLen})`)
     return null
   }
 
@@ -354,7 +446,7 @@ export function splitPreviewBlocksWithoutFullParse(
     const probeRanges = parseStructuralRanges(probeLines.join('\n'), probeLines.length)
     const boundaryHolds = probeRanges.some((range) => range.rangeEndLine1 === windowLines.length)
     if (!boundaryHolds) {
-      debugLogFallback(`tail-boundary probe failed (windowLines=${windowLines.length})`)
+      debugLogDeclined(`tail-boundary probe failed (windowLines=${windowLines.length})`)
       return null
     }
     windowRanges = probeRanges
@@ -368,26 +460,26 @@ export function splitPreviewBlocksWithoutFullParse(
   const nextRanges = [...headRanges, ...windowRanges, ...tailRanges]
 
   if (!rangesAreContiguous(nextRanges, newLines.length)) {
-    debugLogFallback(`ranges not contiguous (windowLines=${windowLines.length} headKeepCount=${headKeepCount} tailKeepCount=${tailKeepCount})`)
-    debugLogFallback(`  headRanges[0]: ${JSON.stringify(headRanges[0])}`)
-    debugLogFallback(`  headRanges tail: ${JSON.stringify(headRanges.slice(-2))}`)
-    debugLogFallback(`  windowRanges: ${JSON.stringify(windowRanges)}`)
-    debugLogFallback(`  tailRanges head: ${JSON.stringify(tailRanges.slice(0, 2))}`)
-    debugLogFallback(`  tailRanges last: ${JSON.stringify(tailRanges[tailRanges.length - 1])}`)
-    debugLogFallback(`  windowStartLine1=${windowStartLine1} windowEndLine1=${windowEndLine1} totalLines=${newLines.length}`)
+    debugLogDeclined(`ranges not contiguous (windowLines=${windowLines.length} headKeepCount=${headKeepCount} tailKeepCount=${tailKeepCount})`)
+    debugLogDeclined(`  headRanges[0]: ${JSON.stringify(headRanges[0])}`)
+    debugLogDeclined(`  headRanges tail: ${JSON.stringify(headRanges.slice(-2))}`)
+    debugLogDeclined(`  windowRanges: ${JSON.stringify(windowRanges)}`)
+    debugLogDeclined(`  tailRanges head: ${JSON.stringify(tailRanges.slice(0, 2))}`)
+    debugLogDeclined(`  tailRanges last: ${JSON.stringify(tailRanges[tailRanges.length - 1])}`)
+    debugLogDeclined(`  windowStartLine1=${windowStartLine1} windowEndLine1=${windowEndLine1} totalLines=${newLines.length}`)
     // Pinpoint the exact adjacent pair that breaks tiling, scanning the
     // assembled array directly rather than guessing from the head/tail/
     // window pieces in isolation.
     for (let i = 1; i < nextRanges.length; i += 1) {
       if (nextRanges[i].rangeStartLine1 !== nextRanges[i - 1].rangeEndLine1 + 1) {
-        debugLogFallback(`  gap/overlap at index ${i}: prev=${JSON.stringify(nextRanges[i - 1])} next=${JSON.stringify(nextRanges[i])}`)
+        debugLogDeclined(`  gap/overlap at index ${i}: prev=${JSON.stringify(nextRanges[i - 1])} next=${JSON.stringify(nextRanges[i])}`)
       }
     }
     if (nextRanges[0]?.rangeStartLine1 !== 1) {
-      debugLogFallback(`  first range doesn't start at line 1: ${JSON.stringify(nextRanges[0])}`)
+      debugLogDeclined(`  first range doesn't start at line 1: ${JSON.stringify(nextRanges[0])}`)
     }
     if (nextRanges[nextRanges.length - 1]?.rangeEndLine1 !== newLines.length) {
-      debugLogFallback(`  last range doesn't reach totalLines: ${JSON.stringify(nextRanges[nextRanges.length - 1])}`)
+      debugLogDeclined(`  last range doesn't reach totalLines: ${JSON.stringify(nextRanges[nextRanges.length - 1])}`)
     }
     return null
   }
