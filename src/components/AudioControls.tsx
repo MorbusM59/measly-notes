@@ -28,9 +28,13 @@ import {
 import { useHoldToAdjust } from '../shared/useHoldToAdjust'
 import { useNonPassiveWheel } from '../shared/useNonPassiveWheel'
 import { musicPlayerService, MissingFileError, resolveSeekPress } from '../sound/MusicPlayerService'
+import { armHold, HOLD_COMMIT_MS } from '../shared/holdTiming'
 
-// Duration (ms) a pointer must be held to trigger the "arm for clear" action.
-const HOLD_THRESHOLD_MS = 700
+// Purging a song from the library and clearing a playlist slot are both
+// "I know this is not undoable" -- the app's COMMIT threshold
+// (`shared/holdTiming.ts`), which also announces the completion in the
+// cursor. Was 700ms of its own.
+const HOLD_THRESHOLD_MS = HOLD_COMMIT_MS
 
 // Fade-in duration (seconds) for playback resumed from the previous
 // session (see the initialWasPlaying restore below) -- starts at silence
@@ -122,7 +126,7 @@ export const AudioControls = memo(function AudioControls({
   // Position to seek to once the restored song's first playback begins.
   const pendingSeekSecRef = useRef<number | null>(null)
 
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdTimerRef = useRef<(() => void) | null>(null)
   const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const seekIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isSeekScrubbing = useRef(false)
@@ -434,14 +438,14 @@ export const AudioControls = memo(function AudioControls({
   }, [handleSkipRight])
 
   // Held right-click on the favorability button = purge song.
-  const favHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const favHoldTimerRef = useRef<(() => void) | null>(null)
   const favPrimedRef = useRef(false)
 
   const handleFavPointerDown = useCallback((event: React.PointerEvent) => {
     if (event.button !== 2) return
     event.preventDefault()
     favPrimedRef.current = false
-    favHoldTimerRef.current = setTimeout(() => {
+    favHoldTimerRef.current = armHold(() => {
       favPrimedRef.current = true
     }, HOLD_THRESHOLD_MS)
   }, [])
@@ -449,7 +453,7 @@ export const AudioControls = memo(function AudioControls({
   const handleFavPointerUp = useCallback(async (event: React.PointerEvent) => {
     if (event.button !== 2) return
     if (favHoldTimerRef.current) {
-      clearTimeout(favHoldTimerRef.current)
+      favHoldTimerRef.current()
       favHoldTimerRef.current = null
     }
     if (favPrimedRef.current && currentSong) {
@@ -474,6 +478,9 @@ export const AudioControls = memo(function AudioControls({
   // the neighbouring song rather than stalling against the file boundary, so a
   // held rewind walks backwards through the tally continuously.
 
+  // Deliberately NOT one of holdTiming.ts's two thresholds: this is when a
+  // held seek starts REPEATING, not when a gesture completes. Nothing is
+  // confirmed at 200ms here, so there is nothing to acknowledge either.
   const SEEK_HOLD_DELAY_MS = 200
   const SEEK_INTERVAL_MS = 100
   const SEEK_HOLD_STEP = 0.05
@@ -678,7 +685,7 @@ export const AudioControls = memo(function AudioControls({
   const handleSlotPointerDown = useCallback((event: React.PointerEvent, slot: PlaylistSlot) => {
     if (event.button !== 2) return
     event.preventDefault()
-    holdTimerRef.current = setTimeout(() => {
+    holdTimerRef.current = armHold(() => {
       setPrimedSlot(slot)
     }, HOLD_THRESHOLD_MS)
   }, [])
@@ -686,7 +693,7 @@ export const AudioControls = memo(function AudioControls({
   const handleSlotPointerUp = useCallback(async (event: React.PointerEvent, slot: PlaylistSlot) => {
     if (event.button !== 2) return
     if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current)
+      holdTimerRef.current()
       holdTimerRef.current = null
     }
     if (primedSlot === slot) {
@@ -708,7 +715,7 @@ export const AudioControls = memo(function AudioControls({
 
   const handleSlotPointerLeave = useCallback((slot: PlaylistSlot) => {
     if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current)
+      holdTimerRef.current()
       holdTimerRef.current = null
     }
     if (primedSlot === slot) setPrimedSlot(null)

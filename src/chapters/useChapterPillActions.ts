@@ -3,9 +3,12 @@ import type { MouseEvent, MutableRefObject } from 'react'
 import type { ChapterEntry } from '../shared/chapters'
 import type { NoteSummary } from '../shared/noteLifecycle'
 import { applyProtectedTagDestination } from '../shared/protectedTagActions'
+import { armHold, HOLD_CONFIRM_MS } from '../shared/holdTiming'
 
 /** Matches the sidebar's own right-click-hold gesture (useNoteProtectionActions.ts's NOTE_RIGHT_CLICK_HOLD_MS) -- same duration, so the two gestures feel identical even though this one shows both options at once instead of escalating a single primed action. */
-const CHAPTER_PILL_SPLIT_HOLD_MS = 200
+// Splitting a pill is "I meant this one" -- the app's CONFIRM threshold
+// (`shared/holdTiming.ts`). Was 200ms of its own.
+const CHAPTER_PILL_SPLIT_HOLD_MS = HOLD_CONFIRM_MS
 
 export interface ChapterPillSplitArm {
   chapterNoteId: string
@@ -76,11 +79,11 @@ export function useChapterPillActions({
   startEditingChapterId,
 }: UseChapterPillActionsOptions): UseChapterPillActionsResult {
   const [splitArmedChapter, setSplitArmedChapter] = useState<ChapterPillSplitArm | null>(null)
-  const holdTimerRef = useRef<{ chapterNoteId: string; timeoutId: number } | null>(null)
+  const holdTimerRef = useRef<{ chapterNoteId: string; cancelHold: () => void } | null>(null)
 
   const clearHoldTimer = useCallback(() => {
     if (holdTimerRef.current !== null) {
-      window.clearTimeout(holdTimerRef.current.timeoutId)
+      holdTimerRef.current.cancelHold()
       holdTimerRef.current = null
     }
   }, [])
@@ -102,11 +105,11 @@ export function useChapterPillActions({
     if (event.button !== 2) return
     clearHoldTimer()
     const widthPx = event.currentTarget.getBoundingClientRect().width
-    const timeoutId = window.setTimeout(() => {
+    const cancelHold = armHold(() => {
       holdTimerRef.current = null
       setSplitArmedChapter({ chapterNoteId, widthPx })
     }, CHAPTER_PILL_SPLIT_HOLD_MS)
-    holdTimerRef.current = { chapterNoteId, timeoutId }
+    holdTimerRef.current = { chapterNoteId, cancelHold }
   }, [clearHoldTimer])
 
   const handleChapterPillMouseUp = useCallback((event: MouseEvent<HTMLDivElement>, chapterNoteId: string) => {

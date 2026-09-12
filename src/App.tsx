@@ -243,6 +243,7 @@ import {
   TEXTURE_VSTEPS_MAX,
 } from './textures/types'
 import { TEXTURE_ALGORITHM_VERSION, TEXTURE_REPEAT_TILE_SIZE, useTextureSurface } from './textures/useTextureSurface'
+import { armHold, HOLD_CONFIRM_MS } from './shared/holdTiming'
 
 const NEW_NOTE_TEMPLATE = '# '
 const FALLBACK_NEW_NOTE_TITLE = 'Untitled'
@@ -288,7 +289,10 @@ const DEFAULT_BORDER_ALPHA_PERCENT = 100
 const DEFAULT_BOX_SHADOW_ALPHA_PERCENT = 100
 const TEXTURE_PREVIEW_SURFACE: TextureSurfaceKey = 'appGrid'
 const SCROLL_TRACK_EDGE_GAP_PX = 3
-const COLOR_BUTTON_ARM_HOLD_MS = 300
+// Holding a swatch to copy its colour is "I meant this one" -- the app's
+// CONFIRM threshold (`shared/holdTiming.ts`), which also announces the
+// completion in the cursor. Was 300ms of its own.
+const COLOR_BUTTON_ARM_HOLD_MS = HOLD_CONFIRM_MS
 
 /** The font sizes that are remembered per size mode (see fontSizesByMode in App). */
 interface FontSizeSet {
@@ -1969,7 +1973,7 @@ function App() {
     return rgbaToHsva(seed)
   })
   const [caretHsvaDragState, setCaretHsvaDragState] = useState<HsvaDragState | null>(null)
-  const caretColorArmTimerRef = useRef<number | null>(null)
+  const caretColorArmTimerRef = useRef<(() => void) | null>(null)
   // Local "staged" HSVA color for the Mouse options row-1 H/S/V/A drag
   // controls -- deliberately not tied to the app-wide activeColorHsva/
   // primedColorSource rig (that system arms a swatch anywhere in the app;
@@ -1983,7 +1987,7 @@ function App() {
     return rgbaToHsva(seed)
   })
   const [cursorHsvaDragState, setCursorHsvaDragState] = useState<HsvaDragState | null>(null)
-  const cursorColorArmTimerRef = useRef<number | null>(null)
+  const cursorColorArmTimerRef = useRef<(() => void) | null>(null)
   const debugNoteIdRef = useRef<string | null>(null)
   const [windowIsMaximized, setWindowIsMaximized] = useState(false)
   const [windowIsCollapsed, setWindowIsCollapsed] = useState(false)
@@ -2684,7 +2688,7 @@ function App() {
   })
   const [hsvaDragState, setHsvaDragState] = useState<HsvaDragState | null>(null)
   const [textureControlDragState, setTextureControlDragState] = useState<TextureControlDragState | null>(null)
-  const colorArmTimerRef = useRef<number | null>(null)
+  const colorArmTimerRef = useRef<(() => void) | null>(null)
   const pendingUpdateDebounceRef = useRef<number | null>(null)
   type ConsoleMethodName = 'log' | 'info' | 'warn' | 'error' | 'debug'
   const appStateSaveTimerRef = useRef<number | null>(null)
@@ -3679,7 +3683,7 @@ function App() {
 
   const clearColorArmTimer = useCallback(() => {
     if (colorArmTimerRef.current === null) return
-    window.clearTimeout(colorArmTimerRef.current)
+    colorArmTimerRef.current()
     colorArmTimerRef.current = null
   }, [])
 
@@ -3784,7 +3788,7 @@ function App() {
     event.stopPropagation()
     clearColorArmTimer()
 
-    colorArmTimerRef.current = window.setTimeout(() => {
+    colorArmTimerRef.current = armHold(() => {
       setPrimedColorSource(source)
       colorArmTimerRef.current = null
     }, COLOR_BUTTON_ARM_HOLD_MS)
@@ -3796,7 +3800,7 @@ function App() {
     event.stopPropagation()
     clearColorArmTimer()
 
-    colorArmTimerRef.current = window.setTimeout(() => {
+    colorArmTimerRef.current = armHold(() => {
       copyElementValuesToPreviews(source)
       colorArmTimerRef.current = null
     }, COLOR_BUTTON_ARM_HOLD_MS)
@@ -3892,7 +3896,7 @@ function App() {
   // back into the staged H/S/V/A, mirroring startElementPreviewCopyHold.
   const clearCursorColorArmTimer = useCallback(() => {
     if (cursorColorArmTimerRef.current === null) return
-    window.clearTimeout(cursorColorArmTimerRef.current)
+    cursorColorArmTimerRef.current()
     cursorColorArmTimerRef.current = null
   }, [])
 
@@ -3920,7 +3924,7 @@ function App() {
     event.stopPropagation()
     clearCursorColorArmTimer()
 
-    cursorColorArmTimerRef.current = window.setTimeout(() => {
+    cursorColorArmTimerRef.current = armHold(() => {
       copyCursorTargetColorToHsva(target)
       cursorColorArmTimerRef.current = null
     }, COLOR_BUTTON_ARM_HOLD_MS)
@@ -4004,7 +4008,7 @@ function App() {
   // caret color can't disturb a cursor color mid-edit, and vice versa.
   const clearCaretColorArmTimer = useCallback(() => {
     if (caretColorArmTimerRef.current === null) return
-    window.clearTimeout(caretColorArmTimerRef.current)
+    caretColorArmTimerRef.current()
     caretColorArmTimerRef.current = null
   }, [])
 
@@ -4027,7 +4031,7 @@ function App() {
     event.stopPropagation()
     clearCaretColorArmTimer()
 
-    caretColorArmTimerRef.current = window.setTimeout(() => {
+    caretColorArmTimerRef.current = armHold(() => {
       copyCaretTargetColorToHsva(target)
       caretColorArmTimerRef.current = null
     }, COLOR_BUTTON_ARM_HOLD_MS)

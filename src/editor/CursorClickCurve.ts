@@ -158,3 +158,77 @@ export function sampleCursorReleaseAxis(
 export function cursorClickReleaseTailDurationSec(skew: number, durationSec: number): number {
   return Math.max(0, durationSec - cursorClickApexTimeSec(skew, durationSec));
 }
+
+// --- the twitch ------------------------------------------------------
+//
+// A completed HOLD gesture (see shared/holdTiming.ts) fires while the button
+// is usually still down, so the click response is sitting in SUSTAIN and the
+// orbit is parked at its held radius. The twitch is the acknowledgement: one
+// brief excursion in the OPPOSITE direction from wherever the hold put it,
+// settling back to that same held state rather than to the base radius.
+//
+// It is a second, independent channel rather than an interruption of the
+// press axis, and that is the whole reason it composes: the press keeps
+// sustaining underneath, so "back to where it was" needs no bookkeeping --
+// the twitch simply finishes at a factor of 1.
+//
+// Same ramp and shape as the click response, at HALF its duration, because a
+// twitch that takes as long as the press response reads as a second gesture
+// rather than as a confirmation of the first.
+
+/**
+ * Half the click response's, so the excursion reads as a spike.
+ *
+ * Not floored away from zero: the speed slider at its maximum means "no
+ * animation", and a twitch of zero length should be exactly that rather than
+ * a tenth of a millisecond of one. `normalizedBellHeight` guards its own
+ * division, so nothing downstream needs the floor.
+ */
+export function cursorTwitchDurationSec(clickDurationSec: number): number {
+  return Math.max(0, clickDurationSec) / 2;
+}
+
+/**
+ * The twitch's RADIUS factor at `elapsedSec`, to multiply on top of whatever
+ * the press axis is already doing. 1 at both ends, and at its apex exactly
+ * `1 + maxImpact` expanding or `1 / (1 + maxImpact)` contracting -- so the
+ * radius reached is the held radius times or divided by that, and the two
+ * polarities are exact mirrors of each other rather than merely similar.
+ *
+ * Radius only: the click response splits itself between radius and spin by
+ * the `balance` slider, but a twitch is a spatial punctuation mark and reads
+ * as one whether or not the user has balance pushed toward spin.
+ */
+export function cursorTwitchRadiusMultiplier(
+  direction: -1 | 1,
+  elapsedSec: number,
+  ramp: number,
+  skew: number,
+  twitchDurationSec: number,
+  maxImpact: number,
+): number {
+  return Math.pow(1 + Math.max(0, maxImpact), direction * twitchHeight(elapsedSec, ramp, skew, twitchDurationSec));
+}
+
+// The bell is asymptotic, not zero-ended: at the default ramp it stands at
+// ~0.098 of its own peak at t=0 and again at t=duration. The press response
+// can live with that (it enters from a press and leaves through a decay that
+// is cleared once it is small), but a twitch RETURNS to the state it left,
+// and a residual 3.6% of radius still standing when the twitch is discarded
+// pops visibly. So the floor is subtracted and the remainder rescaled: both
+// ends reach exactly 0, the apex still reaches exactly 1, and ramp and shape
+// otherwise behave exactly as they do for a click.
+//
+// The higher of the two ends is the floor, because skew makes them unequal;
+// taking the lower one would leave the other end negative, which for a
+// multiplicative factor means twitching the WRONG WAY for a frame or two
+// right at the end.
+function twitchHeight(elapsedSec: number, ramp: number, skew: number, durationSec: number): number {
+  const floor = Math.max(
+    normalizedBellHeight(0, ramp, skew, durationSec),
+    normalizedBellHeight(durationSec, ramp, skew, durationSec),
+  );
+  if (floor >= 1) return 0;
+  const height = normalizedBellHeight(elapsedSec, ramp, skew, durationSec);
+  return Math.max(0, (height - floor) / (1 - floor));
+}

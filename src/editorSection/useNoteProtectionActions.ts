@@ -4,8 +4,13 @@ import type { NoteSummary } from '../shared/noteLifecycle'
 import { isArchivedNote, isChapterOnlyNote, isDeletedNote, isExternalNote, isSameNoteSummary } from '../shared/noteLifecycle'
 import { applyProtectedTagDestination } from '../shared/protectedTagActions'
 import { normalizeInternalText } from '../editor/TextPolicy'
+import { armHold, HOLD_CONFIRM_MS } from '../shared/holdTiming'
 
-const NOTE_RIGHT_CLICK_HOLD_MS = 200
+// A right-press on a note, or on the trash-view button, that means "this
+// one" rather than the ordinary click -- the app's CONFIRM threshold
+// (`shared/holdTiming.ts`), which also announces the completion in the
+// cursor. Was 200ms of its own.
+const NOTE_RIGHT_CLICK_HOLD_MS = HOLD_CONFIRM_MS
 
 type NotePrimedAction = 'archive' | 'deletion'
 type ProtectedQuickReleaseAction = 'remove-archived' | 'remove-deleted' | null
@@ -65,9 +70,9 @@ export function useNoteProtectionActions({
   refreshChapters,
 }: UseNoteProtectionActionsOptions) {
   const [primedNoteActionState, setPrimedNoteActionState] = useState<{ noteId: string; action: NotePrimedAction } | null>(null)
-  const noteArmTimerRef = useRef<{ noteId: string; button: 0 | 2; timeoutId: number; quickReleaseAction: ProtectedQuickReleaseAction | null } | null>(null)
+  const noteArmTimerRef = useRef<{ noteId: string; button: 0 | 2; cancelHold: () => void; quickReleaseAction: ProtectedQuickReleaseAction | null } | null>(null)
   const [isTrashViewDeletePrimed, setIsTrashViewDeletePrimed] = useState(false)
-  const trashButtonArmTimerRef = useRef<number | null>(null)
+  const trashButtonArmTimerRef = useRef<(() => void) | null>(null)
 
   const primedNoteActionById = useMemo(() => {
     if (!primedNoteActionState) {
@@ -79,13 +84,13 @@ export function useNoteProtectionActions({
 
   const clearNoteArmTimer = useCallback(() => {
     if (!noteArmTimerRef.current) return
-    window.clearTimeout(noteArmTimerRef.current.timeoutId)
+    noteArmTimerRef.current.cancelHold()
     noteArmTimerRef.current = null
   }, [])
 
   const clearTrashButtonArmTimer = useCallback(() => {
     if (trashButtonArmTimerRef.current === null) return
-    window.clearTimeout(trashButtonArmTimerRef.current)
+    trashButtonArmTimerRef.current()
     trashButtonArmTimerRef.current = null
   }, [])
 
@@ -519,9 +524,11 @@ export function useNoteProtectionActions({
       ? 'remove-deleted'
       : (isNoteArchived ? 'remove-archived' : null)
 
-    let timeoutId = 0
+    // No hold at all in trash mode -- the gesture means something else
+    // there, so there is nothing to arm and nothing to acknowledge.
+    let cancelHold: () => void = () => {}
     if (sidebarMode !== 'trash') {
-      timeoutId = window.setTimeout(() => {
+      cancelHold = armHold(() => {
         setPrimedNoteActionState((previous) => {
           if (quickReleaseAction) {
             return {
@@ -546,7 +553,7 @@ export function useNoteProtectionActions({
       }, NOTE_RIGHT_CLICK_HOLD_MS)
     }
 
-    noteArmTimerRef.current = { noteId, button: 2, timeoutId, quickReleaseAction }
+    noteArmTimerRef.current = { noteId, button: 2, cancelHold, quickReleaseAction }
   }, [clearNoteArmTimer, notes, sidebarMode])
 
 
@@ -694,7 +701,7 @@ export function useNoteProtectionActions({
     clearTrashButtonArmTimer()
     setIsTrashViewDeletePrimed(false)
 
-    trashButtonArmTimerRef.current = window.setTimeout(() => {
+    trashButtonArmTimerRef.current = armHold(() => {
       setIsTrashViewDeletePrimed(true)
       trashButtonArmTimerRef.current = null
     }, NOTE_RIGHT_CLICK_HOLD_MS)

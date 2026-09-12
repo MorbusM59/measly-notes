@@ -9,7 +9,10 @@ import {
   resolveCursorClickWeights,
   sampleCursorPressAxis,
   sampleCursorReleaseAxis,
+  cursorTwitchDurationSec,
+  cursorTwitchRadiusMultiplier,
 } from '../editor/CursorClickCurve'
+import { subscribeCursorTwitch } from '../shared/cursorTwitch'
 import { readPageZoomFactor } from '../window/pageZoom'
 
 export interface MouseCursorOverlayProps {
@@ -144,6 +147,12 @@ export function MouseCursorOverlay({
   const clickPressRef = useRef<{ button: 0 | 2; direction: -1 | 1; startMs: number } | null>(null)
   const clickReleaseRef = useRef<{ initialAxis: number; startMs: number } | null>(null)
   const clickPendingReleaseTimeoutRef = useRef<number | null>(null)
+  // The confirmation twitch (shared/cursorTwitch.ts): a second deviation
+  // channel that runs ON TOP of the press axis rather than replacing it, so
+  // it settles back to the held state with no bookkeeping. Its direction is
+  // latched when it starts -- resolved then from which way the press is
+  // deforming the orbit, because that is what it is a reversal OF.
+  const twitchRef = useRef<{ direction: -1 | 1; startMs: number } | null>(null)
 
   const {
     dotColor, centerColor, trailColor, dotCount, radiusPx, spinHz, trailThicknessPx, trailFadeMs,
@@ -188,6 +197,7 @@ export function MouseCursorOverlay({
     const angleStep = (Math.PI * 2) / effectiveDotCount
     const clickWeights = resolveCursorClickWeights(clickBalance)
     const clickDurationSec = resolveCursorClickDurationSec(clickSpeedX)
+    const twitchDurationSec = cursorTwitchDurationSec(clickDurationSec)
 
     function updateCanvasResolution() {
       // A zoom change arrives as a resize. The pointer has not moved within
@@ -314,7 +324,26 @@ export function MouseCursorOverlay({
         }
       }
       clickAxisRef.current = axis
-      const effectiveRadiusPx = radiusPx * axisToRadiusMultiplier(axis, clickWeights.radiusWeight)
+
+      // --- confirmation twitch --------------------------------------
+      // Multiplies the radius the press axis already produced, so its apex
+      // is exactly the HELD radius times (1 + max impact) expanding, or
+      // divided by it contracting -- the excursion is measured from where
+      // the hold put the orbit, not from the base radius.
+      let twitchRadiusMultiplier = 1
+      if (twitchRef.current) {
+        const twitch = twitchRef.current
+        const elapsedSec = (now - twitch.startMs) / 1000
+        if (elapsedSec >= twitchDurationSec) {
+          twitchRef.current = null
+        } else {
+          twitchRadiusMultiplier = cursorTwitchRadiusMultiplier(
+            twitch.direction, elapsedSec, clickRamp, clickSkew, twitchDurationSec, clickMaxSpeed,
+          )
+        }
+      }
+
+      const effectiveRadiusPx = radiusPx * axisToRadiusMultiplier(axis, clickWeights.radiusWeight) * twitchRadiusMultiplier
       const effectiveSpinHz = Math.abs(spinHz) * axisToSpinMultiplier(axis, clickWeights.spinWeight)
 
       rotationPhaseRef.current += effectiveSpinHz * dtSec
@@ -468,6 +497,25 @@ export function MouseCursorOverlay({
       beginRelease()
     }
 
+    // A hold gesture completed somewhere in the app. Its POLARITY is decided
+    // here and nowhere else: the twitch is a reversal of whatever the press
+    // is currently doing to the orbit, and the live axis says which way that
+    // is -- negative is a left press tightening it, positive a right press
+    // widening it. A caller naming its own polarity would have to know that a
+    // left button contracts, which is a fact about this cursor, not about the
+    // gesture that finished.
+    //
+    // An axis of exactly 0 means no press is deforming anything (a keyboard
+    // hold, or a gesture whose button was already released and settled), and
+    // there is nothing to reverse -- so nothing happens, by construction
+    // rather than by a check at the call site.
+    const stopListeningForTwitch = subscribeCursorTwitch(() => {
+      const axis = clickAxisRef.current
+      if (axis === 0) return
+      twitchRef.current = { direction: axis < 0 ? 1 : -1, startMs: performance.now() }
+      ensureLoopRunning()
+    })
+
     // capture: true throughout -- a component calling stopPropagation on a
     // click or move (dropdowns, modals) fires during the bubble phase, so
     // listening in the capture phase (which runs first, top-down) means
@@ -491,8 +539,10 @@ export function MouseCursorOverlay({
       activeSinceRef.current = null
       leftAtRef.current = null
       clearPendingRelease()
+      stopListeningForTwitch()
       clickPressRef.current = null
       clickReleaseRef.current = null
+      twitchRef.current = null
     }
   }, [
     radiusPx, trailThicknessPx, trailFadeMs, spinHz, fadeMs, dotCount, dotColor, centerColor, trailColor,

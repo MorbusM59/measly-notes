@@ -6,9 +6,14 @@ import { PROTECTED_TAGS, normalizeTagName, isProtectedTagName, isExternalTagName
 import { isAutoAssignedId } from '../shared/assignedIds'
 import { NOTE_DRAG_MIME_TYPE, serializeNoteDragPayload } from '../shared/noteDrag'
 import { useInlinePillEdit } from '../shared/useInlinePillEdit'
+import { armHold, HOLD_COMMIT_MS } from '../shared/holdTiming'
 
 /** How long the temp tab must be held down (left mouse button) before it's promoted to a permanent pinned tab. */
-export const TEMP_TAB_PIN_HOLD_MS = 500
+// Pinning a temp tab, and arming a pinned one for unpin, are both "I know
+// this is not undoable" -- the app's COMMIT threshold
+// (`shared/holdTiming.ts`), which also announces the completion in the
+// cursor. Was 500ms of its own.
+export const TEMP_TAB_PIN_HOLD_MS = HOLD_COMMIT_MS
 
 export interface UseSectionTabsOptions {
   /** Which section this instance belongs to -- scopes both the tag bar (this section's active note) and the pinned tabs it shows. */
@@ -798,12 +803,12 @@ export function useSectionTabs(options: UseSectionTabsOptions): UseSectionTabsRe
   // as its own ref/state pair, separate from the left-button pin-hold
   // (tempTabHoldTimerRef/pinArmingTabNoteId, further down), since the temp
   // tab can have both gestures live on it at once.
-  const tabHoldTimerRef = useRef<number | null>(null)
+  const tabHoldTimerRef = useRef<(() => void) | null>(null)
   const [unpinArmingTabNoteId, setUnpinArmingTabNoteId] = useState<string | null>(null)
 
   const clearTabHoldTimer = useCallback(() => {
     if (tabHoldTimerRef.current !== null) {
-      window.clearTimeout(tabHoldTimerRef.current)
+      tabHoldTimerRef.current()
       tabHoldTimerRef.current = null
     }
     setUnpinArmingTabNoteId(null)
@@ -903,12 +908,12 @@ export function useSectionTabs(options: UseSectionTabsOptions): UseSectionTabsRe
 
   // Holding the left mouse button on the temp tab for TEMP_TAB_PIN_HOLD_MS
   // promotes it to a real, permanent pinned tab.
-  const tempTabHoldTimerRef = useRef<number | null>(null)
+  const tempTabHoldTimerRef = useRef<(() => void) | null>(null)
   const [pinArmingTabNoteId, setPinArmingTabNoteId] = useState<string | null>(null)
 
   const clearTempTabHoldTimer = useCallback(() => {
     if (tempTabHoldTimerRef.current !== null) {
-      window.clearTimeout(tempTabHoldTimerRef.current)
+      tempTabHoldTimerRef.current()
       tempTabHoldTimerRef.current = null
     }
     setPinArmingTabNoteId(null)
@@ -918,7 +923,7 @@ export function useSectionTabs(options: UseSectionTabsOptions): UseSectionTabsRe
     if (event.button !== 0) return
     clearTempTabHoldTimer()
     setPinArmingTabNoteId(noteId)
-    tempTabHoldTimerRef.current = window.setTimeout(() => {
+    tempTabHoldTimerRef.current = armHold(() => {
       tempTabHoldTimerRef.current = null
       setPinArmingTabNoteId(null)
       void pinNoteToTabs(noteId)
@@ -933,7 +938,7 @@ export function useSectionTabs(options: UseSectionTabsOptions): UseSectionTabsRe
     if (event.button !== 2) return
     clearTabHoldTimer()
     setUnpinArmingTabNoteId(noteId)
-    tabHoldTimerRef.current = window.setTimeout(() => {
+    tabHoldTimerRef.current = armHold(() => {
       tabHoldTimerRef.current = null
       setUnpinArmingTabNoteId(null)
       setUnpinPrimedTabNoteId(noteId)

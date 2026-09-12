@@ -1,4 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
+import { emitCursorTwitch } from '../shared/cursorTwitch'
+import { HOLD_COMMIT_MS } from '../shared/holdTiming'
 
 // Right-click-and-hold gesture for "branch this snapshot into a new note".
 // A plain right-click still opens the context menu / does nothing special --
@@ -9,7 +11,10 @@ import { useCallback, useRef, useState } from 'react'
 // held, giving the user feedback that something is about to happen before
 // it's irreversible.
 
-const DEFAULT_HOLD_MS = 550
+// Branching a snapshot into a new note, and merging two of them, are both
+// "I know this is not undoable" -- the app's COMMIT threshold
+// (`shared/holdTiming.ts`). Was 550 here and 1000 at the merge's call site.
+const DEFAULT_HOLD_MS = HOLD_COMMIT_MS
 
 export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) {
   const [isHolding, setIsHolding] = useState(false)
@@ -41,6 +46,11 @@ export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) 
 
     if (ratio >= 1 && !firedRef.current) {
       firedRef.current = true
+      // The one hold in the app that does not run on a timer -- it drives a
+      // filling ring off rAF -- so it announces its own completion rather
+      // than inheriting it from `armHold`. Same order as there: the gesture
+      // is acknowledged before the action it triggered.
+      emitCursorTwitch()
       onBranch()
       setLastFiredAt(Date.now())
       clear()

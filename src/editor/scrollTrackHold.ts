@@ -15,14 +15,17 @@
 // drift apart in feel; only what "snap" and "travel" mean differs between
 // them, and that is the caller's business.
 
+import { armHold, HOLD_CONFIRM_MS } from '../shared/holdTiming'
+
 /**
  * How long the button must be held before the click becomes a snap.
  *
- * Long enough not to fire on an ordinary click (a deliberate click is well
- * under 200ms; a lazy one is around it), short enough that holding for a snap
- * does not feel like waiting.
+ * The app's one CONFIRM threshold (`shared/holdTiming.ts`) -- "I meant this
+ * one" rather than "I know this is not undoable" -- which is what a snap is.
+ * It was this value already; it is now this value because that is what the
+ * gesture is, not because 250 read well on the day.
  */
-export const SCROLL_TRACK_SNAP_HOLD_MS = 250
+export const SCROLL_TRACK_SNAP_HOLD_MS = HOLD_CONFIRM_MS
 
 export interface ScrollTrackHoldHandlers {
   /** The button was held past the threshold: go there now. */
@@ -44,7 +47,7 @@ export function beginScrollTrackHold(handlers: ScrollTrackHoldHandlers): () => v
   let resolved = false
 
   const cleanUp = () => {
-    window.clearTimeout(timerId)
+    cancelHold()
     window.removeEventListener('mouseup', onRelease)
     window.removeEventListener('blur', onAbandon)
   }
@@ -65,7 +68,7 @@ export function beginScrollTrackHold(handlers: ScrollTrackHoldHandlers): () => v
     cleanUp()
   }
 
-  const timerId = window.setTimeout(() => {
+  const cancelHold = armHold(() => {
     if (resolved) return
     resolved = true
     cleanUp()

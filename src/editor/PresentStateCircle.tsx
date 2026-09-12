@@ -32,7 +32,7 @@ export function PresentStateCircle({
     onMergeAdjacentSnapshots?.()
   }, [onMergeAdjacentSnapshots])
 
-  const { isHolding, progress, lastFiredAt, handlers } = useHoldToBranch(doMerge, 1000)
+  const { isHolding, progress, lastFiredAt, handlers } = useHoldToBranch(doMerge)
 
   const [showComplete, setShowComplete] = useState(false)
   const [isFading, setIsFading] = useState(false)
