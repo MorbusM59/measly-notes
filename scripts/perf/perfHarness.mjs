@@ -377,7 +377,9 @@ export async function startCdpJsProfile(page) {
     async stop() {
       const { profile } = await client.send('Profiler.stop')
       await client.detach().catch(() => {})
-      return aggregateCdpProfile(profile)
+      // `raw` alongside the aggregation because self time cannot say who
+      // CALLED a hot frame, and callers need the ancestor chain for that.
+      return { ...aggregateCdpProfile(profile), raw: profile }
     },
   }
 }
@@ -492,7 +494,7 @@ function loadTraceMapForUrl(url) {
  * URL -- otherwise falls back to the raw (possibly minified) name, same as
  * before this existed.
  */
-function resolveCallFrameName(callFrame) {
+export function resolveCallFrameName(callFrame) {
   const rawName = callFrame?.functionName || '(anonymous)'
   const url = callFrame?.url
   if (!url) return { name: rawName, location: '' }

@@ -34,6 +34,12 @@
 // Flags:
 //   --target=electron|browser
 //   --chars=2000000     size of the synthetic note
+//   --mode=self|tree    `self` ranks frames by self time; `tree` prints the
+//                       ANCESTOR CHAIN of each hottest frame. Self time alone
+//                       says what is slow and is silent on who asked for it,
+//                       which is the question that actually matters when the
+//                       hot frame is inside a library -- three rounds of
+//                       guessing went into learning that.
 //   --skip-build        (electron only) reuse the existing
 //                       release/<version>/linux-unpacked build instead of
 //                       repackaging first. A stale package silently measures
@@ -50,21 +56,26 @@ import {
   startDevServer,
   waitForAppReady,
   startCdpJsProfile,
+  resolveCallFrameName,
 } from './perfHarness.mjs'
 
 const PORT = 5251
 
 function parseArgs(argv) {
-  const args = { target: 'electron', chars: 2_000_000, skipBuild: false }
+  const args = { target: 'electron', chars: 2_000_000, mode: 'self', skipBuild: false }
   for (const raw of argv) {
     const [key, value] = raw.replace(/^--/, '').split('=')
     if (key === 'skip-build') args.skipBuild = true
     else if (key === 'target') args.target = value
+    else if (key === 'mode') args.mode = value
     else if (key === 'chars') args.chars = Number(value)
     else throw new Error(`unknown flag "${raw}"`)
   }
   if (!['electron', 'browser'].includes(args.target)) {
     throw new Error(`--target must be electron|browser, got "${args.target}"`)
+  }
+  if (!['self', 'tree'].includes(args.mode)) {
+    throw new Error(`--mode must be self|tree, got "${args.mode}"`)
   }
   if (!Number.isFinite(args.chars) || args.chars <= 0) {
     throw new Error(`--chars must be a positive number, got "${args.chars}"`)
@@ -74,8 +85,35 @@ function parseArgs(argv) {
 
 // ---------------------------------------------------------------- the measurement
 
+/** The ancestor chain of each hottest sampled frame, innermost first. */
+function printCallChains(profile) {
+  const byId = new Map(profile.nodes.map((node) => [node.id, node]))
+  const parentOf = new Map()
+  for (const node of profile.nodes) for (const child of node.children ?? []) parentOf.set(child, node.id)
+
+  // Self time per NODE, from timeDeltas rather than sample counts, so these
+  // numbers are the same currency as --mode=self's (see aggregateCdpProfile:
+  // timeDeltas[i + 1] is the delta attributable to samples[i]).
+  const selfMs = new Map()
+  for (let i = 0; i < profile.samples.length; i += 1) {
+    const id = profile.samples[i]
+    selfMs.set(id, (selfMs.get(id) ?? 0) + (profile.timeDeltas[i + 1] ?? 0) / 1000)
+  }
+
+  const ranked = [...selfMs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
+  for (const [id, ms] of ranked) {
+    console.log(`\n=== ${Math.round(ms)}ms self ===`)
+    for (let cursor = id; cursor !== undefined; cursor = parentOf.get(cursor)) {
+      const node = byId.get(cursor)
+      if (!node) break
+      const { name, location } = resolveCallFrameName(node.callFrame)
+      console.log(`  ${name}${location}`)
+    }
+  }
+}
+
 /** Seeds a large note WITHOUT opening it, reloads, then profiles the first open. */
-async function measureFirstOpen(page, targetChars, label) {
+async function measureFirstOpen(page, targetChars, label, mode) {
   await page.waitForTimeout(1500)
 
   const { noteId, kb } = await page.evaluate(async (chars) => {
@@ -108,11 +146,15 @@ async function measureFirstOpen(page, targetChars, label) {
   )
   const firstText = Date.now() - started
   await page.waitForTimeout(500)
-  const { totalMs, entries } = await profile.stop()
+  const { totalMs, entries, raw } = await profile.stop()
 
-  console.log(`\ntarget=${label} chars=${targetChars}`)
-  console.log(`time to first text: ${firstText}ms   (profiled ${Math.round(totalMs)}ms total)\n`)
-  console.log('self time, hottest first:')
+  console.log(`\ntarget=${label} chars=${targetChars} mode=${mode}`)
+  console.log(`time to first text: ${firstText}ms   (profiled ${Math.round(totalMs)}ms total)`)
+  if (mode === 'tree') {
+    printCallChains(raw)
+    return
+  }
+  console.log('\nself time, hottest first:')
   for (const entry of entries.slice(0, 20)) {
     console.log(`  ${String(Math.round(entry.ms)).padStart(6)}ms  ${entry.name}`)
   }
@@ -127,7 +169,7 @@ async function runBrowser(args) {
     const page = await browser.newPage()
     await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' })
     await waitForAppReady(page).catch(() => {})
-    await measureFirstOpen(page, args.chars, 'browser-mock')
+    await measureFirstOpen(page, args.chars, 'browser-mock', args.mode)
   } finally {
     await browser.close()
     server.stop?.()
@@ -188,7 +230,7 @@ async function runElectron(args) {
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     await waitForDatabaseReady(page, 20000)
-    await measureFirstOpen(page, args.chars, 'electron-packaged')
+    await measureFirstOpen(page, args.chars, 'electron-packaged', args.mode)
   } finally {
     await app.close()
     rmSync(userDataDir, { recursive: true, force: true })
