@@ -3,8 +3,8 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import type { NoteSummary } from '../shared/noteLifecycle'
 import { isExternalNote, isSameNoteSummary } from '../shared/noteLifecycle'
 import { normalizeInternalText } from '../editor/TextPolicy'
-import { hashNormalizedText } from '../shared/hashText'
-import { PREVIEW_BLOCK_CACHE_VERSION, type PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
+import type { PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
+import { buildPersistedBlockMap } from '../editor/persistedBlockMap'
 
 /** How long to wait after the last keystroke before persisting to disk. */
 export const SAVE_DEBOUNCE_MS = 350
@@ -79,18 +79,7 @@ export function useNoteSaveQueue(options: UseNoteSaveQueueOptions): UseNoteSaveQ
       const isExternal = noteSummary ? isExternalNote(noteSummary) : false
       const normalizedText = normalizeInternalText(nextText)
 
-      const splitCache = previewBlockSplitCacheRef.current
-      const previewBlockCache = splitCache && splitCache.text === normalizedText
-        ? {
-            v: PREVIEW_BLOCK_CACHE_VERSION,
-            textHash: await hashNormalizedText(normalizedText),
-            ranges: splitCache.ranges.map(({ type, rangeStartLine1, rangeEndLine1 }) => ({
-              type,
-              rangeStartLine1,
-              rangeEndLine1,
-            })),
-          }
-        : null
+      const previewBlockCache = await buildPersistedBlockMap(previewBlockSplitCacheRef.current, normalizedText)
 
       if (typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
         console.log('[preview-block-cache] piggybacking on saveNote', {

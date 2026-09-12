@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, DragEvent, MouseEvent, MutableRefObject, SetStateAction } from 'react'
-import type { NoteSummary } from '../shared/noteLifecycle'
+import type { NoteSummary, NoteUiStatePayload } from '../shared/noteLifecycle'
 import { isExternalNote } from '../shared/noteLifecycle'
 import type { PersistedViewportState } from '../shared/appState'
 import { NOTE_DRAG_MIME_TYPE, parseNoteDragPayload } from '../shared/noteDrag'
@@ -38,9 +38,9 @@ import { usePreviewScrollbar } from './usePreviewScrollbar'
 import { useDocumentFindNavigation } from './useDocumentFindNavigation'
 import { useMarkdownFormattingToolbar } from './useMarkdownFormattingToolbar'
 import { hashNormalizedText } from '../shared/hashText'
-import { restorePreviewBlockSplitCacheFromRanges } from '../editor/PreviewBlockSplit'
 import type { PreviewMarkdownBlock, PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
 import type { SectionHandle } from './sectionRegistry'
+import { buildPersistedBlockMap, restorePersistedBlockMap } from '../editor/persistedBlockMap'
 
 /** Same seed text as App.tsx's own NEW_NOTE_TEMPLATE (createNote) -- kept as its own local copy rather than a shared import to avoid a circular dependency (App.tsx is what mounts EditorSection). */
 const NEW_NOTE_TEMPLATE = '# '
@@ -682,32 +682,24 @@ export function EditorSection({
         const cursorPos = readCurrentEditUiPayload()?.cursorPos
           ?? editModeSnapshotByNoteIdRef.current.get(previousNoteId)?.fullSelection.end
         const leavingText = normalizeInternalText(latestEditorTextRef.current || activeNoteTextRef.current)
-        // Why the ranges were or were not carried out with the note. This
-        // branch decides whether the note it is LEAVING stays warm, and it
-        // was silent: a note that writes null here has marked itself as
-        // having no cache, and will parse on every future visit until
-        // something builds one again.
+        const previewBlockMap = await buildPersistedBlockMap(previewBlockSplitCacheRef.current, leavingText)
+        // Whether the note being LEFT stays warm. Silent until it was
+        // measured: this used to hand-roll the record with a hardcoded
+        // `v: 1` while its three siblings used the version constant, which
+        // is the drift the constant exists to prevent.
         if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
           console.log('[preview-block-cache] persisting out', {
             noteId: previousNoteId,
             leavingLength: leavingText.length,
             cacheLength: previewBlockSplitCacheRef.current?.text.length ?? null,
-            matches: previewBlockSplitCacheRef.current?.text === leavingText,
+            carried: !!previewBlockMap,
           })
         }
-        const previewBlockCache = previewBlockSplitCacheRef.current?.text === leavingText
-          ? {
-              v: 1,
-              textHash: await hashNormalizedText(leavingText),
-              ranges: previewBlockSplitCacheRef.current.ranges.map(({ type, rangeStartLine1, rangeEndLine1 }) => ({
-                type,
-                rangeStartLine1,
-                rangeEndLine1,
-              })),
-            }
-          : null
-        const payload: { anchorBlockIndex: number; cursorPos?: number; previewBlockCache?: typeof previewBlockCache } = { anchorBlockIndex, previewBlockCache }
+        // Absent, never null: an omitted field keeps whatever is on disk,
+        // and what is on disk is either provably good or discarded on read.
+        const payload: NoteUiStatePayload = { anchorBlockIndex }
         if (cursorPos !== undefined) payload.cursorPos = cursorPos
+        if (previewBlockMap) payload.previewBlockCache = previewBlockMap
         await window.thockdownNotes.saveNoteUiState({ id: previousNoteId, payload })
       }
     }
@@ -774,60 +766,25 @@ export function EditorSection({
 
     const cacheRestoreStart = performance.now()
     const hydratedText = normalizeInternalText(loaded.text)
-    if (nextUiState?.previewBlockCache && nextUiState.previewBlockCache.v === 1) {
-      const textHash = await hashNormalizedText(hydratedText)
-      const cacheHash = nextUiState.previewBlockCache.textHash
-      const cacheRanges = nextUiState.previewBlockCache.ranges.length
-      if (textHash === cacheHash) {
-        previewBlockSplitCacheRef.current = restorePreviewBlockSplitCacheFromRanges(hydratedText, nextUiState.previewBlockCache.ranges)
-        previewBlocksCacheRef.current = { text: hydratedText, blocks: previewBlockSplitCacheRef.current.blocks }
-        if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
-          console.log('[preview-block-cache] restored from DB cache', {
-            noteId,
-            textHash,
-            blocks: previewBlocksCacheRef.current.blocks.length,
-            ranges: cacheRanges,
-          })
-        }
-      } else {
-        previewBlockSplitCacheRef.current = null
-        previewBlocksCacheRef.current = null
-        if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
-          console.log('[preview-block-cache] DB cache hash mismatch; will parse', {
-            noteId,
-            textHash,
-            cacheHash,
-            ranges: cacheRanges,
-          })
-        }
-      }
-    } else if (previewBlockSplitCacheRef.current?.text === hydratedText) {
-      // ALREADY WARM IN MEMORY for exactly this text, so there is nothing to
-      // discard. Nulling here regardless is what made the background prewarm
-      // pointless even once it could run: a note is activated more than once
-      // on a single click, and the second activation threw away the split the
-      // first one had just built -- after which the persist-out found no
-      // cache and wrote `previewBlockCache: null`, marking the note as having
-      // none and guaranteeing a full parse on every future visit.
-      //
-      // Measured: "persisting out { leavingLength: 72, cacheLength: null,
-      // matches: false }" for a note whose prewarm had completed seconds
-      // earlier.
-      if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
-        console.log('[preview-block-cache] no DB cache, but memory cache matches; keeping it', {
-          noteId,
-          blocks: previewBlockSplitCacheRef.current.blocks.length,
-        })
-      }
-    } else {
+    const restored = await restorePersistedBlockMap(nextUiState?.previewBlockCache, hydratedText)
+    if (restored.cache) {
+      previewBlockSplitCacheRef.current = restored.cache
+      previewBlocksCacheRef.current = { text: hydratedText, blocks: restored.cache.blocks }
+    } else if (previewBlockSplitCacheRef.current?.text !== hydratedText) {
+      // Only discard when what is in memory is for DIFFERENT text. Nulling
+      // regardless is what made the background prewarm pointless: a note is
+      // activated more than once per click, and the second activation threw
+      // away the split the first had just built -- after which nothing was
+      // carried out with the note and it parsed on every future visit.
       previewBlockSplitCacheRef.current = null
       previewBlocksCacheRef.current = null
-      if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
-        console.log('[preview-block-cache] no DB cache found; will parse', {
-          noteId,
-          hasPreviewBlockCache: !!nextUiState?.previewBlockCache,
-        })
-      }
+    }
+    if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
+      console.log('[preview-block-cache] activation', {
+        noteId,
+        persisted: restored.reason,
+        memoryMatches: previewBlockSplitCacheRef.current?.text === hydratedText,
+      })
     }
     logStep('restore/clear preview block cache', cacheRestoreStart)
 

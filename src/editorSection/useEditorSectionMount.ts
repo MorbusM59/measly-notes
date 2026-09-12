@@ -28,12 +28,10 @@ import {
 } from '../editor/EditRestoreMath'
 import { normalizeInternalText } from '../editor/TextPolicy'
 import { buildTransformResult } from '../editor/TransformResult'
-import { hashNormalizedText } from '../shared/hashText'
 import { readPreviewEdgePaddingPx, readPreviewLineHeightPx } from './previewBlockGeometry'
 import {
   splitMarkdownIntoPreviewBlocks,
   splitMarkdownIntoPreviewBlocksIncremental,
-  PREVIEW_BLOCK_CACHE_VERSION,
   type PreviewMarkdownBlock,
   type PreviewBlockSplitCache,
 } from '../editor/PreviewBlockSplit'
@@ -58,6 +56,8 @@ import type { PreviewScrollToSourceLineFn } from './usePreviewMarkdownRendering'
 import { createPreviewSettleGate, type PreviewSettleGate } from './previewSettleGate'
 import { traceSettle } from './previewSettleTrace'
 import { createDocumentCommitCoalescer } from './documentCommitCoalescer'
+import { buildPersistedBlockMap } from '../editor/persistedBlockMap'
+import type { NoteUiStatePayload } from '../shared/noteLifecycle'
 
 /**
  * Throwaway checkpoint logger for the commit-to-paint input-lag
@@ -564,25 +564,6 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     return blocks
   }, [previewBlockSplitCacheRef, previewBlocksCacheRef])
 
-  /**
-   * Builds a PersistedPreviewBlockCache from the current in-memory split
-   * cache, if it matches the supplied text. The result is small (just
-   * structural ranges) and can be persisted alongside the note text so the
-   * next app startup warm-starts the first preview toggle.
-   */
-  const buildPersistedPreviewBlockCache = useCallback((text: string) => {
-    const cache = previewBlockSplitCacheRef.current
-    if (!cache || cache.text !== text) return null
-    return {
-      v: PREVIEW_BLOCK_CACHE_VERSION,
-      textHash: '', // filled in by the caller once an async hash resolves
-      ranges: cache.ranges.map(({ type, rangeStartLine1, rangeEndLine1 }) => ({
-        type,
-        rangeStartLine1,
-        rangeEndLine1,
-      })),
-    }
-  }, [previewBlockSplitCacheRef])
 
   // Boundary conversion for the scroll-sync rewrite: everything in this hook
   // still computes/caches position in terms of a raw source line internally
@@ -866,19 +847,19 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
 
       const text = normalizeInternalText(latestEditorTextRef.current || activeNoteText)
       const anchorBlockIndex = computeAnchorBlockIndexFromLine(text, sourceAnchorLine)
-      const previewBlockCache = buildPersistedPreviewBlockCache(text)
-      if (previewBlockCache) {
-        previewBlockCache.textHash = await hashNormalizedText(text)
-      }
+      const previewBlockMap = await buildPersistedBlockMap(previewBlockSplitCacheRef.current, text)
       debugLogPreviewBlockCache('persisting edit-ui cache', {
         noteId,
-        hasCache: !!previewBlockCache,
-        ranges: previewBlockCache?.ranges.length,
+        hasCache: !!previewBlockMap,
+        ranges: previewBlockMap?.ranges.length,
       })
-      await notesApi.saveNoteUiState({
-        id: noteId,
-        payload: { anchorBlockIndex, cursorPos, previewBlockCache },
-      })
+      // OMITTED, not null, when there is nothing to say -- saveNoteUiState
+      // merges field by field, so a null here would erase a record on disk
+      // that is still perfectly good. The comment on cursorPos below already
+      // knew this; the field beside it did not.
+      const uiStatePayload: NoteUiStatePayload = { anchorBlockIndex, cursorPos }
+      if (previewBlockMap) uiStatePayload.previewBlockCache = previewBlockMap
+      await notesApi.saveNoteUiState({ id: noteId, payload: uiStatePayload })
     }
 
     if (options?.immediate) {
@@ -898,7 +879,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       editUiStateSaveTimerRef.current = null
       void persistNow()
     }, 280)
-  }, [activeNoteText, buildPersistedPreviewBlockCache, computeAnchorBlockIndexFromLine, latestEditorTextRef, lineHeightPx, readCurrentEditUiPayload, updateEditModeSnapshotCache])
+  }, [activeNoteText, computeAnchorBlockIndexFromLine, latestEditorTextRef, lineHeightPx, previewBlockSplitCacheRef, readCurrentEditUiPayload, updateEditModeSnapshotCache])
 
   const cancelPendingEditUiStatePersist = useCallback(() => {
     if (editUiStateSaveTimerRef.current !== null) {
@@ -933,32 +914,30 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     const cursorPos = isPreviewMode ? undefined : readCurrentEditUiPayload()?.cursorPos
 
     const text = normalizeInternalText(latestEditorTextRef.current || activeNoteText)
-    const previewBlockCache = buildPersistedPreviewBlockCache(text)
-    const payloadBase: { anchorBlockIndex: number | null; cursorPos?: number | null; previewBlockCache?: ReturnType<typeof buildPersistedPreviewBlockCache> } =
-      { anchorBlockIndex, previewBlockCache }
+    const payloadBase: NoteUiStatePayload = { anchorBlockIndex }
     if (cursorPos !== undefined) {
       payloadBase.cursorPos = cursorPos
     }
 
     void (async () => {
-      if (payloadBase.previewBlockCache) {
-        payloadBase.previewBlockCache.textHash = await hashNormalizedText(text)
-      }
+      // Same rule as the checkpoint above: absent, never null.
+      const previewBlockMap = await buildPersistedBlockMap(previewBlockSplitCacheRef.current, text)
+      if (previewBlockMap) payloadBase.previewBlockCache = previewBlockMap
       debugLogPreviewBlockCache('persisting leave-note cache', {
         noteId: activeNoteId,
-        hasCache: !!payloadBase.previewBlockCache,
-        ranges: payloadBase.previewBlockCache?.ranges.length,
+        hasCache: !!previewBlockMap,
+        ranges: previewBlockMap?.ranges.length,
       })
       await notesApi.saveNoteUiState({ id: activeNoteId, payload: payloadBase })
     })()
   }, [
     activeNoteId,
     activeNoteText,
-    buildPersistedPreviewBlockCache,
     captureCurrentAnchorBlockIndex,
     captureEditModeSnapshotFromEditor,
     isPreviewMode,
     latestEditorTextRef,
+    previewBlockSplitCacheRef,
     readCurrentEditUiPayload,
   ])
 
