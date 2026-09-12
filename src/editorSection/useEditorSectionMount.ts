@@ -2232,15 +2232,34 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     updateEditModeSnapshotCache,
   ])
 
+  /**
+   * Edit-restore snapshot preload, for a note that arrived WITHOUT one.
+   *
+   * activateNote (EditorSection.tsx) already computes and caches a restore
+   * snapshot for the note it is activating, synchronously, before it calls
+   * setActiveNoteId -- so by the time this effect runs, that entry exists for
+   * the common path and there is nothing to do. This covers any other route
+   * that sets activeNoteId without pre-populating the cache.
+   *
+   * It USED to share a body with the preview-block prewarm below, and the
+   * early return above took the prewarm down with it: the common path always
+   * has the snapshot cached, so `prewarmPreviewBlocks()` was unreachable for
+   * every note opened normally. Confirmed live -- three seconds after opening
+   * a note, the trace showed "no DB cache found; will parse" and no
+   * "scheduling background prewarm" line at all. A note with no persisted
+   * cache therefore never built one, and on the way out wrote
+   * `previewBlockCache: null`, marking itself cold permanently.
+   *
+   * Two jobs, two effects. A guard belonging to one of them must not be able
+   * to decide anything about the other.
+   *
+   * Deliberately NOT dependent on `activeNoteText` -- this runs once per note
+   * activation, not per keystroke, and its body reads
+   * `latestEditorTextRef.current` for exactly that reason. The dependency was
+   * in the array anyway, contradicting the comment that said so.
+   */
   useEffect(() => {
     if (!persistenceReady || !activeNoteId) return
-    // activateNote (EditorSection.tsx) already computes and caches a restore
-    // snapshot for the note it's activating, synchronously, before it calls
-    // setActiveNoteId -- by the time this effect runs (activeNoteId change),
-    // that cache entry already exists for the common "note loaded via
-    // activateNote" path. Skip the redundant IPC round trip + parse in that
-    // case; this effect exists only to cover any other path that sets
-    // activeNoteId without pre-populating the cache.
     if (editModeSnapshotByNoteIdRef.current.has(activeNoteId)) return
 
     let cancelled = false
@@ -2270,6 +2289,41 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         console.warn('Failed to preload edit mode snapshot for active note', error)
       }
     }
+
+    void preloadEditModeSnapshot()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeNoteId,
+    lineHeightPx,
+    persistenceReady,
+    updateEditModeSnapshotCache,
+    editModeSnapshotByNoteIdRef,
+    latestEditorTextRef,
+    latestEditViewportRef,
+    latestViewportRef,
+  ])
+
+  /**
+   * Background prewarm of the preview block split.
+   *
+   * What it is FOR, since the name no longer says it: the split is not what
+   * renders the preview any more (the continuous pane stopped virtualizing).
+   * Its blocks resolve an anchor LINE -- `buildEditRestoreSnapshotFromUiState`
+   * and the save queue both read them -- and building one here is what lets
+   * `activateNote`'s persist-out write the note's `previewBlockCache` ranges
+   * to its own row, which is the real per-note warm store. A note that never
+   * prewarms never persists ranges, so it parses on every visit forever.
+   *
+   * Debounced 500ms and then run on an idle callback, so a note that is
+   * opened and immediately typed in reschedules rather than parsing under
+   * the keystrokes. That is why `activeNoteText` IS a dependency here, where
+   * it is not for the snapshot preload above.
+   */
+  useEffect(() => {
+    if (!activeNoteId) return
 
     const prewarmPreviewBlocks = () => {
       const text = normalizeInternalText(latestEditorTextRef.current || activeNoteText)
@@ -2314,20 +2368,15 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       }, 500)
     }
 
-    void preloadEditModeSnapshot()
     prewarmPreviewBlocks()
 
     return () => {
-      cancelled = true
       if (previewBlockPrewarmTimerRef.current !== null) {
         window.clearTimeout(previewBlockPrewarmTimerRef.current)
         previewBlockPrewarmTimerRef.current = null
       }
     }
-    // Deliberately NOT dependent on activeNoteText -- this preloads the
-    // persisted-position cache once per note activation (activeNoteId
-    // change), not on every edit. See the comment above.
-  }, [activeNoteId, activeNoteText, lineHeightPx, persistenceReady, updateEditModeSnapshotCache, latestEditorTextRef, previewBlockSplitCacheRef, previewBlocksCacheRef])
+  }, [activeNoteId, activeNoteText, latestEditorTextRef, previewBlockSplitCacheRef, previewBlocksCacheRef])
 
   /**
    * Note-activation effect: restores edit-mode position when the active

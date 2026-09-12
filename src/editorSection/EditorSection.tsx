@@ -682,6 +682,19 @@ export function EditorSection({
         const cursorPos = readCurrentEditUiPayload()?.cursorPos
           ?? editModeSnapshotByNoteIdRef.current.get(previousNoteId)?.fullSelection.end
         const leavingText = normalizeInternalText(latestEditorTextRef.current || activeNoteTextRef.current)
+        // Why the ranges were or were not carried out with the note. This
+        // branch decides whether the note it is LEAVING stays warm, and it
+        // was silent: a note that writes null here has marked itself as
+        // having no cache, and will parse on every future visit until
+        // something builds one again.
+        if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
+          console.log('[preview-block-cache] persisting out', {
+            noteId: previousNoteId,
+            leavingLength: leavingText.length,
+            cacheLength: previewBlockSplitCacheRef.current?.text.length ?? null,
+            matches: previewBlockSplitCacheRef.current?.text === leavingText,
+          })
+        }
         const previewBlockCache = previewBlockSplitCacheRef.current?.text === leavingText
           ? {
               v: 1,
@@ -787,6 +800,24 @@ export function EditorSection({
             ranges: cacheRanges,
           })
         }
+      }
+    } else if (previewBlockSplitCacheRef.current?.text === hydratedText) {
+      // ALREADY WARM IN MEMORY for exactly this text, so there is nothing to
+      // discard. Nulling here regardless is what made the background prewarm
+      // pointless even once it could run: a note is activated more than once
+      // on a single click, and the second activation threw away the split the
+      // first one had just built -- after which the persist-out found no
+      // cache and wrote `previewBlockCache: null`, marking the note as having
+      // none and guaranteeing a full parse on every future visit.
+      //
+      // Measured: "persisting out { leavingLength: 72, cacheLength: null,
+      // matches: false }" for a note whose prewarm had completed seconds
+      // earlier.
+      if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
+        console.log('[preview-block-cache] no DB cache, but memory cache matches; keeping it', {
+          noteId,
+          blocks: previewBlockSplitCacheRef.current.blocks.length,
+        })
       }
     } else {
       previewBlockSplitCacheRef.current = null

@@ -3908,3 +3908,48 @@ retiring columns without a drop.
   render on first open is unknown, and it is the axis a full mount most plausibly made worse.
 - The block ceiling's exact safe maximum is bracketed (somewhere between 200 and 793) but not
   pinned down.
+
+## The block-split warm path was dead end to end (fixed)
+
+Reported as "switching between large notes feels sluggish, and worse after
+the adventure has been opened". The slot management turned out to be clean;
+the warm path was not. Two defects, each a guard belonging to one job
+deciding something about another, and together they meant the persisted
+per-note block cache could never be populated at all:
+
+1. **The background prewarm was unreachable.** It shared an effect body with
+   the edit-restore snapshot preload, whose early return
+   (`editModeSnapshotByNoteIdRef.current.has(activeNoteId)`) is ALWAYS true on
+   the normal path — `activateNote` populates that cache synchronously before
+   it calls `setActiveNoteId`. So `prewarmPreviewBlocks()` never ran for any
+   note opened normally. Confirmed live: three seconds after opening a note,
+   no "scheduling background prewarm" line existed. Now two effects.
+   (That effect's dep array also contained `activeNoteText` while its own
+   closing comment said "Deliberately NOT dependent on activeNoteText".)
+
+2. **`activateNote` discarded a valid in-memory cache.** On "no DB cache
+   found" it nulled both refs unconditionally, including when the in-memory
+   split already matched the text being loaded. A note is activated more than
+   once per click, so the second activation threw away what the first had
+   built — after which the persist-out found nothing and wrote
+   `previewBlockCache: null`, marking the note as having no cache and
+   guaranteeing a full parse on every future visit. Measured:
+   `persisting out { leavingLength: 72, cacheLength: null, matches: false }`
+   for a note whose prewarm had completed seconds earlier.
+
+The `: null` branch of the persist-out is no longer silent — it logs what it
+compared and whether it matched, under `thockdown:debug-input-lag`. It
+decides whether the note it is leaving stays warm, and a wrong answer there
+is invisible for the rest of the session.
+
+**Still unexplained**, and worth a trace if it recurs: why the correlation
+with opening the adventure specifically. Clearing a slot preserves the
+persisted cache (`saveNoteUiState` is a field-wise merge, so an omitted
+`previewBlockCache` is kept, not wiped) and the prewarm effect guards on
+`!activeNoteId`, so neither is an eviction. The likeliest reading is simply
+that the game path adds another activation cycle to a warm path that was
+broken for everyone; that is a hypothesis, not a finding.
+
+**Still true and untouched:** the in-memory split cache is single-slot and
+keyed by text, so only one note is ever warm in memory. The per-note warm
+store is the DB cache, and it now works.
