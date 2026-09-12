@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, FocusEvent, KeyboardEvent } from 'react'
+import type { CSSProperties, KeyboardEvent } from 'react'
 import {
   buildContinuationPlan,
   estimateVelocityAndAcceleration,
@@ -15,12 +15,8 @@ import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
 
 // Two staggered setTimeout delays, not rAF (see the doc comments on the
 // effect and handler that use these) -- setTimeout with different delays
-// is spec-guaranteed to fire in delay order, which is what actually needs
-// to hold here: the focus grab (0ms) needs to run, and then the blur-close
-// check (comfortably later) needs to run strictly after it, across two
-// independent component instances with no other way to coordinate.
+// is spec-guaranteed to fire in delay order.
 const FOCUS_GRAB_DELAY_MS = 0
-const BLUR_CLOSE_CHECK_DELAY_MS = 50
 
 // Cheap fallback speed for reduceVisualEffects: true -- see the component
 // doc comment for why that mode skips the curve engine below entirely
@@ -230,35 +226,31 @@ interface PanelCell {
  * tokens the ring geometry itself is built from), not a hand-tuned number.
  *
 
- * Closes itself if it ever ends up open with focus genuinely outside it
- * (`handleRingBlur`) -- the panel is meant to hold focus the entire time
- * it's shown, so losing it to something else in the app is treated as an
- * implicit dismissal, the same as clicking the backdrop. The one exception
- * is switching which editor section is active while the panel is open:
- * `isOpen` here is this section's own `isEscapeHoldActive`
- * (SectionEditorArea.tsx), which is global "the panel is open" AND-ed with
- * "this is the active section" -- so activating a different section flips
- * *this* instance's `isOpen` to false (hiding it) while the *other*
- * section's instance flips to true and grabs focus into its own top cell
- * via the effect above, without the panel ever needing to be closed and
- * reopened. Blur naturally fires here as part of that handoff too, so
- * `handleRingBlur` can't just always close on blur.
+ * IT NEVER CLOSES ITSELF. The panel is dismissed by Escape (a window-level
+ * handler in App.tsx, so it works wherever focus happens to be) or by
+ * activating a cell that does not opt out of closing -- and by nothing
+ * else. Losing focus does not close it, and neither does a click on the
+ * backdrop.
  *
- * It deliberately does NOT decide this by checking whether THIS instance's
- * own `isOpen` prop is still true after a deferred tick -- an earlier
- * version did that, and it was racy: native focus-shift on mousedown fires
- * as part of the very same synchronous dispatch that also runs
- * markSectionActive (EditorSection.tsx), so by the time blur reaches here
- * the section switch may not have re-rendered (and even less reliably,
- * this component's own `isOpen`-mirroring ref may not have been updated by
- * its passive effect) yet, even after a setTimeout(0). Checking
- * `document.activeElement` against ANY visible escape-hold ring in the
- * whole document, not just this one's own `isOpen`, sidesteps that
- * entirely: exactly one ring is ever visible at a time (only the active
- * section's), so "focus landed in *some* ring" and "focus landed in *the*
- * ring that's currently open" are the same fact, and the check is reading
- * the DOM directly rather than trusting a React ref that may not have
- * settled yet.
+ * That is a correctness requirement, not a preference. A mode can OWN the
+ * ring for as long as it likes (escapeMenuContract.ts), and for the
+ * adventure the ring is the entire interface: a stray click that dismissed
+ * it would end a session through a path the game never sees, leaving the
+ * view up with no way to reach it. Making dismissal conditional on which
+ * mode is up would put the same rule in two places and let them disagree,
+ * so there is one rule for every consumer.
+ *
+ * Two earlier designs closed on blur and both were racy in the same way:
+ * native focus-shift on mousedown fires inside the very dispatch that also
+ * runs markSectionActive (EditorSection.tsx), so nothing this component can
+ * read -- neither its own `isOpen` prop nor a ref mirroring it -- has
+ * settled by the time blur arrives. Switching sections while the panel is
+ * open is a legitimate handoff (`isOpen` here is this section's own
+ * `isEscapeHoldActive`: global "the panel is open" AND-ed with "this is the
+ * active section", so the other instance takes over and grabs focus via the
+ * effect above), and it is indistinguishable at blur time from a genuine
+ * dismissal. Not closing on blur removes the distinction rather than
+ * timing it.
  *
  * ARIA: role="toolbar" rather than role="grid" -- there's no row/column
  * structure to describe, and toolbar is the WAI-ARIA pattern that actually
@@ -763,35 +755,6 @@ export function EscapeHoldPanel({
     if (!cell.keepsMenuOpen) onClose()
   }
 
-  // Deferred well past the focus-grab effect's own delay (BLUR_CLOSE_CHECK_
-  // DELAY_MS > FOCUS_GRAB_DELAY_MS) so a section-switch that's *in flight*
-  // as part of this same blur (see the component doc comment) has settled
-  // -- i.e. so the newly active section's own ring has had a chance to grab
-  // focus, via its own deferred effect above -- before checking where focus
-  // actually ended up. This needs to run strictly *after* that other
-  // instance's timer, and two independently-scheduled deferrals at the
-  // *same* delay have no ordering guarantee relative to each other -- found
-  // live as the panel still closing intermittently even after both were
-  // "one tick" via setTimeout(0), because this callback's timer had
-  // sometimes already been queued (blur fires synchronously as part of the
-  // section-switch) before the other instance's focus-grab effect had even
-  // run, let alone its own timer fired. setTimeout callbacks at different
-  // delays are spec-guaranteed to fire in delay order, so giving this one a
-  // longer delay than the focus grab's is what actually makes "run after
-  // it" reliable, rather than "usually runs after it, on this browser, at
-  // this load level."
-  //
-  // See the component doc comment for why this checks the DOM globally
-  // (any visible ring, not just this instance's own) rather than this
-  // instance's `isOpen` prop.
-  const handleRingBlur = (_event: FocusEvent<HTMLDivElement>) => {
-    window.setTimeout(() => {
-      const activeElement = document.activeElement
-      if (activeElement instanceof HTMLElement && activeElement.closest('.editor-escape-hold-ring.is-visible')) return
-      onClose()
-    }, BLUR_CLOSE_CHECK_DELAY_MS)
-  }
-
   // Hover takes priority over focus -- while the mouse is over a cell, the
   // label previews what a click would activate; focusedIndex is the
   // fallback the rest of the time. Either can legitimately point past the
@@ -806,7 +769,6 @@ export function EscapeHoldPanel({
       role="toolbar"
       aria-label="Quick note actions"
       onKeyDown={handleRingKeyDown}
-      onBlur={handleRingBlur}
     >
       {/* Centered label of whichever cell is focused, or hovered while the
           mouse is over one -- see displayedLabel above. Sized/shaped in

@@ -339,18 +339,17 @@ export function SectionEditorArea({
         <div className="editor-background">
           <div ref={setStageEl} className={`editor-stage${isPreviewMode ? ' is-preview-mode' : ''}${!activeNoteId ? ' is-empty' : ''}`}>
             {isEscapeHoldActive ? (
-              // Pure dim+blur backdrop -- catches outside clicks to close, and
-              // its backdrop-filter blurs whatever's behind it (the real note
-              // content in edit/render-container below). It does NOT wrap the
-              // panel: the panel is a sibling that paints in front of this, so
-              // the blur never touches it (backdrop-filter only blurs what's
-              // behind the element it's set on, not its own descendants --
-              // see the empty-state box further down for why that matters).
-              <div
-                className="editor-escape-hold-backdrop"
-                aria-hidden="true"
-                onClick={onEscapeHoldPanelClose}
-              />
+              // Pure dim+blur backdrop: its backdrop-filter blurs whatever's
+              // behind it (the real note content in edit/render-container
+              // below), and it swallows clicks aimed at the note underneath.
+              // It does NOT close the panel -- see EscapeHoldPanel.tsx's doc
+              // comment for why nothing outside the ring dismisses it. It also
+              // does NOT wrap the panel: the panel is a sibling that paints in
+              // front of this, so the blur never touches it (backdrop-filter
+              // only blurs what's behind the element it's set on, not its own
+              // descendants -- see the empty-state box further down for why
+              // that matters).
+              <div className="editor-escape-hold-backdrop" aria-hidden="true" />
             ) : null}
             <div className={`edit-container${isPreviewMode ? ' is-pane-hidden' : ''}`}>
               <div className="markdown-editor-texture" />
