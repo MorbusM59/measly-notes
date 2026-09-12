@@ -137,11 +137,22 @@ function markChain(from: EventTarget | null): void {
   }
 }
 
-/** Typing a space in a text field is not activating a control. */
-function isTextEntry(node: Element | null): boolean {
-  if (!node) return true
-  if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) return true
-  return node instanceof HTMLElement && node.isContentEditable
+/**
+ * The focused element, if it is something that can look pressed at all.
+ *
+ * Asked as a selector match rather than by ruling out text entry, which is
+ * how this started: `isContentEditable` resolves computed style, so reading
+ * it on every SPACE cost ~32us a keystroke on the keydown path -- measured,
+ * after a first version that assumed the check was free. A selector match
+ * touches no style. It is also the better question: keyboard focus is
+ * always on the control itself, so there is nothing to walk up to.
+ */
+function pressableFocus(): Element | null {
+  const selector = resolvePressableSelector()
+  const node = document.activeElement
+  if (!node) return null
+  if (selector !== null && !node.matches(selector)) return null
+  return node
 }
 
 /**
@@ -181,8 +192,11 @@ export function installPressTracking(): void {
   // dropping it would have traded one gap for another.
   window.addEventListener('keydown', (event) => {
     if (event.repeat || !ACTIVATION_KEYS.has(event.key)) return
-    if (isTextEntry(document.activeElement)) return
-    markChain(document.activeElement)
+    const node = pressableFocus()
+    if (!node) return
+    clearAll()
+    node.setAttribute(PRESSED_ATTRIBUTE, '')
+    marked.push(node)
   }, { capture: true })
   window.addEventListener('keyup', (event) => {
     if (!ACTIVATION_KEYS.has(event.key)) return
