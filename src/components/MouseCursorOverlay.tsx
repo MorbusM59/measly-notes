@@ -449,7 +449,7 @@ export function MouseCursorOverlay({
       }
 
       if (haloRadiusPx > 0) {
-        const haloOuterRadius = haloRadiusPx * dpr * cursorHoldHaloMultiplier(holdLevel, clickMaxSpeed)
+        const haloOuterRadius = haloRadiusPx * dpr * cursorHoldHaloMultiplier(holdLevel, clickMaxSpeed) * 4
         const falloffStop = haloFalloff / 100
         const gradient = ctx!.createRadialGradient(cx, cy, 0, cx, cy, haloOuterRadius)
         gradient.addColorStop(0, `rgba(${halo.r}, ${halo.g}, ${halo.b}, ${halo.a * fadeAlpha})`)
