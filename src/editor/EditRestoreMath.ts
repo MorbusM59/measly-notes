@@ -138,6 +138,18 @@ export function resolveEditSourceAnchorLineFromUiState(
     return null
   }
 
+  // BLOCK ZERO IS LINE ZERO, and knowing that costs nothing. The first range
+  // always starts at line 1 (the split's contiguity invariant: ranges tile
+  // the document from line 1 with no gaps), so the answer here is 0 whatever
+  // the document contains.
+  //
+  // This matters far more than it looks. `getNoteUiState` returns 0 as the
+  // documented default for a note that has never been positioned -- not
+  // null -- so EVERY never-opened note took the parse below to be told its
+  // anchor is at the top. On a 2MB import that is the entire first-open
+  // cost: a full remark pass over the document to compute the number zero.
+  if (uiState.anchorBlockIndex <= 0) return 0
+
   const totalLines = Math.max(1, text.split('\n').length)
   const resolvedBlocks = blocks ?? splitMarkdownIntoPreviewBlocks(text)
   const sourceLine = resolveSourceLineForAnchorBlockIndex(resolvedBlocks, Math.round(uiState.anchorBlockIndex))

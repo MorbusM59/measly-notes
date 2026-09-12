@@ -789,15 +789,32 @@ export function EditorSection({
       // Measured on a 320KB note: 1.6s in the snapshot build, then another
       // 1.7s in the prewarm half a second later. Same parse, twice, on the
       // first open of every large note.
-      // OFF THE MAIN THREAD (editor/blockSplitClient.ts). This is the one
-      // parse a reader waits through, and on a large note it was 1.6 seconds
-      // of frozen app -- no scroll, no sidebar, no window controls -- on the
-      // first open. `activateNote` is already async and already behind the
-      // render view's fade, so awaiting a worker costs the same wall time
-      // and spends none of it frozen.
-      const parsed = await requestFullBlockSplit(hydratedText)
-      previewBlockSplitCacheRef.current = parsed
-      previewBlocksCacheRef.current = { text: hydratedText, blocks: parsed.blocks }
+      // DOES THIS ACTIVATION ACTUALLY NEED THE MAP? Only to place a stored
+      // anchor, and only a real one: block zero is line zero by definition
+      // (EditRestoreMath.ts), and zero is exactly what `getNoteUiState`
+      // returns for a note nobody has positioned yet. So the case this whole
+      // cost was being paid for -- opening a freshly imported document for
+      // the first time -- is the one case that needs nothing at all.
+      //
+      // When it is needed, the parse happens OFF THE MAIN THREAD
+      // (editor/blockSplitClient.ts) and is awaited here: `activateNote` is
+      // already async and already behind the render view's fade, so the wait
+      // costs the same wall time and spends none of it frozen.
+      //
+      // When it is not, nothing is parsed on this path at all. The map still
+      // gets built -- by the background prewarm, on the worker, half a second
+      // later -- and persisted for next time. The reader is not kept waiting
+      // for it.
+      const storedAnchor = nextUiState?.anchorBlockIndex
+      const needsBlockMap = typeof storedAnchor === 'number' && storedAnchor > 0
+      if (needsBlockMap) {
+        const parsed = await requestFullBlockSplit(hydratedText)
+        previewBlockSplitCacheRef.current = parsed
+        previewBlocksCacheRef.current = { text: hydratedText, blocks: parsed.blocks }
+      } else {
+        previewBlockSplitCacheRef.current = null
+        previewBlocksCacheRef.current = null
+      }
     }
     if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
       console.log('[preview-block-cache] activation', {
