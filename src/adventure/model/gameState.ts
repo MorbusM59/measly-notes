@@ -28,11 +28,21 @@ import { armorFromHoldings, applyAcquisition, NO_ARMOR, type Armor } from './arm
 import { resolveProfile, type EffectiveProfile, type HoldingCounts, type Modifier, type ModifierKind } from './modifiers'
 import { clampBaseStats, createStatBlock, deriveStats, type StatBlock } from './stats'
 import type { Effect } from './effects'
+import { allocateStatPoint, FIRST_STAT_POINT_THRESHOLD } from './motes'
 import type { JsonObject } from '../core/json'
 import { createSeed, type RngState } from '../core/rng'
 
-/** Bumped when the SHAPE below changes incompatibly. */
-export const SAVE_VERSION = 1
+/**
+ * Bumped when the SHAPE below changes incompatibly, which DISCARDS the save
+ * (save.ts returns null for any other version) rather than migrating it.
+ *
+ * 2: experience split into `experienceEarned` / `experienceSpentOnTraits`
+ * with a stored `experienceToNextStatPoint`. A v1 save has one running
+ * balance, and there is no honest way to read a total out of it -- whatever
+ * was spent is simply gone from the number. Guessing would put a run at the
+ * wrong distance from its next stat point with nothing to say so.
+ */
+export const SAVE_VERSION = 2
 
 /** One frame of the director's stack: which stage, and its own private state. */
 export interface StageFrame {
@@ -79,8 +89,20 @@ export interface GameRecord {
   level: number
   regionId: string | null
   baseStats: StatBlock
+  /** Points earned and not yet spent on a stat. */
   statPoints: number
-  experienceUnits: number
+  /** Points ever spent on a stat -- what pushes the next threshold away. */
+  statPointsAcquired: number
+  /**
+   * Every mote this run has ever earned. MONOTONIC: spending never reduces
+   * it, because it is the milestone track as well as the source of the
+   * currency. See model/motes.ts for why the two are stored apart.
+   */
+  experienceEarned: number
+  /** Of those, how many have gone on traits. The balance is the difference. */
+  experienceSpentOnTraits: number
+  /** What `experienceEarned` must reach for the next stat point. Starts at 10. */
+  experienceToNextStatPoint: number
   goldUnits: number
   fame: number
   hitPoints: number
@@ -179,7 +201,10 @@ function createGame(id: string, seed: RngState, nowMs: number): GameRecord {
     regionId: null,
     baseStats,
     statPoints: 0,
-    experienceUnits: 0,
+    statPointsAcquired: 0,
+    experienceEarned: 0,
+    experienceSpentOnTraits: 0,
+    experienceToNextStatPoint: FIRST_STAT_POINT_THRESHOLD,
     goldUnits: 0,
     fame: 0,
     hitPoints: deriveStats(clampBaseStats(baseStats)).maxHitPoints,
@@ -278,7 +303,20 @@ export function applyEffect(
       return replace({ armor: { fromItems: effect.fromItems, natural: effect.natural } })
 
     case 'grantExperience':
-      return replace({ experienceUnits: Math.max(0, game.experienceUnits + effect.units) })
+      // Earning only ever adds. Spending is `spendExperience`, and it is a
+      // different field on purpose -- see model/motes.ts.
+      return replace({ experienceEarned: Math.max(0, game.experienceEarned + effect.units) })
+
+    case 'spendExperience':
+      return replace({
+        experienceSpentOnTraits: Math.max(0, game.experienceSpentOnTraits + effect.units),
+      })
+
+    case 'allocateStatPoint': {
+      if (game.statPoints <= 0) return save
+      const next = allocateStatPoint(game.experienceToNextStatPoint, game.statPointsAcquired)
+      return replace({ statPoints: game.statPoints - 1, ...next })
+    }
 
     case 'grantGold':
       return replace({ goldUnits: Math.max(0, game.goldUnits + effect.units) })

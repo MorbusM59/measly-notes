@@ -40,6 +40,19 @@ export type Effect =
   | { kind: 'setArmor'; fromItems: number; natural: number }
   /** Quantized: one unit buys one selection at the start of a level. */
   | { kind: 'grantExperience'; units: number }
+  /**
+   * Spending motes on a trait. A DIFFERENT effect from earning, not a
+   * negative grant: the milestone track reads only what was earned, so
+   * spending must not be able to reach it (model/motes.ts).
+   */
+  | { kind: 'spendExperience'; units: number }
+  /**
+   * Putting a held stat point into a stat. Consumes one point and pushes the
+   * next threshold away; the STAT it goes into is `adjustBaseStat`, emitted
+   * alongside, because which stat is the game's business and the threshold
+   * is the platform's.
+   */
+  | { kind: 'allocateStatPoint' }
   | { kind: 'grantGold'; units: number }
   /** The score. Only ever goes up. */
   | { kind: 'grantFame'; amount: number }

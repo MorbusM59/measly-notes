@@ -225,6 +225,15 @@ Effects come in two kinds, and the distinction is load-bearing: **passive**
 (re-applied whenever the profile resolves) and **on-acquire** (fired once,
 changes state). Armor is the reason.
 
+**Motes are a currency and a milestone at once**, and the two never interact:
+the balance (`earned − spentOnTraits`) buys traits, while stat points read
+`earned` alone, which is monotonic. So spending never slows the character and
+hoarding never speeds it up; what moves is the threshold, pushed
+`5 × pointsAcquired` further by each point taken. One running balance cannot
+express that — subtracting a purchase from it would silently defer the next
+stat point — which is why two numbers are stored and neither is derived from
+the other.
+
 **Armor is not a stat.** Every other stat is static for a level; armor is
 *spent*. Two pools — `fromItems`, which decay can touch, and `natural` from
 traits, which it cannot — because one number could not express a trait that
@@ -235,8 +244,8 @@ an item carried over counts as a fresh acquisition.
 
 Built and exercised end to end: the director, the stack, the effect
 vocabulary, the save and its sanitizer, stats, modifiers, armor, checks,
-determinism, and the stages for welcome, character creation, region select
-and the encounter hub. The two acquired-\* interludes are GONE — what you
+determinism, the mote model, the chrome contract, and the stages for welcome,
+character creation, region select and the encounter hub. The two acquired-\* interludes are GONE — what you
 carry belongs on the chrome, always visible, not behind a permanent cell.
 
 **Not built, on purpose**: hunting, exploring, chance encounters, combat and
@@ -263,7 +272,7 @@ These block a playable game and want answers rather than guesses.
    focused CHOICE, not about holdings any more.)
 2. **Readouts have no icons.** The design's status line is written in icons;
    the contract's readout is a short label and a value.
-3. **Motes — DECIDED, not yet built.** One earning stream, two stored facts:
+3. **Motes — BUILT** (`model/motes.ts`). One earning stream, two stored facts:
    `experienceEarned` (monotonic) and `experienceSpentOnTraits`. The spendable
    balance is `earned − spentOnTraits` and has nothing to do with stats. Stat
    points read `earned` alone: available when `earned ≥ experienceToNextStatPoint`,

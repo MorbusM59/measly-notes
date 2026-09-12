@@ -23,8 +23,9 @@
 //     also consumes progress toward it is not. Showing a number computed
 //     from an unresolved rule would make the rule look decided.
 
-import type { EscapeMenuChromePill, EscapeMenuModeChrome, EscapeMenuReadout } from '../escapeMenu/escapeMenuContract'
+import type { EscapeMenuChromeGauge, EscapeMenuChromePill, EscapeMenuModeChrome, EscapeMenuReadout } from '../escapeMenu/escapeMenuContract'
 import { totalArmor } from './model/armor'
+import { moteBalance, statPointProgress, statPointSpan } from './model/motes'
 import { activeGame, heldModifiers, holdingCounts, profileOf, type GameSave } from './model/gameState'
 import { describeModifier, type Modifier } from './model/modifiers'
 import { STAT_KEYS, STAT_LABELS } from './model/stats'
@@ -62,7 +63,10 @@ export function statusReadouts(save: GameSave, catalog: ReadonlyMap<string, Modi
       value: String(profile.stats[key]),
     })),
     { key: 'gold', label: 'Gold', value: String(game.goldUnits) },
-    { key: 'xp', label: 'Motes', value: String(game.experienceUnits) },
+    // The BALANCE, not the total earned: this readout is what the player can
+    // spend. How close the next stat point is is the rail's job, and reads
+    // the total instead -- see model/motes.ts for why those are two numbers.
+    { key: 'xp', label: 'Motes', value: String(moteBalance(game.experienceEarned, game.experienceSpentOnTraits)) },
     ...(game.statPoints > 0 ? [{ key: 'points', label: 'Points', value: String(game.statPoints) }] : []),
     { key: 'fame', label: 'Fame', value: String(game.fame) },
   ]
@@ -146,4 +150,34 @@ export function chromeStrip(save: GameSave, catalog: ReadonlyMap<string, Modifie
     leading: pillsOf(held, 'item', counts),
     trailing: pillsOf(held, 'trait', counts),
   }
+}
+
+/**
+ * The rail's gauges. One today: how close the next stat point is.
+ *
+ * It reads the run's TOTAL experience against the moving threshold, so it
+ * does not move when motes are spent on a trait -- which is the whole of the
+ * mote design and the thing a single running balance could not express.
+ *
+ * A list because the rail is subdivided: the second gauge is a layout
+ * question, and the layout answers it already (escapeMenuContract.ts).
+ */
+export function chromeGauges(save: GameSave): EscapeMenuChromeGauge[] {
+  const game = activeGame(save)
+  if (!game) return []
+
+  const span = statPointSpan(game.statPointsAcquired)
+  const into = Math.max(0, game.experienceEarned - (game.experienceToNextStatPoint - span))
+  return [
+    {
+      key: 'statPoint',
+      icon: 'fa-solid fa-arrow-up-right-dots',
+      ratio: statPointProgress(game.experienceEarned, game.experienceToNextStatPoint, game.statPointsAcquired),
+      label: 'Next stat point',
+      detail: [
+        `${into} of ${span} motes earned toward it`,
+        `${game.experienceEarned} earned in total, next point at ${game.experienceToNextStatPoint}`,
+      ],
+    },
+  ]
 }
