@@ -82,7 +82,11 @@ export interface EscapeMenuModeStatus {
    * short label -- roughly twelve characters -- not a name.
    */
   title: string
-  /** The one line that says where you are -- shown across the tab strip. */
+  /**
+   * The one line that says what just happened and what is being asked --
+   * shown on the CHAPTER BAR below the editor, where a reader already looks
+   * for "what is going on with this". Prose, not a label.
+   */
   headline: string
   /**
    * WHICH one, when the mode has instances worth naming: a story's title, a
@@ -91,7 +95,10 @@ export interface EscapeMenuModeStatus {
    * `title` has already said everything.
    */
   subject?: string
-  /** Running state, as pills on the chapter/tag bar. Keep it to a handful. */
+  /**
+   * Running state, as pills on the TAB BAR above the editor -- where a
+   * reader already looks for "what am I holding". Keep it to a handful.
+   */
   readouts: EscapeMenuReadout[]
 }
 

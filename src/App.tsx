@@ -2318,7 +2318,7 @@ function App() {
   const reportSlotOccupancy = useCallback((
     sectionId: string,
     occupancy: SlotOccupancy,
-    arrival: { displacedNoteId: string | null } | null,
+    arrival: { arrivedNoteId: string | null; displacedNoteId: string | null } | null,
   ) => {
     setOccupancyBySectionId((previous) => {
       const existing = previous[sectionId]
@@ -2328,6 +2328,17 @@ function App() {
       if (existing && existing.kind === occupancy.kind && sameNote) return previous
       return { ...previous, [sectionId]: occupancy }
     })
+
+    // A NOTE ARRIVING IN A SLOT LOWERS THE RING. The two are different kinds
+    // of thing: in a note the text is the content and the ring is a menu over
+    // it, but for a mode the ring IS the content -- so a ring left up over a
+    // note the reader just chose is a menu they did not ask for, sitting on
+    // top of the thing they did.
+    //
+    // Only an arriving NOTE, not an emptying: opening the adventure clears
+    // the slot and raises the ring in the same gesture, and treating that
+    // clear as a switch would close the ring on the way in.
+    if (arrival?.arrivedNoteId) setIsEscapeHoldPanelOpen(false)
 
     // A guide that ARRIVED without us opening it -- a `$HELP` link, a link
     // from another note -- still owes the slot its note back. It is already
@@ -5923,9 +5934,18 @@ ${markdownHtml}
    */
   const closeOverlay = useCallback(async (): Promise<void> => {
     const plan = planOverlayClose(slotOverlay)
-    if (!plan.restore) return
+    if (!plan.restore || !slotOverlay) return
+
+    // A record whose slot has already moved on is DROPPED, not acted on. The
+    // reader has chosen what they want there; restoring what the overlay
+    // remembered would take it away again -- and this is reachable now that a
+    // note arriving lowers the ring, which can reach a mode's onDismiss a
+    // beat after the slot stopped showing it. The invariant, applied: where
+    // the record and the screen disagree, the screen wins.
+    const live = occupancyBySectionId[slotOverlay.sectionId]?.kind === slotOverlay.kind
     setSlotOverlay(null)
     persistMenuStateNow({ slotOverlay: null })
+    if (!live) return
 
     const handle = sectionRegistryRef.current.get(plan.restore.sectionId)
     if (!handle) return
@@ -5934,7 +5954,7 @@ ${markdownHtml}
       return
     }
     await handle.clearActiveNote().catch(() => undefined)
-  }, [persistMenuStateNow, slotOverlay])
+  }, [occupancyBySectionId, persistMenuStateNow, slotOverlay])
 
   /**
    * The User Guide: an ordinary (timeless) note loaded through the exact

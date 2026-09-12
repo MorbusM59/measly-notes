@@ -17,7 +17,7 @@ import type { ChapterPillSplitArm } from '../chapters/useChapterPillActions'
 import { EscapeHoldPanel, type ExportScope } from './EscapeHoldPanel'
 import { splitChapterFamily } from '../shared/chapters'
 import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
-import { EscapeMenuStatusBar } from '../escapeMenu/EscapeMenuStatusBar'
+import { EscapeMenuNarration } from '../escapeMenu/EscapeMenuStatus'
 
 export interface SectionEditorAreaProps {
   sectionId: string
@@ -309,11 +309,12 @@ export function SectionEditorArea({
   // chapter now, so the bar needs to be reachable before chapters.length
   // ever goes positive, not just after. No user-facing show/hide control
   // exists; it simply tracks whether there's a note to show chapters of.
-  // A mode that owns this slot (escapeMenuContract.ts) has no note and so
-  // no chapters and no tags -- but it does have running state, and this bar
-  // is where the editor already shows "what is the state of the thing you
-  // are looking at". So the panel opens for a mode too, and shows the
-  // mode's readouts in place of the chapter/tag bar.
+  // A mode that owns this slot (escapeMenuContract.ts) has no note and so no
+  // chapters and no tags -- but it does have something to say. This bar is
+  // where the editor already shows "what is going on with the thing you are
+  // looking at", so the panel opens for a mode too and shows the mode's
+  // NARRATION here. Its state goes to the tab bar above instead -- see
+  // EscapeMenuStatus.tsx for why the two are split that way round.
   const modeStatus = escapeMenu?.activeMode?.status ?? null
   const isChapterPanelOpen = Boolean(activeNoteId) || Boolean(modeStatus)
 
@@ -480,7 +481,7 @@ export function SectionEditorArea({
       </aside>
       <div className={`chapter-panel${isChapterPanelOpen ? ' is-open' : ''}`} aria-hidden={!isChapterPanelOpen}>
         {modeStatus ? (
-          <EscapeMenuStatusBar status={modeStatus} />
+          <EscapeMenuNarration status={modeStatus} />
         ) : activeNoteId && menuIdentityNoteId ? (
           <ChapterBar
             parentNoteId={menuIdentityNoteId}

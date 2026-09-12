@@ -105,7 +105,7 @@ export interface EditorSectionProps extends Omit<SectionEditorAreaProps,
   reportSlotOccupancy: (
     sectionId: string,
     occupancy: SlotOccupancy,
-    arrival: { displacedNoteId: string | null } | null,
+    arrival: { arrivedNoteId: string | null; displacedNoteId: string | null } | null,
   ) => void
   /** Files the undocked note into an existing section picked from the section picker. */
   onDockUndockedNoteIntoSection: (candidateSectionId: string) => void
@@ -2012,7 +2012,7 @@ export function EditorSection({
     const switched = lastReportedNoteIdRef.current !== activeNoteId
     const displacedNoteId = lastReportedNoteIdRef.current
     lastReportedNoteIdRef.current = activeNoteId
-    reportSlotOccupancy(sectionId, occupancy, switched ? { displacedNoteId } : null)
+    reportSlotOccupancy(sectionId, occupancy, switched ? { arrivedNoteId: activeNoteId, displacedNoteId } : null)
   }, [reportSlotOccupancy, sectionId, occupancy, activeNoteId])
 
   /** Files the undocked note into the section this slot already holds. */

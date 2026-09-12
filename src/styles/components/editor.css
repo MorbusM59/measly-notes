@@ -76,9 +76,41 @@
    here; this only sets the two things that are actually different -- the
    pills sit at their natural width instead of filling the strip, and each
    one is a label and a value rather than a single name. */
-.escape-menu-status-shell {
+.escape-menu-narration-shell {
   gap: var(--spacing-regular);
   padding: var(--spacing-small) var(--spacing-regular);
+}
+
+/* The mode's narration: prose, not a pill. A pill would read as something to
+   press, and every gesture a mode has is in the ring. Takes the rest of the
+   bar and truncates rather than wrapping -- this strip is one line high, and
+   a second line would push the editor. */
+.escape-menu-narration {
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--color-text-80);
+}
+
+/* Separated from the subject in EMs, not in --spacing-*: the shell's gap is
+   the bar's pill gap (2px at default spacing), which is right between pills
+   that carry their own padding and far too tight between two bare runs of
+   text. This is typographic space, so it scales with the type. */
+.escape-menu-status-subject + .escape-menu-narration {
+  margin-left: 0.75em;
+}
+
+/* State, in the tab bar's strip. The pills are the chapter bar's, unchanged;
+   only the row around them is new, because here it shares the strip's own
+   scroll shell rather than sitting in a well of its own. */
+.escape-menu-readouts {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-small);
+  min-width: 0;
 }
 
 /* The mode's own name, leading the bar. Not a pill: it names the strip

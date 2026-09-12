@@ -28,10 +28,11 @@ channels:
 | the tab bar | the stats readout — or, while a choice is focused, that choice's own effects |
 | the chapter bar | narration: what just happened, and the frame for what is being asked |
 
-**The last two are currently inverted in the running app** — the escape-menu
-contract puts `headline` on the tab bar and `readouts` on the chapter bar.
-Swapping them is a change to a shared seam and has not been made yet. See the
-open questions.
+State goes up and narration goes down, and that is a rule rather than a
+layout convenience: a reader's eye goes up for "how am I doing" and down for
+"what is going on", the same way it does for a note's tabs and its chapters.
+`src/escapeMenu/EscapeMenuStatus.tsx` renders each half into the bar it
+belongs to.
 
 ## Director and stages
 
@@ -105,6 +106,14 @@ adventure wires it to leaving, because lowering the ring — Escape, or a cell
 that does not keep the menu open — otherwise left the slot occupied by an
 empty editor with the window control still lit: a view whose effects the
 player can see but which they cannot reach.
+
+The converse holds too, and it is the same observation from the other side:
+**a note arriving in a slot lowers the ring.** In a note the text is the
+content and the ring is a menu over it; for a mode the ring *is* the content.
+So a ring left up over a note the reader just chose is a menu they did not
+ask for, sitting on top of the thing they did. Only an arriving note counts —
+opening the adventure empties its slot and raises the ring in one gesture,
+and treating that as a switch would close the ring on the way in.
 
 Which slot is showing what is not the game's business at all. It is one
 record and one derivation, shared with the User Guide and undocked notes —
@@ -191,43 +200,35 @@ as a number somebody would have to guess was real. **Do not fill these in.**
 
 These block a playable game and want answers rather than guesses.
 
-1. **Tab bar and chapter bar are inverted** against the design. Swapping them
-   is an edit to `EscapeMenuModeStatus`'s documented roles plus the two host
-   render sites.
-2. **The tab bar is not focus-sensitive yet.** A choice's `detail` is
-   computed and carried on every `Choice`, but the escape-menu contract has
-   no way to show it: `EscapeMenuModeStatus` is static for as long as a mode
-   is up. Needs an additive field on the shared contract.
-3. **Readouts have no icons.** The design's status line is written in icons;
+1. **The tab bar is not focus-sensitive yet.** A choice's `detail` is computed
+   and carried on every `Choice`, but the escape-menu contract has no way to
+   show it: `EscapeMenuModeStatus` is static for as long as a mode is up.
+   Needs an additive field on the shared contract.
+2. **Readouts have no icons.** The design's status line is written in icons;
    the contract's readout is a short label and a value.
-4. **Motes: spent or banked?** Experience buys traits at the start of a level
+3. **Motes: spent or banked?** Experience buys traits at the start of a level
    *and* accumulates toward a stat point at `10 + 5 × points acquired`.
    Whether spending on a trait also consumes progress toward the threshold is
    undecided, so the tab bar does not show "motes until next point".
-5. **Resilience.** The design writes hit points as `50 + 15 × Resilience`, and
+4. **Resilience.** The design writes hit points as `50 + 15 × Resilience`, and
    Resilience is not one of the six stats — but the formula is written under
    Might, and is read against Might here. Seventh stat, or a slip?
-6. **Player base damage.** The damage *multiplier* is specified; what it
+5. **Player base damage.** The damage *multiplier* is specified; what it
    multiplies is not.
-7. **Intellect and Charisma** have unlocks (spells, charisma actions) rather
+6. **Intellect and Charisma** have unlocks (spells, charisma actions) rather
    than curves, and neither list is written. They are declared stats with real
    effects pending.
-8. **Enemy scaling, fame, experience and gold rates, and the action economy.**
+7. **Enemy scaling, fame, experience and gold rates, and the action economy.**
    All unwritten.
-9. **Ring capacity.** Nine stage choices plus the three the director always
+8. **Ring capacity.** Nine stage choices plus the three the director always
    adds is the working cap (`core/screen.ts`). Not yet checked against the
    rendered dial at twelve cells.
-10. **Regions** currently carry a name and nothing else: which encounters and
+9. **Regions** currently carry a name and nothing else: which encounters and
     monsters each brings into scope is unspecified.
-11. **A second game slot.** The save is shaped for it (`games` is a list,
+10. **A second game slot.** The save is shaped for it (`games` is a list,
     `activeGameId` says which is live), and "Continue previous adventure"
     re-enters at the encounter hub rather than at the exact screen left,
     because leaving a game currently discards its stack rather than
     suspending it into its row.
-12. **The ring after a game ends by other means.** Choosing a note while the
-    adventure is up correctly ends the game — but the ring stays raised, now
-    showing the ordinary quick actions over the newly loaded note. Nothing is
-    wrong with the state; it is just a transition nobody designed. Should a
-    mode disappearing take the ring down with it?
-13. **Armor decay's curve.** "A chance based on luck" is specified; the curve
+11. **Armor decay's curve.** "A chance based on luck" is specified; the curve
     is not. `ARMOR_DECAY_TUNING` is a labelled placeholder, not a tuned value.

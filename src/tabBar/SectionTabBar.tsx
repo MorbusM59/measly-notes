@@ -5,6 +5,7 @@ import { resolveIdentityLabel } from '../shared/tabLabels'
 import { InlinePillOrInput } from '../shared/InlinePillOrInput'
 import { TEMP_TAB_PIN_HOLD_MS, type UseSectionTabsResult } from './useSectionTabs'
 import type { EscapeMenuModeStatus } from '../escapeMenu/escapeMenuContract'
+import { EscapeMenuReadouts } from '../escapeMenu/EscapeMenuStatus'
 
 export interface SectionTabBarProps {
   tabs: UseSectionTabsResult
@@ -248,9 +249,11 @@ export function SectionTabBar({
                   so there are no tabs to show it among. The picker still opens
                   over it normally, which is how the note gets filed. The guide
                   spends that same empty space on the one thing its reader
-                  needs to know, since it can never be filed anywhere. */}
+                  needs to know, since it can never be filed anywhere. A mode
+                  spends it on its STATE -- see EscapeMenuStatus.tsx for why
+                  state goes here and narration goes to the bar below. */}
               {modeStatus ? (
-                <span className="tabbar-tag-hint tabbar-mode-headline">{modeStatus.headline}</span>
+                <EscapeMenuReadouts status={modeStatus} />
               ) : isShowingGuide ? (
                 <span className="tabbar-tag-hint tabbar-guide-hint">Right click the button to the left to close this guide.</span>
               ) : isShowingUndockedNote && !isSectionPickerOpen ? null : isSectionPickerOpen ? (
