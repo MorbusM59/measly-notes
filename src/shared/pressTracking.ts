@@ -155,6 +155,29 @@ function pressableFocus(): Element | null {
   return node
 }
 
+// ## Pointer events, not mouse events
+//
+// `mousedown` and `mouseup` are COMPATIBILITY events, synthesized after the
+// pointer event they follow and suppressed entirely if anything called
+// `preventDefault()` on it. Several controls here do exactly that from their
+// own `onPointerDown` -- the music transport buttons, to stop a press-and-hold
+// scrub from also starting a text selection -- and those buttons went
+// completely dead to the pressed look, for a LEFT click, with nothing wrong
+// at the button.
+//
+// That is not a per-button defect and cannot be fixed per button: any control
+// that ever needs to suppress a default on press would silently lose its
+// pressed look. `:active` never had the problem because Chromium sets it from
+// the widget-level press, upstream of the DOM event the app can cancel. So the
+// app has to listen where the browser does. A window-capture `pointerdown`
+// listener runs BEFORE the target's own handler, so a `preventDefault()` there
+// cannot reach it -- verified in Chromium: a left click on a button that
+// cancels its own `pointerdown` fires window-capture pointerdown/pointerup and
+// no mouse events at all.
+//
+// It is the better question anyway: a press is a press whatever device made
+// it, and touch and pen now get the pressed look for free.
+
 /**
  * Installs the tracking. Idempotent, and never removed: it is a property of
  * the document for the app's whole life, not something a component owns.
@@ -163,7 +186,7 @@ function pressableFocus(): Element | null {
  * drag starting, the window losing focus, the pointer being cancelled -- so
  * every one of those clears. Clearing works from a remembered list rather
  * than a document-wide query: the query was a full tree walk on every
- * mouseup, and a list cannot strand anything as long as marking clears
+ * release, and a list cannot strand anything as long as marking clears
  * first, which it does.
  */
 let installed = false
@@ -171,14 +194,14 @@ export function installPressTracking(): void {
   if (installed) return
   installed = true
 
-  window.addEventListener('mousedown', (event) => {
+  window.addEventListener('pointerdown', (event) => {
     // The PRIMARY button only. This one line is the whole fix: a secondary
     // press is a different gesture and never looks like an activation.
     if (event.button !== 0) return
     markChain(event.target)
   }, { capture: true })
 
-  for (const endEvent of ['mouseup', 'dragstart', 'pointercancel'] as const) {
+  for (const endEvent of ['pointerup', 'dragstart', 'pointercancel'] as const) {
     window.addEventListener(endEvent, clearAll, { capture: true })
   }
   // The WINDOW losing focus, and nothing else. Deliberately not in the
