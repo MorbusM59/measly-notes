@@ -183,7 +183,7 @@
     inset 0 0 12px rgba(0, 0, 0, 0.15);
 
   /* Active-state variants: same lineup as above, isolated so active elements
-     (.is-active, :active) can be tuned separately from resting-state shadows
+     (.is-active, [data-pressed]) can be tuned separately from resting-state shadows
      without losing distinguishability once shadow-flip inverts dark mode. */
 
   --box-shadow-regular-light-active:

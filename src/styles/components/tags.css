@@ -277,11 +277,11 @@
 }
 
 .tag-pill.suggested:hover           { background: var(--btn-bg-hover); }
-.tag-pill.suggested:active          { background: var(--btn-bg-pressed); }
+.tag-pill.suggested[data-pressed]          { background: var(--btn-bg-pressed); }
 .tag-pill.suggested[aria-disabled='true'] { opacity: 0.5; cursor: default; }
 
 .tag-pill.suggested:hover           { background: var(--btn-bg-hover); }
-.tag-pill.suggested:active          { background: var(--btn-bg-pressed); }
+.tag-pill.suggested[data-pressed]          { background: var(--btn-bg-pressed); }
 .tag-pill.suggested[aria-disabled='true'] { opacity: 0.5; cursor: default; }
 
 .suggested-empty {
@@ -511,7 +511,7 @@
 }
 
 .note-tab-pill:hover  { background: var(--btn-bg-hover); }
-.note-tab-pill:active { background: var(--btn-bg-pressed); }
+.note-tab-pill[data-pressed] { background: var(--btn-bg-pressed); }
 
 .note-tab-pill.is-active {
   border: 1px solid var(--color-border-light-30);

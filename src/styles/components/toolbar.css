@@ -613,9 +613,9 @@
    Re-apply the shadow on ::after, the topmost of the two layers, so it
    remains visible over the swatch color. */
 .options-element-grid .options-color-swatch.is-active::after,
-.options-element-grid .options-color-swatch:active::after,
+.options-element-grid .options-color-swatch[data-pressed]::after,
 .options-texture-grid .options-color-swatch.is-active::after,
-.options-texture-grid .options-color-swatch:active::after {
+.options-texture-grid .options-color-swatch[data-pressed]::after {
   box-shadow: var(--box-shadow-inverted-harsh-active);
 }
 

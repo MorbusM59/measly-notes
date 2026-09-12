@@ -696,7 +696,7 @@
   transition: background 0.2s, border-color 0.2s, color 0.2s, transform var(--rotation-duration, 200ms) ease;
 }
 
-.editor-stage .editor-escape-hold-panel-btn:active
+.editor-stage .editor-escape-hold-panel-btn[data-pressed]
 {
   border-color: var(--btn-border-active);
   box-shadow:   var(--box-shadow-inverted-harsh-active);                                    

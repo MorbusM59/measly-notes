@@ -97,8 +97,8 @@ button:hover,
   border-color: var(--btn-border-hover);
 }
 
-button:active,
-.ui-btn:active {
+button[data-pressed],
+.ui-btn[data-pressed] {
   background: var(--btn-bg-pressed);
   border-color: var(--btn-border-active);
   box-shadow:   var(--box-shadow-inverted-harsh-active);
