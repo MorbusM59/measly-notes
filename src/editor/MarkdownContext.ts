@@ -1,3 +1,4 @@
+import { readFenceTokenAt } from './textScanning'
 import type { EditorSelectionState, EditorTextEdit, EditorTransformResult } from './EditorContract'
 import { applyEditToDocumentLineIndex, buildDocumentLineIndex, lineIndexAtOffset, type DocumentLineIndex } from './DocumentLineIndex'
 import { buildTransformResult, collapsedSelectionAt } from './TransformResult'
@@ -202,12 +203,14 @@ function scanInlineStateFrom(text: string, startCursor: number, initialState: In
     const lineStart = cursor
     let lineEnd = text.indexOf('\n', lineStart)
     if (lineEnd === -1 || lineEnd > safeOffset) lineEnd = safeOffset
-    const line = text.slice(lineStart, lineEnd)
 
-    const fenceMatch = line.match(/^\s*(```+|~~~+)/)
-    if (fenceMatch && !activeInlineCodeLen) {
-      const fenceToken = fenceMatch[1]
-      const fenceChar = fenceToken.charCodeAt(0) === 96 ? '`' : '~'
+    // Read in place rather than slicing the line out to run a regex over it:
+    // the slice was the only allocation in this loop, paid once per line for
+    // a question about the line's first few characters. See
+    // textScanning.ts's own note on why that mattered.
+    const fenceToken = activeInlineCodeLen ? null : readFenceTokenAt(text, lineStart, lineEnd)
+    if (fenceToken) {
+      const fenceChar = fenceToken.char
       const fenceLen = fenceToken.length
 
       if (!activeCodeFence) {

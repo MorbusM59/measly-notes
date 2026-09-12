@@ -4021,3 +4021,173 @@ decoder.
 **Still open:** nothing chunks the parse itself. A document large enough will
 keep a worker busy for seconds — which no longer freezes anything, so this is
 now about how long a reader waits rather than whether the app responds.
+
+> **Superseded** by the round below (*"The block split was still computed
+> during React's render"*), in both halves. The worker described in this
+> section was real but inert: a `useMemo` in `usePreviewMarkdownRendering`
+> demanded the same parse synchronously during render, so every measurement
+> above that credits the worker with a cold open is measuring the warm cache
+> instead. And the parse IS chunked now —
+> `splitPreviewBlockRangesProgressively` delivers it in order, top of the
+> document first.
+
+## The block split was still computed during React's render — 26 seconds of it
+
+**Read this before trusting any number in the sections above that was taken
+against `dev:browser`.** The measurement that opened this round was run
+against the wrong instrument by a script whose own doc comment said so and
+whose runner ignored it: `measureLargeNoteFirstOpen.mjs` spawned
+`npm run dev:browser`, the browser mock this document already establishes
+cannot measure anything proportional to note size. It now targets a real
+`electron-builder` package by default (`npm run perf:first-open`), with
+`--target=browser` kept, and labelled, for reading frame ORDERING only.
+
+The first honest number was **26,305ms to first text** on a never-opened
+1953KB note, with **26,710ms of main-thread JS** — against ~694ms through
+the mock. A 38x gap, on the same document, in the same container.
+
+### What it was
+
+```
+prepareList → compile → fromMarkdown → parse
+  → parseStructuralRanges @ PreviewBlockSplit.ts
+  → fullSplit
+  → splitMarkdownIntoPreviewBlocksIncremental
+  → (anonymous) @ usePreviewMarkdownRendering.tsx    ← a useMemo
+  → usePreviewMarkdownRendering
+  → EditorSection
+  → react-dom render
+```
+
+A full remark parse of the whole document, synchronously, inside a `useMemo`,
+during React's render phase.
+
+**The worker built in the previous round could never win.** It was not
+broken, not mis-bundled, not blocked — it was racing a synchronous reader
+upstream of it that had always already finished. Moving work off the main
+thread cannot help while something in render still demands it synchronously.
+The demand is the defect, and it stayed invisible because the warm path
+reads a cache and the warm path is what got measured (1.4ms, reported as
+success).
+
+### The two hypotheses that died first, and why that is the lesson
+
+Before the call tree existed, two plausible explanations were tested and
+refuted — cheaply, but only because they were tested rather than acted on:
+
+1. *The worker chunk is not emitted in a packaged build.* It is.
+2. *Chromium blocks module workers over `file://`, so the fallback runs.*
+   Production does use `loadFile`, so this was more than plausible. A direct
+   probe of the packaged app constructed a module worker from `file://` and
+   got a reply. False.
+
+Three rounds went into that because the profiler was reporting **self time**,
+which says what is slow and is structurally silent on who asked for it. When
+the hot frame is inside a library, that is the only question that matters.
+`--mode=tree` now prints the ancestor chain instead, and answered it in one
+run. Reach for it first.
+
+### Seven call sites, one rule, and a test instead of a memory
+
+"A full parse never runs on the main thread" held in intent everywhere and in
+fact nowhere. Fixing the `useMemo` moved first text to 528ms and left a
+15.9s parse behind it, from `getPreviewBlocksForText`'s synchronous fallback.
+Behind that, a single OPTIONAL `blocks` parameter on
+`resolveEditSourceAnchorLineFromUiState` was hiding three more.
+
+- `splitPreviewBlocksWithoutFullParse` is the main thread's only entry point
+  and returns **null** where it would need a full parse. Null means ask the
+  worker. `splitMarkdownIntoPreviewBlocksIncremental` keeps its totality for
+  the worker and for the fuzz suites' ground truth and is now *defined in
+  terms of* the partial one, so the two cannot drift.
+- `usePreviewMarkdownRendering` has three outcomes and **PENDING is a real
+  one**: the pane renders no blocks, the editor chrome is its normal self,
+  and text arrives formatted rather than appearing as raw source and
+  reflowing into it. Warm incremental updates stay synchronous on the main
+  thread — a worker round trip there would cost more than the work.
+- `getPreviewBlocksForText` is async and worker-backed; every caller was
+  already an event handler or an async restore.
+- `resolveEditSourceAnchorLineFromUiState` **requires** the block map. That
+  is a type change rather than three fixes on purpose: an optional parameter
+  with a fallback is an invitation, and it was accepted three times.
+- `previewBlockSplit.contract.test.ts` parses every renderer source and fails
+  on an import of either total entry point outside the worker, the client,
+  and tests. Verified by A/B.
+
+Two parses that computed **nothing** went with it: an anchor at or below line
+zero resolves to block zero with no map at all, and `getNoteUiState` returns
+zero as its documented default for a never-positioned note — so every
+never-opened note was parsing itself to be told it was at the top. That is
+the same defect as the one fixed in `EditRestoreMath` last round, at two more
+sites. It keeps recurring because the default is a plausible number rather
+than an absence.
+
+| first open, never-opened 1953KB note, packaged | to first text | main-thread JS |
+| --- | --- | --- |
+| before | 26,305ms | 26,710ms |
+| after the render-phase fix | 528ms | 16,000ms (still, after first text) |
+| after all seven | **445ms** | **980ms** |
+
+No remark frame appears anywhere in the profile now.
+
+### Progressive delivery: the top of the document first
+
+Closing this document's own long-standing "still open" item — *nothing chunks
+the parse itself*. `splitPreviewBlockRangesProgressively` yields runs of
+finished ranges, absolute to the document, which concatenate to exactly what
+a whole-document parse produces. In render view the top of a 2MB note is
+readable at **~850ms** instead of after the entire parse.
+
+Two things make that exact rather than approximate:
+
+- A non-final chunk **discards the last range its parse produced** and the
+  next chunk restarts at that range's first line. Any construct that reaches
+  the cut has by definition swallowed every line from where it began to the
+  end of the window, so its parse produced exactly one range covering all of
+  that — which IS the last range. A window that keeps nothing is a single
+  construct spanning all of it, so the window grows until the construct ends
+  or the document does.
+- The backward direction needs nothing extra, for the reason the incremental
+  path's head buffer already documents: CommonMark's backward dependency
+  never crosses a top-level boundary, and each chunk begins at one,
+  inductively back to line 1.
+
+Verified rather than argued: every corpus runs at chunk sizes 1, 3, 7 and 64
+against a whole-document parse — long fences, UNCLOSED fences, HTML blocks,
+setext underlines, lists interrupting paragraphs, lazy blockquote
+continuation, document-wide definitions, and randomized mixed corpora.
+
+Windows double, so delivery is O(log n) instalments and O(n) total
+re-materialization while the first stays small. The client accumulates
+deltas rather than resending the running total, and fans instalments out to
+a **set** of listeners: the answer is shared by text while the wish to watch
+it arrive is per-caller. An incomplete split is never committed to the
+incremental cache or persisted — it describes a document that ends early.
+
+**When reading the perf script's block-arrival curve, the final count is not
+the document's block count.** Past `noteSizeThresholdBlocks` the render pane
+is windowed and mounts a window and no more. A settle heuristic called a
+58,573-block document finished at 74 blocks before this was understood.
+
+### Two full-document scans were allocating, not scanning
+
+Both showed up next to a garbage-collector bucket, which is the tell.
+
+- `countWords` was `text.trim().split(/\s+/u).length`: a 2MB copy plus
+  ~330,000 short-lived strings, to produce one number. A single pass counting
+  maximal non-whitespace runs is identical by construction and **4x faster**
+  (49.8ms → 12.2ms on 2MB), with nothing for the collector afterwards.
+- `MarkdownContext`'s inline scan sliced every line out to run
+  `/^\s*(```+|~~~+)/` over it — one allocation and one regex per line, for a
+  question about a line's first few characters. `readFenceTokenAt` reads it
+  in place.
+
+Both now share one whitespace predicate in `textScanning.ts`, because two
+hand-rolled copies of "what counts as whitespace" is exactly the drift this
+codebase keeps paying for. Each replaced a regex that was correct, so each
+is tested against that regex as an oracle over randomized inputs rather than
+against hand-written expectations.
+
+`countWrappedLines` was on the suspect list at 23ms and was **left alone**:
+that number came from the browser mock, it appears in no packaged profile,
+its own pass is allocation-free, and its one `toString()` is cached per note.

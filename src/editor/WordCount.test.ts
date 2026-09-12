@@ -177,3 +177,42 @@ describe('trackWordCount', () => {
     runFuzzSequence(seed, 500)
   })
 })
+
+describe('countWords equivalence with the allocating implementation it replaced', () => {
+  /** Exactly what countWords used to be, kept here as the oracle. */
+  const countWordsBySplitting = (text: string): number => {
+    const trimmed = text.trim()
+    if (trimmed.length === 0) return 0
+    return trimmed.split(/\s+/u).length
+  }
+
+  // Every character class that could make the single-pass scan disagree:
+  // the ASCII fast path's own members, the Unicode spaces \s matches, and
+  // look-alikes it does NOT (a zero-width space is a word character to \s).
+  const ALPHABET = [
+    'a', 'b', 'Z', '9', '.', '-', '_',
+    ' ', '\t', '\n', '\r', '\v', '\f',
+    ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '　', '﻿',
+    '​', 'é', '中', '\u{1f600}',
+  ]
+
+  it('agrees on hand-picked shapes', () => {
+    for (const text of ['', ' ', '\n\n', 'one', ' one ', 'one two', 'one  two\t\tthree\n', ' word ', '​glued​']) {
+      expect(countWords(text), JSON.stringify(text)).toBe(countWordsBySplitting(text))
+    }
+  })
+
+  it('agrees on randomized strings drawn from every relevant character class', () => {
+    let seed = 20260912
+    const rng = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed / 0x7fffffff
+    }
+    for (let trial = 0; trial < 2000; trial += 1) {
+      let text = ''
+      const length = Math.floor(rng() * 40)
+      for (let i = 0; i < length; i += 1) text += ALPHABET[Math.floor(rng() * ALPHABET.length)]
+      expect(countWords(text), JSON.stringify(text)).toBe(countWordsBySplitting(text))
+    }
+  })
+})

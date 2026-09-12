@@ -1,4 +1,5 @@
 import { computeMinimalTextReplacement } from './MinimalTextDiff'
+import { isWhitespaceAt } from './textScanning'
 
 // Character count needs no equivalent module: JS strings already track their
 // own length in O(1) (`text.length`), so there's nothing to establish or
@@ -18,9 +19,30 @@ function isWordChar(ch: string | undefined): boolean {
  * bounded by the selection's own size rather than the document's).
  */
 export function countWords(text: string): number {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return 0
-  return trimmed.split(/\s+/u).length
+  // One pass, no allocation. This was `text.trim().split(/\s+/u).length`,
+  // which is correct and expensive in a way that has nothing to do with
+  // counting: `trim` copies the whole document and `split` builds an array
+  // of every word in it -- ~330,000 strings for a 2MB note, which is why
+  // this showed up next to a garbage-collector bucket in a first-open
+  // profile rather than as scanning cost. A word count is a count of
+  // maximal non-whitespace runs, and counting runs needs to materialize
+  // nothing.
+  //
+  // The result is identical by construction: `trim().split(/\s+/u)` yields
+  // exactly the maximal non-whitespace runs, and the empty string yields
+  // none. WordCount.test.ts pins that equivalence against the old
+  // implementation across randomized inputs, including the exotic Unicode
+  // spaces `\s` matches and the ones it does not.
+  let count = 0
+  let inWord = false
+  for (let index = 0; index < text.length; index += 1) {
+    if (isWhitespaceAt(text, index)) inWord = false
+    else if (!inWord) {
+      inWord = true
+      count += 1
+    }
+  }
+  return count
 }
 
 /**
