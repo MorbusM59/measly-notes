@@ -220,7 +220,10 @@ interface PanelCell {
  *
  * A small label sits centered inside the ring showing whichever cell's name
  * is currently relevant: `hoveredIndex` (mouse-only, set/cleared by each
- * button's own onMouseEnter/onMouseLeave, independent of focus) takes
+ * button's own onMouseEnter/onMouseLeave AND re-asked whenever the ring
+ * moves under a stationary pointer -- see refreshHoverFromPointer; it is
+ * also what draws the highlight, since CSS `:hover` cannot see a cell that
+ * came to the cursor rather than the other way round) takes
  * priority while the mouse is over a cell, falling back to `focusedIndex`
  * the rest of the time -- see `displayedLabel`. Sized and shaped in
  * editor.css's `.editor-escape-hold-label` to match the ring's own circle
@@ -468,6 +471,54 @@ export function EscapeHoldPanel({
     })
   }
 
+  /**
+   * WHAT IS UNDER THE POINTER RIGHT NOW, re-asked whenever the RING moved
+   * rather than the mouse.
+   *
+   * The browser only re-evaluates hover when the pointer moves (a wheel over
+   * the ring scrolls nothing, so not even that helps), which made the dial's
+   * nicest gesture not work: rest the pointer on a cell, turn the wheel, and
+   * the next choice slides underneath it -- but the app still believed the
+   * old cell was hovered, so the centre label named the wrong thing and
+   * nothing lit up until the mouse was wiggled. The same gap appears when a
+   * mode advances and swaps its cells out under a stationary pointer.
+   *
+   * Asked of the DOM (`elementFromPoint`) rather than recomputed from the
+   * ring's geometry: the browser already knows exactly where the buttons
+   * are, and a second hit-test of our own would be a second opinion about
+   * cell positions that could disagree with the one on screen.
+   */
+  const pointerPositionRef = useRef<{ x: number; y: number } | null>(null)
+  // Tracked at the WINDOW, and NOT gated on the ring being open.
+  //
+  // Both of those are load-bearing, and I got the second wrong first time.
+  // Listening on the ring alone means the pointer has to enter it before
+  // anything is known about where it is; gating a window listener on `isOpen`
+  // has the same hole one step further out, because the ring can open under a
+  // pointer that then never moves again -- which is exactly the gesture this
+  // whole change exists to support. The position has to be known BEFORE the
+  // ring appears, so the listener outlives it. It stores two numbers.
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      pointerPositionRef.current = { x: event.clientX, y: event.clientY }
+    }
+    window.addEventListener('mousemove', onMove)
+    return () => { window.removeEventListener('mousemove', onMove) }
+  }, [])
+  const refreshHoverFromPointer = () => {
+    const position = pointerPositionRef.current
+    if (!position) return
+    const under = document.elementFromPoint(position.x, position.y)
+    const button = under instanceof Element
+      ? under.closest<HTMLButtonElement>('.editor-escape-hold-panel-btn')
+      : null
+    // indexOf against the live ref array: React writes each button's ref by
+    // index every render, and a stale entry left by a shrink holds a
+    // detached node, which elementFromPoint can never return.
+    const index = button ? buttonRefs.current.indexOf(button) : -1
+    setHoveredIndex(index >= 0 && index < cellsRef.current.length ? index : null)
+  }
+
   // The one place `topIndex` actually changes -- always once rotationOffsetRef
   // has already settled on (or very near) a whole slot. Wraps into [0, count)
   // since that's what the tabIndex/aria comparison below needs, and
@@ -489,6 +540,10 @@ export function EscapeHoldPanel({
     rotationOffsetRef.current = wrapped
     applyRotationOffsetToDom(wrapped)
     setTopIndex(wrapped)
+    // The cells are at their resting positions as of the line above -- this
+    // path writes transforms directly, with no CSS transition to wait out --
+    // so the pointer can be re-tested straight away.
+    refreshHoverFromPointer()
   }
 
   // Runs one leg of animation: `sampler(elapsedSec)` gives the displacement
@@ -618,7 +673,13 @@ export function EscapeHoldPanel({
     applyRotationOffsetToDom(0)
     setTopIndex(0)
     setFocusedIndex(0)
+    // Cleared and then re-asked rather than simply cleared: a mode advancing
+    // replaces every cell under a pointer that never moved, and the cell now
+    // beneath it is hovered whether the pointer arrived there or the ring
+    // did. Clearing alone is what left the ring dark after a mouse-driven
+    // choice in the game.
     setHoveredIndex(null)
+    refreshHoverFromPointer()
   }, [ringResetKey, isOpen])
 
   // Invalidates any pending rotation frame if this instance is ever
@@ -704,6 +765,10 @@ export function EscapeHoldPanel({
     rotationOffsetRef.current = next
     setTopIndex(next)
     setFocusedIndex(next)
+    // Here CSS owns the movement, so the cells are not where they are going
+    // to be yet. Waiting out the transition we ourselves set the duration of
+    // is not a retry -- it is the one moment the answer exists.
+    window.setTimeout(refreshHoverFromPointer, SIMPLE_ROTATION_TRANSITION_MS)
   }
 
   /**
@@ -910,7 +975,7 @@ export function EscapeHoldPanel({
             type="button"
             key={cell.id}
             ref={(el) => { buttonRefs.current[index] = el }}
-            className={`editor-escape-hold-panel-btn${reduceVisualEffects ? ' is-simple-rotation' : ''}`}
+            className={`editor-escape-hold-panel-btn${reduceVisualEffects ? ' is-simple-rotation' : ''}${index === hoveredIndex ? ' is-hovered' : ''}`}
             style={{
               transform: `translate(-50%, -50%) translate(${point.x}px, ${point.y}px)`,
               '--rotation-duration': `${SIMPLE_ROTATION_TRANSITION_MS}ms`,

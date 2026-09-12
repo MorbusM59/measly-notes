@@ -702,7 +702,19 @@
   box-shadow:   var(--box-shadow-inverted-harsh-active);                                    
 }
 
-.editor-stage .editor-escape-hold-panel-btn:hover {
+/* Hover is driven by STATE, not by `:hover`.
+
+   The ring moves under a stationary pointer -- a turn of the wheel slides
+   the next choice beneath the cursor -- and the browser does not
+   re-evaluate `:hover` for that, because the pointer never moved. So the
+   old cell kept the highlight until the mouse was wiggled.
+   EscapeHoldPanel.tsx re-asks the DOM what is under the pointer whenever the
+   RING moved, and that answer is the one thing that decides this class.
+
+   `:hover` is not kept alongside it. The two disagree in exactly the case
+   this exists for -- stale `:hover` on the cell the pointer left, the class
+   on the cell it is now over -- and would light both. */
+.editor-stage .editor-escape-hold-panel-btn.is-hovered {
   background: var(--btn-bg-hover);
   border-color: var(--btn-border-hover);
 }
