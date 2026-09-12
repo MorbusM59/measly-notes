@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  cursorClickApexTimeSec,
+  cursorHoldHaloMultiplier,
   cursorTwitchDurationSec,
   cursorTwitchRadiusMultiplier,
   resolveCursorClickDurationSec,
+  sampleCursorHoldLevel,
+  sampleCursorHoldReleaseLevel,
 } from './CursorClickCurve'
 import {
   CURSOR_CLICK_RAMP_DEFAULT,
@@ -10,7 +14,6 @@ import {
   CURSOR_CLICK_SPEED_X_DEFAULT,
   CURSOR_CLICK_MAX_SPEED_DEFAULT,
 } from '../shared/cursorSettings'
-import { cursorClickApexTimeSec } from './CursorClickCurve'
 
 const RAMP = CURSOR_CLICK_RAMP_DEFAULT
 const SKEW = CURSOR_CLICK_SKEW_DEFAULT
@@ -67,6 +70,61 @@ describe('the confirmation twitch', () => {
     for (let t = 0; t <= DURATION; t += DURATION / 20) {
       expect(sample(1, t, 0)).toBeCloseTo(1, 10)
       expect(sample(-1, t, 0)).toBeCloseTo(1, 10)
+    }
+  })
+})
+
+describe("the halo's swell while a hold runs", () => {
+  const HOLD_SEC = 0.25
+
+  const level = (elapsedSec: number) => sampleCursorHoldLevel(elapsedSec, RAMP, SKEW, HOLD_SEC)
+
+  it('reaches full extension exactly at the threshold, and not before', () => {
+    // The property the stretch exists for: full halo means "now", so the
+    // apex has to land on the hold's own duration rather than on the speed
+    // slider's. Fails if the curve is not stretched by 1/skew.
+    expect(level(HOLD_SEC)).toBeCloseTo(1, 10)
+    for (const fraction of [0.1, 0.25, 0.5, 0.75, 0.9, 0.99]) {
+      expect(level(HOLD_SEC * fraction)).toBeLessThan(1)
+    }
+  })
+
+  it('rises from exactly nothing, and never falls back on the way up', () => {
+    expect(level(0)).toBeCloseTo(0, 10)
+    let previous = -1
+    for (let t = 0; t <= HOLD_SEC; t += HOLD_SEC / 200) {
+      const current = level(t)
+      expect(current).toBeGreaterThanOrEqual(previous - 1e-12)
+      previous = current
+    }
+  })
+
+  it('holds full extension for a hold that outlives its own threshold', () => {
+    // An abandon that has not arrived yet must not start the halo shrinking.
+    expect(level(HOLD_SEC * 4)).toBe(1)
+  })
+
+  it('scales the halo to exactly (1 + max impact) at full extension', () => {
+    for (const maxImpact of [0, 0.35, 0.7, 1]) {
+      expect(cursorHoldHaloMultiplier(1, maxImpact)).toBeCloseTo(1 + maxImpact, 10)
+      expect(cursorHoldHaloMultiplier(0, maxImpact)).toBeCloseTo(1, 10)
+    }
+  })
+
+  it('releases from wherever an abandoned hold actually got to, back to nothing', () => {
+    // An abandoned hold is a completed one caught early -- same release,
+    // seeded lower. Nothing about it is a separate animation.
+    const releaseDurationSec = resolveCursorClickDurationSec(CURSOR_CLICK_SPEED_X_DEFAULT)
+    for (const caughtAt of [0.2, 0.5, 0.8, 1]) {
+      const initial = level(HOLD_SEC * caughtAt)
+      const decay = (t: number) => sampleCursorHoldReleaseLevel(initial, t, RAMP, SKEW, releaseDurationSec)
+      expect(decay(0)).toBeCloseTo(initial, 10)
+      expect(decay(releaseDurationSec)).toBeCloseTo(0, 10)
+      let previous = Infinity
+      for (let t = 0; t <= releaseDurationSec; t += releaseDurationSec / 100) {
+        expect(decay(t)).toBeLessThanOrEqual(previous + 1e-12)
+        previous = decay(t)
+      }
     }
   })
 })

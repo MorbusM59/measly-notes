@@ -11,8 +11,12 @@ import {
   sampleCursorReleaseAxis,
   cursorTwitchDurationSec,
   cursorTwitchRadiusMultiplier,
+  cursorHoldHaloMultiplier,
+  cursorClickReleaseTailDurationSec as cursorHoldReleaseDurationSec,
+  sampleCursorHoldLevel,
+  sampleCursorHoldReleaseLevel,
 } from '../editor/CursorClickCurve'
-import { subscribeCursorTwitch } from '../shared/cursorTwitch'
+import { subscribeCursorHoldFeedback } from '../shared/cursorHoldFeedback'
 import { readPageZoomFactor } from '../window/pageZoom'
 
 export interface MouseCursorOverlayProps {
@@ -153,6 +157,13 @@ export function MouseCursorOverlay({
   // latched when it starts -- resolved then from which way the press is
   // deforming the orbit, because that is what it is a reversal OF.
   const twitchRef = useRef<{ direction: -1 | 1; startMs: number } | null>(null)
+  // The halo's swell while a hold gesture runs. `depth` counts nested holds
+  // (the temp tab arms a left pin-hold and a right unpin-hold on one press),
+  // so the swell belongs to "a hold is running" rather than to one of them,
+  // and the shortest live hold owns the timing -- it is the one that will
+  // resolve first, so it is the one full extension should land on.
+  const holdRef = useRef<{ depth: number; startMs: number; holdSec: number } | null>(null)
+  const holdReleaseRef = useRef<{ initialLevel: number; startMs: number } | null>(null)
 
   const {
     dotColor, centerColor, trailColor, dotCount, radiusPx, spinHz, trailThicknessPx, trailFadeMs,
@@ -198,6 +209,9 @@ export function MouseCursorOverlay({
     const clickWeights = resolveCursorClickWeights(clickBalance)
     const clickDurationSec = resolveCursorClickDurationSec(clickSpeedX)
     const twitchDurationSec = cursorTwitchDurationSec(clickDurationSec)
+    // The swell returns on the ordinary click release, not the twitch's
+    // halved one -- a hold letting go should feel like a press letting go.
+    const holdReleaseDurationSec = cursorHoldReleaseDurationSec(clickSkew, clickDurationSec)
 
     function updateCanvasResolution() {
       // A zoom change arrives as a resize. The pointer has not moved within
@@ -343,6 +357,27 @@ export function MouseCursorOverlay({
         }
       }
 
+      // --- the halo's hold swell ------------------------------------
+      // Attack stretched so full extension lands exactly on the hold's own
+      // threshold; release on the ordinary click-speed tail, from wherever
+      // the swell actually got to -- which is below full for every hold that
+      // was let go early, and is why an abandoned hold needs no animation of
+      // its own.
+      let holdLevel = 0
+      if (holdRef.current) {
+        const hold = holdRef.current
+        holdLevel = sampleCursorHoldLevel((now - hold.startMs) / 1000, clickRamp, clickSkew, hold.holdSec)
+      } else if (holdReleaseRef.current) {
+        const release = holdReleaseRef.current
+        const elapsedSec = (now - release.startMs) / 1000
+        if (elapsedSec >= holdReleaseDurationSec) {
+          holdReleaseRef.current = null
+        } else {
+          holdLevel = sampleCursorHoldReleaseLevel(
+            release.initialLevel, elapsedSec, clickRamp, clickSkew, clickDurationSec,
+          )
+        }
+      }
       const effectiveRadiusPx = radiusPx * axisToRadiusMultiplier(axis, clickWeights.radiusWeight) * twitchRadiusMultiplier
       const effectiveSpinHz = Math.abs(spinHz) * axisToSpinMultiplier(axis, clickWeights.spinWeight)
 
@@ -414,7 +449,7 @@ export function MouseCursorOverlay({
       }
 
       if (haloRadiusPx > 0) {
-        const haloOuterRadius = haloRadiusPx * dpr
+        const haloOuterRadius = haloRadiusPx * dpr * cursorHoldHaloMultiplier(holdLevel, clickMaxSpeed)
         const falloffStop = haloFalloff / 100
         const gradient = ctx!.createRadialGradient(cx, cy, 0, cx, cy, haloOuterRadius)
         gradient.addColorStop(0, `rgba(${halo.r}, ${halo.g}, ${halo.b}, ${halo.a * fadeAlpha})`)
@@ -497,23 +532,60 @@ export function MouseCursorOverlay({
       beginRelease()
     }
 
-    // A hold gesture completed somewhere in the app. Its POLARITY is decided
-    // here and nowhere else: the twitch is a reversal of whatever the press
-    // is currently doing to the orbit, and the live axis says which way that
-    // is -- negative is a left press tightening it, positive a right press
-    // widening it. A caller naming its own polarity would have to know that a
-    // left button contracts, which is a fact about this cursor, not about the
-    // gesture that finished.
-    //
-    // An axis of exactly 0 means no press is deforming anything (a keyboard
-    // hold, or a gesture whose button was already released and settled), and
-    // there is nothing to reverse -- so nothing happens, by construction
-    // rather than by a check at the call site.
-    const stopListeningForTwitch = subscribeCursorTwitch(() => {
-      const axis = clickAxisRef.current
-      if (axis === 0) return
-      twitchRef.current = { direction: axis < 0 ? 1 : -1, startMs: performance.now() }
-      ensureLoopRunning()
+    const stopListeningForHolds = subscribeCursorHoldFeedback({
+      // A hold started. Nested holds share one swell (see holdRef), and the
+      // SHORTEST live threshold owns its timing: that is the one that will
+      // resolve first, so it is the one full extension has to land on.
+      onBegin({ holdMs }) {
+        const holdSec = Math.max(0, holdMs) / 1000
+        const live = holdRef.current
+        holdRef.current = live
+          ? { depth: live.depth + 1, startMs: live.startMs, holdSec: Math.min(live.holdSec, holdSec) }
+          : { depth: 1, startMs: performance.now(), holdSec }
+        holdReleaseRef.current = null
+        ensureLoopRunning()
+      },
+
+      onEnd({ completed }) {
+        const live = holdRef.current
+        if (live) {
+          if (live.depth > 1) {
+            // Another hold is still running underneath; the swell is not
+            // theirs to retract.
+            holdRef.current = { ...live, depth: live.depth - 1 }
+          } else {
+            holdRef.current = null
+            // Seeded from where the swell actually IS, computed rather than
+            // read off the last frame: an abandon can land between frames,
+            // and a hold shorter than one frame would otherwise release from
+            // a level it never reached.
+            holdReleaseRef.current = {
+              initialLevel: sampleCursorHoldLevel(
+                (performance.now() - live.startMs) / 1000, clickRamp, clickSkew, live.holdSec,
+              ),
+              startMs: performance.now(),
+            }
+          }
+        }
+
+        // The twitch is completion only, and its POLARITY is decided here and
+        // nowhere else: it is a reversal of whatever the press is currently
+        // doing to the orbit, and the live axis says which way that is --
+        // negative is a left press tightening it, positive a right press
+        // widening it. A caller naming its own polarity would have to know
+        // that a left button contracts, which is a fact about this cursor,
+        // not about the gesture that finished.
+        //
+        // An axis of exactly 0 means no press is deforming anything (a key
+        // hold, or a gesture whose button was already released and settled),
+        // and there is nothing to reverse -- so nothing happens, by
+        // construction rather than by a check at the call site.
+        const axis = clickAxisRef.current
+        if (completed && axis !== 0) {
+          twitchRef.current = { direction: axis < 0 ? 1 : -1, startMs: performance.now() }
+        }
+        ensureLoopRunning()
+      },
     })
 
     // capture: true throughout -- a component calling stopPropagation on a
@@ -539,10 +611,12 @@ export function MouseCursorOverlay({
       activeSinceRef.current = null
       leftAtRef.current = null
       clearPendingRelease()
-      stopListeningForTwitch()
+      stopListeningForHolds()
       clickPressRef.current = null
       clickReleaseRef.current = null
       twitchRef.current = null
+      holdRef.current = null
+      holdReleaseRef.current = null
     }
   }, [
     radiusPx, trailThicknessPx, trailFadeMs, spinHz, fadeMs, dotCount, dotColor, centerColor, trailColor,

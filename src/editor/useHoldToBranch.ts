@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { emitCursorTwitch } from '../shared/cursorTwitch'
+import { beginCursorHold, endCursorHold } from '../shared/cursorHoldFeedback'
 import { HOLD_COMMIT_MS } from '../shared/holdTiming'
 
 // Right-click-and-hold gesture for "branch this snapshot into a new note".
@@ -24,8 +24,21 @@ export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) 
   const startedAtRef = useRef<number | null>(null)
   const rafRef = useRef<number | null>(null)
   const firedRef = useRef(false)
+  // The one hold in the app that does not run on a timer -- it drives a
+  // filling ring off rAF -- so it keeps `armHold`'s pairing invariant itself:
+  // exactly one end per begin, whichever way the gesture goes. `clear` is
+  // both the abandon path and the last thing the fire path does, so without
+  // this the completion would be followed by an abandon.
+  const settledRef = useRef(true)
+
+  const settle = useCallback((completed: boolean) => {
+    if (settledRef.current) return
+    settledRef.current = true
+    endCursorHold(completed)
+  }, [])
 
   const clear = useCallback(() => {
+    settle(false)
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
@@ -34,7 +47,7 @@ export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) 
     firedRef.current = false
     setIsHolding(false)
     setProgress(0)
-  }, [])
+  }, [settle])
 
   const tick = useCallback(() => {
     const startedAt = startedAtRef.current
@@ -46,11 +59,9 @@ export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) 
 
     if (ratio >= 1 && !firedRef.current) {
       firedRef.current = true
-      // The one hold in the app that does not run on a timer -- it drives a
-      // filling ring off rAF -- so it announces its own completion rather
-      // than inheriting it from `armHold`. Same order as there: the gesture
-      // is acknowledged before the action it triggered.
-      emitCursorTwitch()
+      // Same order as `armHold`: the gesture is acknowledged before the
+      // action it triggered, which happened whatever that action then does.
+      settle(true)
       onBranch()
       setLastFiredAt(Date.now())
       clear()
@@ -58,7 +69,7 @@ export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) 
     }
 
     rafRef.current = requestAnimationFrame(tick)
-  }, [clear, onBranch, holdMs])
+  }, [clear, onBranch, holdMs, settle])
 
   const onContextMenu = useCallback((event: React.MouseEvent) => {
     // Suppress the native context menu entirely -- right-click is repurposed.
@@ -68,12 +79,14 @@ export function useHoldToBranch(onBranch: () => void, holdMs = DEFAULT_HOLD_MS) 
   const onPointerDown = useCallback((event: React.PointerEvent) => {
     if (event.button !== 2) return // right button only
     event.preventDefault()
+    settledRef.current = false
+    beginCursorHold(holdMs)
     startedAtRef.current = Date.now()
     firedRef.current = false
     setIsHolding(true)
     setProgress(0)
     rafRef.current = requestAnimationFrame(tick)
-  }, [tick])
+  }, [tick, holdMs])
 
   const onPointerUp = useCallback((event: React.PointerEvent) => {
     if (event.button !== 2) return

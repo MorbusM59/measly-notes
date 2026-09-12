@@ -207,23 +207,24 @@ export function cursorTwitchRadiusMultiplier(
   twitchDurationSec: number,
   maxImpact: number,
 ): number {
-  return Math.pow(1 + Math.max(0, maxImpact), direction * twitchHeight(elapsedSec, ramp, skew, twitchDurationSec));
+  return Math.pow(1 + Math.max(0, maxImpact), direction * zeroEndedBellHeight(elapsedSec, ramp, skew, twitchDurationSec));
 }
 
 // The bell is asymptotic, not zero-ended: at the default ramp it stands at
 // ~0.098 of its own peak at t=0 and again at t=duration. The press response
 // can live with that (it enters from a press and leaves through a decay that
-// is cleared once it is small), but a twitch RETURNS to the state it left,
-// and a residual 3.6% of radius still standing when the twitch is discarded
-// pops visibly. So the floor is subtracted and the remainder rescaled: both
-// ends reach exactly 0, the apex still reaches exactly 1, and ramp and shape
-// otherwise behave exactly as they do for a click.
+// is cleared once it is small), but the two HOLD channels below both start
+// and end at a state they must return to exactly, and a residual tenth of
+// their excursion still standing when they are discarded pops visibly. So
+// the floor is subtracted and the remainder rescaled: both ends reach
+// exactly 0, the apex still reaches exactly 1, and ramp and shape otherwise
+// behave exactly as they do for a click.
 //
 // The higher of the two ends is the floor, because skew makes them unequal;
 // taking the lower one would leave the other end negative, which for a
-// multiplicative factor means twitching the WRONG WAY for a frame or two
+// multiplicative factor means deforming the WRONG WAY for a frame or two
 // right at the end.
-function twitchHeight(elapsedSec: number, ramp: number, skew: number, durationSec: number): number {
+function zeroEndedBellHeight(elapsedSec: number, ramp: number, skew: number, durationSec: number): number {
   const floor = Math.max(
     normalizedBellHeight(0, ramp, skew, durationSec),
     normalizedBellHeight(durationSec, ramp, skew, durationSec),
@@ -231,4 +232,71 @@ function twitchHeight(elapsedSec: number, ramp: number, skew: number, durationSe
   if (floor >= 1) return 0;
   const height = normalizedBellHeight(elapsedSec, ramp, skew, durationSec);
   return Math.max(0, (height - floor) / (1 - floor));
+}
+
+// --- the halo, while a hold is running -------------------------------
+//
+// A twitch says a hold LANDED. This says one is UNDER WAY: the halo swells
+// while the gesture is being held, and returns the moment it resolves --
+// completed or abandoned, identically, so a hold let go halfway is a halo
+// caught halfway rather than a separate animation to design.
+//
+// Same ramp and shape as everything else here, but timed off the HOLD rather
+// than off the speed slider: the curve is stretched so its apex falls exactly
+// on the hold's own threshold, which is what makes full extension mean "now"
+// and a partial swell mean "not yet". A `skew` of 0.1 puts the apex at a
+// tenth of the curve, so the curve is ten times the hold to put it at the
+// end -- the stretch is the whole point, not an implementation detail.
+//
+// The RETURN is not stretched, because it is not measuring anything: it is
+// the ordinary click release, which is what a released hold already feels
+// like everywhere else in the cursor.
+
+/**
+ * How far into its swell the halo is, in [0, 1] -- 0 at the press, exactly 1
+ * at `holdSec`, and pinned there for as long as a hold outlives its own
+ * threshold (an abandon that has not arrived yet).
+ */
+export function sampleCursorHoldLevel(
+  elapsedSec: number,
+  ramp: number,
+  skew: number,
+  holdSec: number,
+): number {
+  const clampedSkew = clampedSkewOf(skew);
+  // Apex at exactly holdSec: cursorClickApexTimeSec is duration * skew, so
+  // the duration that lands it there is holdSec / skew.
+  const stretchedDurationSec = Math.max(0.0001, holdSec) / clampedSkew;
+  if (elapsedSec >= holdSec) return 1;
+  return zeroEndedBellHeight(elapsedSec, ramp, clampedSkew, stretchedDurationSec);
+}
+
+/**
+ * The swell decaying back after the hold resolved, from wherever it actually
+ * got to -- `initialLevel`, which is below 1 for every abandoned hold.
+ */
+export function sampleCursorHoldReleaseLevel(
+  initialLevel: number,
+  elapsedSec: number,
+  ramp: number,
+  skew: number,
+  releaseDurationSec: number,
+): number {
+  const apexTimeSec = cursorClickApexTimeSec(skew, releaseDurationSec);
+  return initialLevel * zeroEndedBellHeight(apexTimeSec + elapsedSec, ramp, skew, releaseDurationSec);
+}
+
+/**
+ * The halo's radius factor at a given swell level: 1 at rest, and exactly
+ * `1 + maxImpact` at full extension -- the same slider and the same reach as
+ * the twitch's, so the two read as one vocabulary rather than as two effects
+ * that happen to share a setting.
+ *
+ * Linear in the level, deliberately: the level already carries the curve, so
+ * anything other than a straight mapping would bend the shape a second time.
+ * (The twitch is exponential in ITS level only because it needs expansion and
+ * contraction to be exact reciprocals; there is one direction here.)
+ */
+export function cursorHoldHaloMultiplier(level: number, maxImpact: number): number {
+  return 1 + Math.max(0, level) * Math.max(0, maxImpact);
 }

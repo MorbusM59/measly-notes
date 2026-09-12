@@ -19,7 +19,7 @@
 // seems to want its own, the question to answer first is which of these two
 // it actually is.
 
-import { emitCursorTwitch } from './cursorTwitch'
+import { beginCursorHold, endCursorHold } from './cursorHoldFeedback'
 
 /** A deliberate press: past this, it was not an ordinary click. */
 export const HOLD_CONFIRM_MS = 250
@@ -33,21 +33,39 @@ export const HOLD_COMMIT_MS = 550
  * A drop-in for the `window.setTimeout` every one of these gestures was
  * already doing, with two things folded in that were previously each site's
  * own business: the threshold comes from the two constants above, and the
- * completion announces itself to the custom cursor (`shared/cursorTwitch.ts`)
- * so the reader sees that the hold landed.
+ * gesture announces itself to the custom cursor
+ * (`shared/cursorHoldFeedback.ts`) -- the halo swells while it runs and the
+ * orbit twitches when it lands.
  *
  * That second part is why this exists rather than a bare constant. Wiring the
- * twitch at each of the nine call sites would make "and tell the cursor" a
+ * cursor at each of the nine call sites would make "and tell the cursor" a
  * thing to remember, which is the failure this codebase keeps repeating; here
- * a gesture cannot complete without it.
+ * a gesture cannot run, complete or be abandoned without saying so.
  *
- * The twitch goes first, and deliberately: it acknowledges the GESTURE, which
- * happened whatever the action then does or throws.
+ * `settled` is what makes begin and end exactly paired, once, whatever the
+ * caller does: several sites cancel unconditionally on release, including
+ * after the hold already fired (`editor/scrollTrackHold.ts` cleans up from
+ * inside its own completion), and a second end would retract a swell that
+ * belongs to a hold still running underneath it.
+ *
+ * The cursor is told before `onComplete` runs, deliberately: it acknowledges
+ * the GESTURE, which happened whatever the action then does or throws.
  */
 export function armHold(onComplete: () => void, holdMs: number = HOLD_CONFIRM_MS): () => void {
+  let settled = false
+  beginCursorHold(holdMs)
+
   const timerId = window.setTimeout(() => {
-    emitCursorTwitch()
+    if (settled) return
+    settled = true
+    endCursorHold(true)
     onComplete()
   }, holdMs)
-  return () => { window.clearTimeout(timerId) }
+
+  return () => {
+    if (settled) return
+    settled = true
+    window.clearTimeout(timerId)
+    endCursorHold(false)
+  }
 }
