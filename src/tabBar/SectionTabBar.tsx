@@ -4,7 +4,7 @@ import { isArchivedNote, isDeletedNote } from '../shared/noteLifecycle'
 import { resolveIdentityLabel } from '../shared/tabLabels'
 import { InlinePillOrInput } from '../shared/InlinePillOrInput'
 import { TEMP_TAB_PIN_HOLD_MS, type UseSectionTabsResult } from './useSectionTabs'
-import type { EscapeMenuModeStatus } from '../escapeMenu/escapeMenuContract'
+import type { EscapeMenuModeChrome } from '../escapeMenu/escapeMenuContract'
 import { EscapeMenuReadouts } from '../escapeMenu/EscapeMenuStatus'
 
 export interface SectionTabBarProps {
@@ -76,7 +76,7 @@ export interface SectionTabBarProps {
    * for the same reason: a slot showing something other than a note still
    * has to say what it is showing.
    */
-  modeStatus?: EscapeMenuModeStatus | null
+  modeStatus?: EscapeMenuModeChrome | null
   /** Files the undocked note into the section this slot already holds — offered as the picker's first candidate, since "where I just was" is the likeliest home for it. */
   onDockUndockedNoteHere: () => void
   /** Left-click: opens (or closes) the section picker. Right-click: rename this section. Tab-bar mode only -- the identity tab doesn't render in tag-bar mode (note renaming happens by right-clicking the note's own tab now, and the suggested-tags-expand toggle moved to the tag input). */

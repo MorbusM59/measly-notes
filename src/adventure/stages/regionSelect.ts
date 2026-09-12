@@ -11,6 +11,7 @@ export const REGION_SELECT_STAGE_ID = 'regionSelect'
 
 export const regionSelectStage: StageModule = {
   id: REGION_SELECT_STAGE_ID,
+  title: 'The Road',
 
   enter: (_input, _context, rng) => ({
     state: {},

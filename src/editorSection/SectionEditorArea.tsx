@@ -17,7 +17,7 @@ import type { ChapterPillSplitArm } from '../chapters/useChapterPillActions'
 import { EscapeHoldPanel, type ExportScope } from './EscapeHoldPanel'
 import { splitChapterFamily } from '../shared/chapters'
 import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
-import { EscapeMenuNarration } from '../escapeMenu/EscapeMenuStatus'
+import { EscapeMenuChromeGauges, EscapeMenuChromeStrip, EscapeMenuNarration } from '../escapeMenu/EscapeMenuStatus'
 
 export interface SectionEditorAreaProps {
   sectionId: string
@@ -462,8 +462,10 @@ export function SectionEditorArea({
         </div>
       </main>
       <aside className={`editor-scrollbar-slot${isChapterPanelOpen ? ' chapter-panel-is-open' : ''}${isPreviewMode ? ' is-preview-mode' : ''}`}>
-        <div className="editor-scrollbar-slot-inner" aria-hidden="true">
-          {!isPreviewMode ? (
+        <div className="editor-scrollbar-slot-inner" aria-hidden={modeStatus ? undefined : true}>
+          {modeStatus ? (
+            <EscapeMenuChromeGauges status={modeStatus} />
+          ) : !isPreviewMode ? (
             activeNoteId ? (
               <div ref={setScrollbarHostEl} className="editor-scrollbar-slot-inner" />
             ) : (
@@ -531,6 +533,27 @@ export function SectionEditorArea({
       </div>
       <div className="editor-document-stats" aria-live="polite">
         <div className="chapter-toggle-panel">
+          {/* A mode owning the slot owns this position too, and an omitted
+              toggle leaves it EMPTY rather than falling back to the editor's
+              own -- the line-number and freeze buttons report on a document
+              this slot is not showing, and leaving state from underneath on
+              screen is exactly what "the game drives the chrome" rules out.
+              See escapeMenuContract.ts's EscapeMenuModeChrome. */}
+          {modeStatus ? (
+            modeStatus.toggle ? (
+              <button
+                type="button"
+                className={`chapter-toggle-button btn-icon${modeStatus.toggle.isActive ? ' is-active' : ''}`}
+                aria-label={modeStatus.toggle.label}
+                aria-pressed={modeStatus.toggle.isActive}
+                data-tooltip={modeStatus.toggle.label}
+                onClick={modeStatus.toggle.onActivate}
+              >
+                <span className={modeStatus.toggle.icon} aria-hidden="true" />
+              </button>
+            ) : null
+          ) : (
+          <>
           {/*
             Mode-aware: in edit mode this is the line-numbers/review-flags
             toggle (unchanged). In preview mode -- where line numbers have
@@ -578,14 +601,20 @@ export function SectionEditorArea({
               <span className="fa-solid fa-hashtag" aria-hidden="true" />
             </button>
           )}
-        </div>
-        <div className="wordcount-panel" aria-live="polite">
-          {activeNoteId && (
-            <span><b>{activeNoteDocumentStats.wordCount.toLocaleString()}</b> ({activeNoteDocumentStats.characterCount.toLocaleString()})</span>
+          </>
           )}
         </div>
+        <div className="wordcount-panel" aria-live="polite">
+          {modeStatus ? (
+            modeStatus.counter ? <span>{modeStatus.counter}</span> : null
+          ) : activeNoteId ? (
+            <span><b>{activeNoteDocumentStats.wordCount.toLocaleString()}</b> ({activeNoteDocumentStats.characterCount.toLocaleString()})</span>
+          ) : null}
+        </div>
         <div className="timeline-panel">
-        {activeNoteId && !isViewingAutoTocChapter && !isViewingAutoOpenItemsChapter && !isViewingTimelessNote ? (
+        {modeStatus ? (
+          <EscapeMenuChromeStrip status={modeStatus} />
+        ) : activeNoteId && !isViewingAutoTocChapter && !isViewingAutoOpenItemsChapter && !isViewingTimelessNote ? (
           <SnapshotTimelineSlider
             sourceNoteId={activeNoteId}
             placements={noteSnapshots.placements}
@@ -606,6 +635,23 @@ export function SectionEditorArea({
         )}
         </div>
         <div className="manual-snapshot-panel">
+          {/* A mode owns this position too. Omitted leaves it empty rather
+              than showing a snapshot control for a document this slot is not
+              displaying -- the same rule as the toggle and the counter. */}
+          {modeStatus ? (
+            modeStatus.action ? (
+              <button
+                type="button"
+                className={`chapter-toggle-button btn-icon${modeStatus.action.isActive ? ' is-active' : ''}`}
+                aria-label={modeStatus.action.label}
+                aria-pressed={modeStatus.action.isActive}
+                data-tooltip={modeStatus.action.label}
+                onClick={modeStatus.action.onActivate}
+              >
+                <span className={modeStatus.action.icon} aria-hidden="true" />
+              </button>
+            ) : null
+          ) : (
           <PresentStateCircle
             hasPendingManualChanges={activeNoteId && !isViewingTimelessNote ? ((isViewingAutoTocChapter || isViewingAutoOpenItemsChapter) ? true : noteSnapshots.hasPendingManualChanges) : false}
             onCreateManualSnapshot={() => { void handleCreateManualSnapshot() }}
@@ -621,6 +667,7 @@ export function SectionEditorArea({
                   : undefined
             }
           />
+          )}
         </div>
       </div>
     </div>

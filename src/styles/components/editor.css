@@ -849,3 +849,93 @@
      stutter. */
   transition:    width 220ms ease-out;
 }
+
+/* --- A mode's chrome: the strip and the gauges -----------------------
+ *
+ * Both stand in a place the editor already owns -- the snapshot timeline and
+ * the scrollbar rail -- so both are built out of what those places already
+ * use (a `tag-pill`, a `thockdown-scroll-track`/`thumb`) rather than a look
+ * of their own. A second visual language in either column would read as a
+ * second control rather than as the same one saying something else.
+ * See src/escapeMenu/escapeMenuContract.ts's EscapeMenuModeChrome.
+ */
+
+.escape-menu-chrome-strip {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  gap:             var(--spacing-regular);
+  width:           100%;
+  height:          100%;
+  overflow:        hidden;
+}
+
+.escape-menu-chrome-strip-group {
+  display:   flex;
+  align-items: center;
+  gap:       var(--spacing-small);
+  min-width: 0;
+  overflow:  hidden;
+}
+
+/* Items read outward from the left, traits inward from the right, so the two
+   kinds never look like one list even when only one of them has anything. */
+/* Reversed, so the first trait sits at the far right and later ones fill
+   inward -- the mirror of the items, not a second left-to-right list that
+   happens to start further along. */
+.escape-menu-chrome-strip-group.is-trailing {
+  flex-direction: row-reverse;
+}
+
+.escape-menu-chrome-pill {
+  flex: 0 0 auto;
+  cursor: default;
+}
+
+/* The rail, divided one track per gauge, top to bottom. Equal shares: a
+   gauge measuring a longer thing is not a taller gauge, it is a slower one. */
+.escape-menu-chrome-gauges {
+  position:       absolute;
+  inset:          0;
+  padding:        0 0 0 var(--spacing-regular);
+  display:        flex;
+  flex-direction: column;
+  gap:            var(--spacing-regular);
+  z-index:        14;
+}
+
+.escape-menu-chrome-gauge {
+  position:       relative;
+  flex:           1 1 0;
+  min-height:     0;
+  display:        flex;
+  flex-direction: column;
+  align-items:    flex-end;
+}
+
+/* The icon sits at the FOOT of the track and the fill rises from
+   --spacing-regular above it, so the icon reads as the thing being measured
+   and the bar as how far along it is. The icon is outside the track rather
+   than inside its bottom, so a full gauge never covers it. */
+.escape-menu-chrome-gauge-icon {
+  flex:          0 0 auto;
+  width:         var(--canonical-scroll-thickness);
+  margin-top:    var(--spacing-regular);
+  font-size:     calc(var(--canonical-scroll-thickness) - 2px);
+  line-height:   1;
+  text-align:    center;
+  color:         var(--canonical-handle-border);
+  pointer-events: none;
+}
+
+.escape-menu-chrome-gauge-track {
+  flex:      1 1 auto;
+  min-height: 0;
+}
+
+/* Bottom-anchored, so it grows upward. Height is the ratio; everything else
+   is the ordinary thumb, including its inset inside the track's border. */
+.escape-menu-chrome-gauge-fill {
+  bottom: calc(var(--canonical-scroll-handle-gap) - 2px);
+  cursor: default;
+}

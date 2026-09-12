@@ -27,6 +27,20 @@ channels:
 | the ring | one question's choices, as icon + short label — ALL of them the stage's own |
 | the tab bar | the stats readout — or, while a choice is focused, that choice's own effects |
 | the chapter bar | narration: what just happened, and the frame for what is being asked |
+| the counter | `IV [Combat] 3 | 4` — level in roman numerals, the stage, how far through it |
+| the strip | what the run is carrying: items out from the left, traits in from the right |
+| the rail | one gauge per subdivision, each an icon at the foot and a bar rising above it |
+| the toggle, the action | two buttons the game may claim; **empty** until it does |
+
+Those last four are the chrome AROUND the editor, and one rule covers all of
+them: **a mode owning a slot owns that slot's chrome.** The editor underneath
+has been emptied, so its word count, its timeline, its scrollbar and its
+snapshot control describe nothing — a surface the mode does not fill goes
+BLANK rather than falling back to them. Two of the six worked this way from
+the start and four did not; `EscapeMenuModeChrome` (renamed from
+`…ModeStatus`, which stopped being honest at six surfaces) is what closed
+that. Nothing in it is game-shaped: pills, gauges, a counter string and two
+buttons.
 
 State goes up and narration goes down, and that is a rule rather than a
 layout convenience: a reader's eye goes up for "how am I doing" and down for
@@ -243,8 +257,10 @@ These block a playable game and want answers rather than guesses.
 
 1. **The tab bar is not focus-sensitive yet.** A choice's `detail` is computed
    and carried on every `Choice`, but the escape-menu contract has no way to
-   show it: `EscapeMenuModeStatus` is static for as long as a mode is up.
-   Needs an additive field on the shared contract.
+   show it: `EscapeMenuModeChrome` is static for as long as a mode is up.
+   Needs an additive field on the shared contract. (A modifier's live effects
+   ARE now readable — as the tooltip on its strip pill — so this is about the
+   focused CHOICE, not about holdings any more.)
 2. **Readouts have no icons.** The design's status line is written in icons;
    the contract's readout is a short label and a value.
 3. **Motes — DECIDED, not yet built.** One earning stream, two stored facts:

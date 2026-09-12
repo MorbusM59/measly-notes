@@ -27,7 +27,7 @@ import { choose, currentScreen, enterEntryScreen, type DirectorDeps } from './co
 import { emptySave, type GameSave } from './model/gameState'
 import { createSeed } from './core/rng'
 import { ROOT_STAGE_ID, STAGES } from './stages'
-import { statusReadouts, statusSubject } from './status'
+import { chromeCounter, chromeStrip, statusReadouts, statusSubject } from './chrome'
 
 const CATALOG = buildCatalog(THOCKQUEST)
 
@@ -142,6 +142,13 @@ export function useAdventureEscapeMenu(options: AdventureEscapeMenuOptions): Esc
         subject: statusSubject(save, regionNameOf),
         headline: screen.narration,
         readouts: statusReadouts(save, CATALOG),
+        // The stage names itself; the counter does not keep a table of
+        // names that could fall out of step with the registry.
+        counter: chromeCounter(save, STAGES.get(screen.stageId)?.title ?? ''),
+        strip: chromeStrip(save, CATALOG),
+        // No `toggle` and no `gauges` yet -- an omitted surface goes BLANK
+        // rather than falling back to the editor's, which is the point of
+        // the rule. See chrome.ts.
       },
     }
   }, [isAdventureViewActive, save, handleChoice, onLeave])

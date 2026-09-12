@@ -13,6 +13,7 @@ export const ENCOUNTER_SELECT_STAGE_ID = 'encounterSelect'
 
 export const encounterSelectStage: StageModule = {
   id: ENCOUNTER_SELECT_STAGE_ID,
+  title: 'Wilds',
 
   enter: (_input, _context, rng) => ({ state: {}, rng }),
 

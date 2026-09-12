@@ -59,22 +59,59 @@ export interface EscapeMenuReadout {
   value: string
 }
 
+/** One pill on the chrome's strip. Its tooltip is where the detail goes. */
+export interface EscapeMenuChromePill {
+  key: string
+  /** A Font Awesome class string. */
+  icon: string
+  /** Read out for assistive tech, and the tooltip's first line. */
+  label: string
+  /** The rest of the tooltip, one line each. */
+  detail?: string[]
+}
+
+/** One subdivision of the chrome's rail: an icon, and a bar rising above it. */
+export interface EscapeMenuChromeGauge {
+  key: string
+  /** A Font Awesome class string, drawn at the foot of the track. */
+  icon: string
+  /** How full, 0..1. Clamped by the host; a value outside it is a caller bug, not a layout one. */
+  ratio: number
+  label: string
+  detail?: string[]
+}
+
+/** The button the chrome's toggle slot shows while a mode owns it. */
+export interface EscapeMenuChromeToggle {
+  /** A Font Awesome class string. */
+  icon: string
+  label: string
+  isActive: boolean
+  onActivate: () => void
+}
+
 /**
- * What a mode needs to show that will NOT fit in the ring. The ring's own
- * centre is a small circle whose entire job is naming the cell you are
- * about to activate -- it says what one press does, and nothing else. A
- * mode that tries to narrate through it makes the one label a player
- * actually needs harder to read, so a mode does not get to: it hands its
- * standing state here instead, and the host renders it in the space the
- * editor already has for exactly this -- the tab bar above and the
- * chapter/tag bar below, which are wide, already legible, and already the
- * place a reader looks for "what am I looking at" and "what is its state".
+ * WHAT THE CHROME AROUND THE EDITOR SHOWS while a mode owns the slot.
  *
- * Present whenever the mode is, INCLUDING while the menu is down: a mode
- * that owns an editor slot keeps describing itself there whether or not
- * the ring happens to be raised over it.
+ * The ring's centre is a small circle whose entire job is naming the cell you
+ * are about to activate -- it says what one press does, and nothing else. A
+ * mode that tries to narrate through it makes the one label a player actually
+ * needs harder to read, so a mode does not get to: it hands its standing
+ * state here instead, and the host renders it in the space the editor already
+ * has for exactly this.
+ *
+ * ONE RULE COVERS ALL SIX SURFACES: a mode owning a slot owns that slot's
+ * chrome. The editor underneath has been emptied, so its word count, its
+ * timeline and its scrollbar describe nothing -- a surface this record does
+ * not fill goes BLANK rather than falling back to them. Two of the six (the
+ * tab bar and the chapter bar) worked this way from the start and the other
+ * four did not, which is the drift this record exists to close.
+ *
+ * Present whenever the mode is, INCLUDING while the menu is down: a mode that
+ * owns an editor slot keeps describing itself there whether or not the ring
+ * happens to be raised over it.
  */
-export interface EscapeMenuModeStatus {
+export interface EscapeMenuModeChrome {
   /**
    * What KIND of thing this slot is showing, for the tab bar's identity
    * pill, where a collection's name would otherwise be ("User Guide" is the
@@ -100,6 +137,42 @@ export interface EscapeMenuModeStatus {
    * reader already looks for "what am I holding". Keep it to a handful.
    */
   readouts: EscapeMenuReadout[]
+  /**
+   * The button in the slot's toggle position, left of the word-count panel.
+   * Omitted means an EMPTY position, not the editor's own line-number /
+   * freeze toggle: that button reports on a document this slot is not
+   * showing, and a mode must never leave state from underneath it on screen.
+   */
+  toggle?: EscapeMenuChromeToggle
+  /**
+   * One short line where the word and character count would be. The mode
+   * formats it; the host only places it.
+   */
+  counter?: string
+  /**
+   * Two groups of pills across the timeline's width -- `leading` from the
+   * left, `trailing` from the right. What a mode is accumulating belongs
+   * here, always visible, rather than behind a cell that costs a ring slot
+   * on every screen to reach.
+   */
+  strip?: {
+    leading: EscapeMenuChromePill[]
+    trailing: EscapeMenuChromePill[]
+  }
+  /**
+   * The button at the far right of the counter row, where a note's
+   * manual-snapshot control sits. Omitted leaves it EMPTY, for the same
+   * reason `toggle` does: a snapshot button is about a document this slot is
+   * not showing.
+   */
+  action?: EscapeMenuChromeToggle
+  /**
+   * The scrollbar rail, divided into one track per gauge, top to bottom.
+   * A LIST from the first day it exists, because the second gauge is a
+   * layout question and answering it once is cheaper than answering it
+   * again later against a single-value field.
+   */
+  gauges?: EscapeMenuChromeGauge[]
 }
 
 export interface EscapeMenuMode {
@@ -118,7 +191,7 @@ export interface EscapeMenuMode {
   /** The only cells shown while this mode is up. */
   cells: EscapeMenuCell[]
   /** Everything that does not belong in the ring -- see above. */
-  status?: EscapeMenuModeStatus
+  status?: EscapeMenuModeChrome
   /**
    * A MODE AND ITS RING ARE ONE UNIT, and this is one half of saying so.
    *

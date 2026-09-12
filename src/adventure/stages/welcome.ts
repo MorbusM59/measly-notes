@@ -39,6 +39,7 @@ function hasSuspendedRun(state: Record<string, unknown>): boolean {
 
 export const welcomeStage: StageModule = {
   id: WELCOME_STAGE_ID,
+  title: 'Camp',
 
   enter: (input, _context, rng) => ({
     state: { hasSuspendedRun: input.hasSuspendedRun === true },

@@ -111,6 +111,13 @@ export interface StagePresentation {
 
 export interface StageModule {
   id: string
+  /**
+   * What this stage is called on the chrome's counter -- "Combat",
+   * "Character Creation". The stage names itself because the name belongs to
+   * the stage, not to a table somewhere that has to be kept in step with the
+   * registry; a stage added without one will not compile.
+   */
+  title: string
   /** Builds initial state. May roll: this runs once, when the stage is entered. */
   enter(input: JsonObject, context: StageContext, rng: RngState): StageEntry
   /** Builds the current screen. Pure, no rolls, no effects -- see the module comment. */

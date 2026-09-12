@@ -16,6 +16,7 @@ export const UNDER_CONSTRUCTION_STAGE_ID = 'underConstruction'
 
 export const underConstructionStage: StageModule = {
   id: UNDER_CONSTRUCTION_STAGE_ID,
+  title: 'Unwritten',
 
   enter: (input, _context, rng) => {
     const what = typeof input.what === 'string' ? input.what : 'That'

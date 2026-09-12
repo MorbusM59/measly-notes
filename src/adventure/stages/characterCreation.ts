@@ -47,6 +47,7 @@ const NARRATION: Readonly<Record<Step, string>> = {
 
 export const characterCreationStage: StageModule = {
   id: CHARACTER_CREATION_STAGE_ID,
+  title: 'Origins',
 
   enter: (input, context, rng) => {
     const step = stepOf(input.step)
