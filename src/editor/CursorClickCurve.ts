@@ -185,7 +185,7 @@ export function cursorClickReleaseTailDurationSec(skew: number, durationSec: num
  * division, so nothing downstream needs the floor.
  */
 export function cursorTwitchDurationSec(clickDurationSec: number): number {
-  return Math.max(0, clickDurationSec) / 2;
+  return Math.max(0, clickDurationSec);
 }
 
 /**
