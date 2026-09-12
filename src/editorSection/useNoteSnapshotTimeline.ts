@@ -82,7 +82,7 @@ export interface UseNoteSnapshotTimelineOptions {
   setPreviewedSnapshotId: (id: number | null) => void
   captureEditModeSnapshotFromEditor: (noteId: string) => EditRestoreSnapshot | null
   /** Resolves the canonical BLOCK for whichever content is currently on screen -- live note or a previewed snapshot. Used to persist a Timeline snapshot's own position when leaving it (see docs/editor-contract.md's Viewport Model section). */
-  captureCurrentAnchorBlockIndex: () => number | null
+  captureCurrentAnchorBlockIndex: () => Promise<number | null>
   flushPendingSaveNow: () => Promise<void>
   applyEditRestoreSnapshot: (
     snapshot: EditRestoreSnapshot,
@@ -164,10 +164,11 @@ export function useNoteSnapshotTimeline({
       // first, mirroring the live note's leave-editor persistence (see
       // docs/editor-contract.md's Viewport Model section). A Timeline
       // snapshot maintains its position independently of the live note's.
-      const anchorBlockIndex = captureCurrentAnchorBlockIndex()
-      if (anchorBlockIndex !== null) {
-        void window.thockdownNotes?.saveSnapshotAnchor({ snapshotId: previewedSnapshotId, anchorBlockIndex })
-      }
+      void captureCurrentAnchorBlockIndex().then((anchorBlockIndex) => {
+        if (anchorBlockIndex !== null) {
+          void window.thockdownNotes?.saveSnapshotAnchor({ snapshotId: previewedSnapshotId, anchorBlockIndex })
+        }
+      })
     }
 
     // Flush any in-flight edit before switching the editor's content out from
@@ -256,10 +257,11 @@ export function useNoteSnapshotTimeline({
       // Leaving this snapshot for the present -- persist its own canonical
       // BLOCK first, same as handleNavigateSnapshot, so it's restored to
       // the same spot next time it's opened.
-      const anchorBlockIndex = captureCurrentAnchorBlockIndex()
-      if (anchorBlockIndex !== null) {
-        void window.thockdownNotes?.saveSnapshotAnchor({ snapshotId: previewedSnapshotId, anchorBlockIndex })
-      }
+      void captureCurrentAnchorBlockIndex().then((anchorBlockIndex) => {
+        if (anchorBlockIndex !== null) {
+          void window.thockdownNotes?.saveSnapshotAnchor({ snapshotId: previewedSnapshotId, anchorBlockIndex })
+        }
+      })
       setPreviewedSnapshotId(null)
     }
 

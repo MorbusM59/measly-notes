@@ -678,7 +678,7 @@ export function EditorSection({
     }
     const persistOutStart = performance.now()
     if (persistenceReady && previousNoteId && previousNoteId !== noteId) {
-      const anchorBlockIndex = captureCurrentAnchorBlockIndex()
+      const anchorBlockIndex = await captureCurrentAnchorBlockIndex()
       if (anchorBlockIndex !== null) {
         const cursorPos = readCurrentEditUiPayload()?.cursorPos
           ?? editModeSnapshotByNoteIdRef.current.get(previousNoteId)?.fullSelection.end
@@ -837,7 +837,7 @@ export function EditorSection({
       fallbackViewport,
       overrideCursorPos,
       overrideSourceAnchorLine,
-      previewBlocks: cachedBlocks,
+      previewBlocks: cachedBlocks ?? [],
     })
     logStep('build edit restore snapshot', restoreSnapshotStart)
     updateEditModeSnapshotCache(preloadedSnapshot)
@@ -975,7 +975,7 @@ export function EditorSection({
     await flushPendingSaveNow()
 
     if (persistenceReady) {
-      const anchorBlockIndex = captureCurrentAnchorBlockIndex()
+      const anchorBlockIndex = await captureCurrentAnchorBlockIndex()
       if (anchorBlockIndex !== null) {
         const cursorPos = readCurrentEditUiPayload()?.cursorPos
           ?? editModeSnapshotByNoteIdRef.current.get(previousNoteId)?.fullSelection.end

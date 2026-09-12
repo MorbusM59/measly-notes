@@ -24,7 +24,8 @@ import { resolveMarkdownChecklistLineToggleTransform } from '../editor/Checklist
 import { normalizeInternalText } from '../editor/TextPolicy'
 import { findHeadingAnchorLine, parseHeadingAnchorFragment } from '../shared/tableOfContentsText'
 import type { ParsedInternalNoteLink } from '../shared/internalNoteLinks'
-import { splitMarkdownIntoPreviewBlocksIncremental, type PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
+import { splitPreviewBlocksWithoutFullParse, type PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
+import { requestFullBlockSplit } from '../editor/blockSplitClient'
 import { resolvePreviewBlockIndexForSourceLine } from '../editor/PreviewBlockIndex'
 import { isNonQuantizedSmoothScrollActive, scrollToNonQuantizedSmooth } from '../editor/NonQuantizedSmoothScroll'
 import { traceScroll } from '../editor/scrollTrace'
@@ -649,34 +650,77 @@ export function usePreviewMarkdownRendering({
   // Warm-start from useEditorSectionMount's background prewarm if the text
   // matches. This avoids a second full remark parse on the first preview
   // render after edit mode had already parsed the document in the background.
-  const splitResult = useMemo(
+  /**
+   * The split, which this render DERIVES only when it can do so without a
+   * full remark parse, and otherwise WAITS for.
+   *
+   * This used to call the total split here, in render. On a 2MB note that is
+   * a 16-second remark parse inside a `useMemo`, on the main thread, inside
+   * React's render phase -- the whole of a 26-second first open, measured in
+   * a packaged build (scripts/perf/measureLargeNoteFirstOpen.mjs --mode=tree).
+   * A worker had already been built for exactly this parse and could never
+   * win, because a synchronous reader upstream of it always forced the answer
+   * first. Moving work off the main thread cannot help while something in
+   * render still demands it synchronously; the demand is the defect.
+   *
+   * So there are now three outcomes, and "not yet" is one of them:
+   *   - the incremental path applies (a keystroke against a warm cache):
+   *     sub-millisecond, stays here, because a worker round trip would be
+   *     slower than the work.
+   *   - the worker has already answered for this exact text: use it.
+   *   - neither: PENDING. The pane renders no blocks, which is a real state
+   *     and not a placeholder -- the editor chrome is its normal self and
+   *     the text simply arrives, rather than appearing as raw source and
+   *     then reflowing into formatted blocks.
+   */
+  const [workerSplit, setWorkerSplit] = useState<PreviewBlockSplitCache | null>(null)
+  const splitState = useMemo(
     () => {
       const cache = splitCacheRef.current
-      const hasMatchingCache = cache && cache.text === splitSourceText
       const start = typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-input-lag') === '1' ? performance.now() : 0
-      const result = splitMarkdownIntoPreviewBlocksIncremental(splitSourceText, cache)
+      const incremental = splitPreviewBlocksWithoutFullParse(splitSourceText, cache)
+      const resolved = incremental ?? (workerSplit?.text === splitSourceText ? workerSplit : null)
       if (typeof window !== 'undefined' && window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
-        const elapsed = Number((performance.now() - start).toFixed(2))
         console.log('[preview-block-cache] usePreviewMarkdownRendering split', {
           renderedLength: splitSourceText.length,
-          hasMatchingCache: !!hasMatchingCache,
+          hasMatchingCache: cache?.text === splitSourceText,
           cacheTextLength: cache?.text.length,
           ranges: cache?.ranges.length,
-          resultRanges: result.ranges.length,
-          elapsedMs: elapsed,
+          source: incremental ? 'incremental' : resolved ? 'worker' : 'pending',
+          resultRanges: resolved?.ranges.length ?? 0,
+          elapsedMs: Number((performance.now() - start).toFixed(2)),
         })
       }
-      return result
+      if (resolved) return { cache: resolved, isPending: false }
+      return { cache: { text: splitSourceText, ranges: [], blocks: [] } as PreviewBlockSplitCache, isPending: true }
     },
-    [splitSourceText, splitCacheRef],
+    [splitSourceText, splitCacheRef, workerSplit],
   )
+  const splitResult = splitState.cache
+
+  // The only producer of a full split. Asking for the text this render is
+  // pending on -- not for whatever the last effect saw -- so a note switched
+  // away from mid-parse simply stops being waited for.
+  useEffect(() => {
+    if (!splitState.isPending) return
+    let cancelled = false
+    void requestFullBlockSplit(splitSourceText).then((cache) => {
+      if (!cancelled) setWorkerSplit(cache)
+    })
+    return () => { cancelled = true }
+  }, [splitState.isPending, splitSourceText])
+
   // Committed in an effect, not during the useMemo above, so this cache
   // update never happens during a render React might discard (Strict Mode's
   // double-invoke, an interrupted concurrent render) -- only once this
-  // result has actually become what's on screen.
+  // result has actually become what's on screen. A PENDING result is never
+  // committed: it describes no blocks, and seeding the incremental path with
+  // it would make the next keystroke diff against a document it thinks is
+  // empty.
   useLayoutEffect(() => {
+    if (splitState.isPending) return
     splitCacheRef.current = splitResult
-  }, [splitResult, splitCacheRef])
+  }, [splitState.isPending, splitResult, splitCacheRef])
   const previewBlocks = splitResult.blocks
 
   // Mirrors `previewBlocks` for callbacks below that resolve a block index

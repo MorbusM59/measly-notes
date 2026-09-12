@@ -261,13 +261,13 @@ function debugLogFallback(reason: string): void {
   console.log(`[input-lag] splitMarkdownIntoPreviewBlocksIncremental -> fullSplit (${reason})`)
 }
 
-export function splitMarkdownIntoPreviewBlocksIncremental(
+export function splitPreviewBlocksWithoutFullParse(
   text: string,
   previous: PreviewBlockSplitCache | null,
-): PreviewBlockSplitCache {
+): PreviewBlockSplitCache | null {
   if (previous === null) {
     debugLogFallback('no previous cache')
-    return fullSplit(text)
+    return null
   }
   if (text === previous.text) {
     return previous
@@ -315,7 +315,7 @@ export function splitMarkdownIntoPreviewBlocksIncremental(
   if (headKeepCount === 0 && tailKeepCount === 0) {
     // Nothing safely reusable -- not worth the bookkeeping over a full reparse.
     debugLogFallback(`headKeepCount=0 tailKeepCount=0 (headRangeCount=${headRangeCount} tailRangeCount=${tailRangeCount} totalRanges=${ranges.length} prefixLen=${prefixLen} suffixLen=${suffixLen})`)
-    return fullSplit(text)
+    return null
   }
 
   const shift = newLines.length - oldLines.length
@@ -355,7 +355,7 @@ export function splitMarkdownIntoPreviewBlocksIncremental(
     const boundaryHolds = probeRanges.some((range) => range.rangeEndLine1 === windowLines.length)
     if (!boundaryHolds) {
       debugLogFallback(`tail-boundary probe failed (windowLines=${windowLines.length})`)
-      return fullSplit(text)
+      return null
     }
     windowRanges = probeRanges
       .filter((range) => range.rangeEndLine1 <= windowLines.length)
@@ -389,8 +389,29 @@ export function splitMarkdownIntoPreviewBlocksIncremental(
     if (nextRanges[nextRanges.length - 1]?.rangeEndLine1 !== newLines.length) {
       debugLogFallback(`  last range doesn't reach totalLines: ${JSON.stringify(nextRanges[nextRanges.length - 1])}`)
     }
-    return fullSplit(text)
+    return null
   }
 
   return { text, ranges: nextRanges, blocks: materializeBlocks(nextRanges, newLines) }
+}
+
+/**
+ * The total split: the incremental path where it applies, a full remark
+ * parse where it does not.
+ *
+ * **This can parse the whole document and therefore must not be called on
+ * the main thread.** On a 2MB note that parse measured 16 SECONDS in a
+ * packaged build -- and it was reached from a `useMemo` during React's
+ * render, which is how a first open of a large note came to cost 26s. The
+ * partial function above exists so the main thread has an entry point that
+ * cannot do this: it returns null instead, and null means "ask the worker"
+ * (blockSplitClient.ts). `previewBlockSplit.contract.test.ts` is what keeps
+ * that true, because the rule was already stated once and four separate
+ * call sites did not hold it.
+ */
+export function splitMarkdownIntoPreviewBlocksIncremental(
+  text: string,
+  previous: PreviewBlockSplitCache | null,
+): PreviewBlockSplitCache {
+  return splitPreviewBlocksWithoutFullParse(text, previous) ?? fullSplit(text)
 }

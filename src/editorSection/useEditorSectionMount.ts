@@ -30,7 +30,6 @@ import { normalizeInternalText } from '../editor/TextPolicy'
 import { buildTransformResult } from '../editor/TransformResult'
 import { readPreviewEdgePaddingPx, readPreviewLineHeightPx } from './previewBlockGeometry'
 import {
-  splitMarkdownIntoPreviewBlocks,
   type PreviewMarkdownBlock,
   type PreviewBlockSplitCache,
 } from '../editor/PreviewBlockSplit'
@@ -225,7 +224,7 @@ export interface UseEditorSectionMountResult {
    * through the same editor/preview DOM). Returns null when no position can
    * currently be determined (e.g. neither pane is mounted yet).
    */
-  captureCurrentAnchorBlockIndex: () => number | null
+  captureCurrentAnchorBlockIndex: () => Promise<number | null>
   resolvePreviewSourceAnchorFromContainer: (container: HTMLElement) => { sourceAnchorLine: number; sourceAnchorText: string | null } | null
   restoreEditorSelection: () => void
   focusEditorInEditMode: (options?: { restoreSelection?: boolean }) => void
@@ -233,7 +232,7 @@ export interface UseEditorSectionMountResult {
   persistEditUiState: (noteId: string, options?: { immediate?: boolean }) => void
   /** Cancels a debounced persistEditUiState write without flushing it -- mirrors useNoteSaveQueue's cancelPendingSave, for unmount cleanup. */
   cancelPendingEditUiStatePersist: () => void
-  persistActiveNoteEditModeStateNow: () => void
+  persistActiveNoteEditModeStateNow: () => Promise<void>
   applyEditRestoreSnapshot: (
     snapshot: EditRestoreSnapshot,
     options?: { restoreFullSelection?: boolean; focusAfterApply?: boolean; onComplete?: () => void },
@@ -541,7 +540,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
   // actually changes. Both DB-persistence and mode-switch round-tripping
   // need these blocks, and without caching the same document can be parsed
   // multiple times in one user operation.
-  const getPreviewBlocksForText = useCallback((text: string): PreviewMarkdownBlock[] => {
+  const getPreviewBlocksForText = useCallback(async (text: string): Promise<PreviewMarkdownBlock[]> => {
     const cached = previewBlocksCacheRef.current
     if (cached && cached.text === text) {
       debugLogPreviewBlockCache('reusing in-memory blocks cache', { textLength: text.length, blocks: cached.blocks.length })
@@ -558,10 +557,18 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       debugLogPreviewBlockCache('reusing split-cache blocks', { textLength: text.length, blocks: splitCache.blocks.length })
       return splitCache.blocks
     }
-    debugLogPreviewBlockCache('falling back to full remark parse', { textLength: text.length })
-    const blocks = splitMarkdownIntoPreviewBlocks(text)
-    previewBlocksCacheRef.current = { text, blocks }
-    return blocks
+    // Neither cache holds this text: the worker parses it, and this waits.
+    // It used to parse here instead, and on a 2MB note that is a 16-SECOND
+    // main-thread freeze -- measured in a packaged build immediately after
+    // the same defect was fixed in usePreviewMarkdownRendering, which is the
+    // whole lesson: the rule "a full parse never runs on the main thread"
+    // was stated at one call site and not at its siblings. Every caller of
+    // this is an event handler or an async restore, so awaiting costs them
+    // nothing they cannot afford.
+    debugLogPreviewBlockCache('awaiting worker full split', { textLength: text.length })
+    const split = await requestFullBlockSplit(text)
+    previewBlocksCacheRef.current = { text, blocks: split.blocks }
+    return split.blocks
   }, [previewBlockSplitCacheRef, previewBlocksCacheRef])
 
 
@@ -575,9 +582,36 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
   // saveNoteUiState/saveSnapshotAnchor call site funnels through it. Only
   // called at enumerated leave-editor checkpoints (never per-keystroke), so
   // the O(document length) remark parse this triggers is not a hot-path cost.
-  const computeAnchorBlockIndexFromLine = useCallback((text: string, sourceAnchorLine: number): number => {
-    const blocks = getPreviewBlocksForText(text)
+  const computeAnchorBlockIndexFromLine = useCallback(async (text: string, sourceAnchorLine: number): Promise<number> => {
+    // Line zero is block zero in every document, so the top of a note -- the
+    // overwhelmingly common case, and the only one a never-scrolled note
+    // ever has -- needs no map at all. Without this, leaving a freshly
+    // opened 2MB note waits on a parse in order to compute zero. The same
+    // short-circuit, for the same reason, as EditRestoreMath's.
+    if (sourceAnchorLine <= 0) return 0
+    const blocks = await getPreviewBlocksForText(text)
     return resolvePreviewBlockIndexForSourceLine(blocks, sourceAnchorLine)
+  }, [getPreviewBlocksForText])
+
+
+  /**
+   * The block map an anchor restore needs -- which for most restores is no
+   * map at all.
+   *
+   * `resolveEditSourceAnchorLineFromUiState` answers 0 for an anchor at or
+   * below zero without consulting a single block, and `getNoteUiState`
+   * returns 0 as the documented default for a note that has never been
+   * positioned. So every never-scrolled note asking for its blocks here was
+   * a full remark parse performed to learn nothing. Returning [] in that
+   * case is not a stub: it is the argument that call provably does not read.
+   */
+  const anchorBlocksForUiState = useCallback(async (
+    text: string,
+    uiState: { anchorBlockIndex?: unknown } | null | undefined,
+  ): Promise<PreviewMarkdownBlock[]> => {
+    const index = uiState?.anchorBlockIndex
+    if (typeof index !== 'number' || !Number.isFinite(index) || index <= 0) return []
+    return await getPreviewBlocksForText(text)
   }, [getPreviewBlocksForText])
 
   const updateEditModeSnapshotCache = useCallback((snapshot: EditRestoreSnapshot) => {
@@ -716,14 +750,14 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     return readSourceAnchorLine(cachedSnapshot.viewport.scrollTopLines, cachedSnapshot.viewport.topBoundaryLines)
   }, [activeNoteId, isPreviewMode, readCurrentEditUiPayload, resolvePreviewSourceAnchorFromContainer])
 
-  const captureCurrentAnchorBlockIndex = useCallback((): number | null => {
+  const captureCurrentAnchorBlockIndex = useCallback(async (): Promise<number | null> => {
     const sourceAnchorLine = resolveCurrentSourceAnchorLine()
     if (sourceAnchorLine === null) return null
 
     const text = normalizeInternalText(
       previewedSnapshotContentRef.current ?? (latestEditorTextRef.current || activeNoteText),
     )
-    return computeAnchorBlockIndexFromLine(text, sourceAnchorLine)
+    return await computeAnchorBlockIndexFromLine(text, sourceAnchorLine)
   }, [activeNoteText, computeAnchorBlockIndexFromLine, latestEditorTextRef, previewedSnapshotContentRef, resolveCurrentSourceAnchorLine])
 
 
@@ -846,7 +880,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       }
 
       const text = normalizeInternalText(latestEditorTextRef.current || activeNoteText)
-      const anchorBlockIndex = computeAnchorBlockIndexFromLine(text, sourceAnchorLine)
+      const anchorBlockIndex = await computeAnchorBlockIndexFromLine(text, sourceAnchorLine)
       const previewBlockMap = await buildPersistedBlockMap(previewBlockSplitCacheRef.current, text)
       debugLogPreviewBlockCache('persisting edit-ui cache', {
         noteId,
@@ -892,7 +926,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
   // close/delete/swap/clear, app quit. Mode-agnostic per the scroll-sync
   // policy -- captures whichever mode (edit or preview) is actually on
   // screen via captureCurrentAnchorBlockIndex, not just edit mode.
-  const persistActiveNoteEditModeStateNow = useCallback(() => {
+  const persistActiveNoteEditModeStateNow = useCallback(async () => {
     if (!activeNoteId) return
 
     if (!isPreviewMode) {
@@ -902,7 +936,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
     const notesApi = window.thockdownNotes
     if (!notesApi) return
 
-    const anchorBlockIndex = captureCurrentAnchorBlockIndex()
+    const anchorBlockIndex = await captureCurrentAnchorBlockIndex()
     if (anchorBlockIndex === null) return
 
     // cursorPos is an edit-mode-only (caret) concern -- preview mode has no
@@ -2019,6 +2053,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
           text: activeText,
           uiState,
           fallbackViewport,
+          previewBlocks: await anchorBlocksForUiState(activeText, uiState),
         })
         updateEditModeSnapshotCache(fallbackSnapshot)
         editRestoreCompletedForNoteIdRef.current.add(editRestoreKey)
@@ -2035,6 +2070,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       cancelled = true
     }
   }, [
+    anchorBlocksForUiState,
     activeNoteText,
     activeNoteId,
     applyEditRestoreSnapshot,
@@ -2253,8 +2289,9 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         // effect must not depend on activeNoteText (see below): that state
         // updates on every keystroke, and re-running this on every keystroke
         // would mean re-running buildEditRestoreSnapshotFromUiState's
-        // now-real markdown parse (resolveEditSourceAnchorLineFromUiState /
-        // splitMarkdownIntoPreviewBlocks) on every keystroke -- exactly the
+        // now-real markdown parse (resolveEditSourceAnchorLineFromUiState,
+        // which today takes the map rather than parsing for it, but still
+        // costs a worker round trip per call) on every keystroke -- exactly the
         // input-lag regression this comment is here to prevent reintroducing.
         const activeText = normalizeInternalText(latestEditorTextRef.current)
         const snapshot = buildEditRestoreSnapshotFromUiState({
@@ -2262,6 +2299,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
           text: activeText,
           uiState,
           fallbackViewport,
+          previewBlocks: await anchorBlocksForUiState(activeText, uiState),
         })
         updateEditModeSnapshotCache(snapshot)
       } catch (error) {
@@ -2275,6 +2313,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       cancelled = true
     }
   }, [
+    anchorBlocksForUiState,
     activeNoteId,
     lineHeightPx,
     persistenceReady,
@@ -2451,6 +2490,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
           text: activeText,
           uiState,
           fallbackViewport,
+          previewBlocks: await anchorBlocksForUiState(activeText, uiState),
         })
         updateEditModeSnapshotCache(restoreSnapshot)
         editRestoreCompletedForNoteIdRef.current.add(editRestoreKey)
@@ -2483,6 +2523,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       cancelled = true
     }
   }, [
+    anchorBlocksForUiState,
     activeNoteId,
     activeNoteText,
     applyEditRestoreSnapshot,
@@ -2666,16 +2707,22 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
           const anchorBlockIndex = await window.thockdownNotes?.getSnapshotAnchor({ snapshotId: previewedSnapshotId }) ?? 0
           if (cancelled) return
           const snapshotText = normalizeInternalText(previewedSnapshotContentRef.current ?? '')
-          const blocks = splitMarkdownIntoPreviewBlocks(snapshotText)
-          sourceAnchorLine = resolveSourceLineForAnchorBlockIndex(blocks, anchorBlockIndex)
+          sourceAnchorLine = anchorBlockIndex <= 0
+            ? 0
+            : resolveSourceLineForAnchorBlockIndex(await getPreviewBlocksForText(snapshotText), anchorBlockIndex)
         } else {
           const uiState = await window.thockdownNotes?.getNoteUiState({ id: activeNoteId })
           if (cancelled) return
           const text = normalizeInternalText(latestEditorTextRef.current || activeNoteText)
-          const blocks = getPreviewBlocksForText(text)
           if (uiState && typeof uiState.anchorBlockIndex === 'number' && Number.isFinite(uiState.anchorBlockIndex)) {
             const totalLines = Math.max(1, text.split('\n').length)
-            const rawLine = resolveSourceLineForAnchorBlockIndex(blocks, Math.round(uiState.anchorBlockIndex))
+            // Only now are the blocks needed -- and only for a non-zero
+            // anchor. Fetching them above meant a never-opened note, whose
+            // uiState has no anchor at all, parsed its whole self to use
+            // nothing.
+            const rawLine = Math.round(uiState.anchorBlockIndex) <= 0
+              ? 0
+              : resolveSourceLineForAnchorBlockIndex(await getPreviewBlocksForText(text), Math.round(uiState.anchorBlockIndex))
             sourceAnchorLine = Math.min(Math.max(0, rawLine), totalLines - 1)
           }
         }
@@ -2813,8 +2860,9 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
         if (cancelled) return
 
         const snapshotText = normalizeInternalText(previewedSnapshotContentRef.current ?? '')
-        const blocks = splitMarkdownIntoPreviewBlocks(snapshotText)
-        const sourceLine = resolveSourceLineForAnchorBlockIndex(blocks, anchorBlockIndex)
+        const sourceLine = anchorBlockIndex <= 0
+          ? 0
+          : resolveSourceLineForAnchorBlockIndex(await getPreviewBlocksForText(snapshotText), anchorBlockIndex)
         const fallbackViewport = latestEditViewportRef.current ?? latestViewportRef.current
         const topBoundaryLines = fallbackViewport?.topBoundaryLines ?? 0
 
@@ -2851,7 +2899,7 @@ export function useEditorSectionMount(options: UseEditorSectionMountOptions): Us
       },
       { restoreFullSelection: Boolean(cached), focusAfterApply: false },
     )
-  }, [activeNoteId, applyEditRestoreSnapshot, previewedSnapshotId, isFrozenSectionPreviewRef, previewedSnapshotContentRef, latestEditViewportRef, latestViewportRef])
+  }, [getPreviewBlocksForText, activeNoteId, applyEditRestoreSnapshot, previewedSnapshotId, isFrozenSectionPreviewRef, previewedSnapshotContentRef, latestEditViewportRef, latestViewportRef])
   const applyProgrammaticEditorText = useCallback((nextText: string, selectionStart?: number, selectionEnd?: number) => {
     if (activeNoteHasDebugTagRef.current) return
 

@@ -33,6 +33,11 @@ type Pending = { resolve: (cache: PreviewBlockSplitCache) => void; text: string 
 let worker: Worker | null | undefined
 let nextRequestId = 1
 const pending = new Map<number, Pending>()
+// One parse per TEXT, not per asker. Two independent callers now want the
+// same map for the same note -- the background prewarm and the preview pane
+// itself -- and parsing a 2MB document twice because two of them asked is
+// the same waste whether it happens on a worker or here.
+const inFlightByText = new Map<string, Promise<PreviewBlockSplitCache>>()
 
 function ensureWorker(): Worker | null {
   if (worker !== undefined) return worker
@@ -43,6 +48,7 @@ function ensureWorker(): Worker | null {
       const request = pending.get(id)
       if (!request) return
       pending.delete(id)
+      inFlightByText.delete(request.text)
       request.resolve(restorePreviewBlockSplitCacheFromRanges(request.text, ranges))
     }
     created.onerror = () => {
@@ -53,6 +59,7 @@ function ensureWorker(): Worker | null {
         request.resolve(splitMarkdownIntoPreviewBlocksIncremental(request.text, null))
       }
       pending.clear()
+      inFlightByText.clear()
       worker = null
     }
     worker = created
@@ -72,11 +79,16 @@ export function requestFullBlockSplit(text: string): Promise<PreviewBlockSplitCa
   const active = ensureWorker()
   if (!active) return Promise.resolve(splitMarkdownIntoPreviewBlocksIncremental(text, null))
 
+  const alreadyRunning = inFlightByText.get(text)
+  if (alreadyRunning) return alreadyRunning
+
   const id = nextRequestId
   nextRequestId += 1
-  return new Promise<PreviewBlockSplitCache>((resolve) => {
+  const answer = new Promise<PreviewBlockSplitCache>((resolve) => {
     pending.set(id, { resolve, text })
     const request: PreviewBlockSplitRequest = { id, text }
     active.postMessage(request)
   })
+  inFlightByText.set(text, answer)
+  return answer
 }

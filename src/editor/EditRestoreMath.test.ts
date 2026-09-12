@@ -27,6 +27,7 @@ describe('buildEditRestoreSnapshotFromUiState — overrideSourceAnchorLine', () 
     const snapshot = buildEditRestoreSnapshotFromUiState({
       noteId: 'n1',
       text,
+      previewBlocks: blocks,
       uiState: { cursorPos: 40, anchorBlockIndex: storedAnchorBlockIndex },
       fallbackViewport: null,
     })
@@ -38,6 +39,7 @@ describe('buildEditRestoreSnapshotFromUiState — overrideSourceAnchorLine', () 
     const snapshot = buildEditRestoreSnapshotFromUiState({
       noteId: 'n1',
       text,
+      previewBlocks: blocks,
       uiState: { cursorPos: 40, anchorBlockIndex: storedAnchorBlockIndex },
       fallbackViewport: null,
       overrideCursorPos: text.indexOf('## First section'),
@@ -59,6 +61,7 @@ describe('buildEditRestoreSnapshotFromUiState — overrideSourceAnchorLine', () 
     const snapshot = buildEditRestoreSnapshotFromUiState({
       noteId: 'n1',
       text,
+      previewBlocks: blocks,
       uiState: null,
       fallbackViewport: null,
       overrideCursorPos: text.indexOf('## Second section'),
@@ -72,6 +75,7 @@ describe('buildEditRestoreSnapshotFromUiState — overrideSourceAnchorLine', () 
     const snapshot = buildEditRestoreSnapshotFromUiState({
       noteId: 'n1',
       text,
+      previewBlocks: blocks,
       uiState: { cursorPos: 40, anchorBlockIndex: storedAnchorBlockIndex },
       fallbackViewport: null,
       overrideSourceAnchorLine: Number.NaN,
@@ -90,6 +94,7 @@ describe('reading a position and landing on it are inverses', () => {
   const land = (anchorLine: number, topBoundaryLines = 0) => buildEditRestoreSnapshotFromUiState({
     noteId: 'n1',
     text,
+    previewBlocks: blocks,
     uiState: { cursorPos: 0 },
     fallbackViewport: { topBoundaryLines, bottomBoundaryLines: 0, scrollTopLines: 0 },
     overrideSourceAnchorLine: anchorLine,

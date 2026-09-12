@@ -1,6 +1,6 @@
 import type { PersistedViewportState } from '../shared/appState'
 import type { EditorSelectionState } from './EditorContract'
-import { splitMarkdownIntoPreviewBlocks, type PreviewMarkdownBlock } from './PreviewBlockSplit'
+import { type PreviewMarkdownBlock } from './PreviewBlockSplit'
 import { resolveSourceLineForAnchorBlockIndex } from './PreviewBlockIndex'
 
 export type EditRestoreSnapshot = {
@@ -132,7 +132,7 @@ export function resolveSourceAnchorFromEditState(params: {
 export function resolveEditSourceAnchorLineFromUiState(
   text: string,
   uiState: { anchorBlockIndex?: unknown } | null | undefined,
-  blocks?: Pick<PreviewMarkdownBlock, 'startLine'>[] | null,
+  blocks: Pick<PreviewMarkdownBlock, 'startLine'>[],
 ): number | null {
   if (!uiState || typeof uiState.anchorBlockIndex !== 'number' || !Number.isFinite(uiState.anchorBlockIndex)) {
     return null
@@ -150,9 +150,16 @@ export function resolveEditSourceAnchorLineFromUiState(
   // cost: a full remark pass over the document to compute the number zero.
   if (uiState.anchorBlockIndex <= 0) return 0
 
+  // `blocks` is REQUIRED rather than optional-with-a-fallback. It used to
+  // parse the document itself when handed none, which is a full remark pass
+  // on whatever thread happened to call -- the same landmine that cost 26
+  // seconds in usePreviewMarkdownRendering and 16 more in
+  // useEditorSectionMount. A caller that reaches this line has an anchor
+  // below the top and therefore genuinely needs the map; making it say so in
+  // the type is what stops a fourth site from quietly parsing on the main
+  // thread.
   const totalLines = Math.max(1, text.split('\n').length)
-  const resolvedBlocks = blocks ?? splitMarkdownIntoPreviewBlocks(text)
-  const sourceLine = resolveSourceLineForAnchorBlockIndex(resolvedBlocks, Math.round(uiState.anchorBlockIndex))
+  const sourceLine = resolveSourceLineForAnchorBlockIndex(blocks, Math.round(uiState.anchorBlockIndex))
   return Math.min(Math.max(0, sourceLine), totalLines - 1)
 }
 
@@ -186,7 +193,7 @@ export function buildEditRestoreSnapshotFromUiState(params: {
    * before arriving at the one they did.
    */
   overrideSourceAnchorLine?: number
-  previewBlocks?: Pick<PreviewMarkdownBlock, 'startLine'>[] | null
+  previewBlocks: Pick<PreviewMarkdownBlock, 'startLine'>[]
 }): EditRestoreSnapshot {
   const { noteId, text, uiState, fallbackViewport, overrideCursorPos, overrideSourceAnchorLine, previewBlocks } = params
   // Default to 0 lines for both boundaries when nothing is stored (per spec:
