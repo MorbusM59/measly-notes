@@ -3953,3 +3953,36 @@ broken for everyone; that is a hypothesis, not a finding.
 **Still true and untouched:** the in-memory split cache is single-slot and
 keyed by text, so only one note is ever warm in memory. The per-note warm
 store is the DB cache, and it now works.
+
+### Measured, on a 320-559KB note
+
+| | cold, no persisted record | warm, record restored |
+| --- | --- | --- |
+| `build edit restore snapshot` | 2129ms → **0.9ms** | 1.4ms |
+| block map: restore, or parse | 1.0ms → **1661ms** | 8–21ms |
+
+The first column moved rather than shrank: the parse is now done ONCE,
+explicitly, in `activateNote`, and published to the split cache. It used to
+happen implicitly inside `buildEditRestoreSnapshotFromUiState`
+(`blocks ?? splitMarkdownIntoPreviewBlocks(text)`), which returns only the
+blocks and throws the RANGES away — so the result could not be published,
+the background prewarm could not tell the document had just been parsed, and
+it parsed it again half a second later. 1.6s + 1.7s on the first open of
+every large note. Now 1.6s once, then ~8ms forever.
+
+**Two things measured and then NOT done**, so nobody re-derives them:
+
+- **A per-note in-memory LRU.** Would remove the 8–21ms hash-and-materialize
+  on each switch, out of ~400ms of real activation work. 5%, against a new
+  cache-invalidation surface. Not worth it.
+- **Reusing the notes table's `contentChecksum` instead of hashing in the
+  renderer.** They are not the same digest: `contentChecksum` hashes
+  `sanitizeDocumentText` (HTML tags stripped), `textHash` hashes
+  `normalizeInternalText` (CRLF→LF, tabs→3 spaces, BOM). Substituting one
+  would silently invalidate every record.
+
+**Still open:** the prewarm runs inside `requestIdleCallback` but never reads
+its deadline, does not chunk, and is not on a worker. It matters less now
+that the cold parse happens once on the activation path rather than twice,
+but a document large enough still blocks the main thread for as long as it
+takes. That is the remaining structural item for large documents.

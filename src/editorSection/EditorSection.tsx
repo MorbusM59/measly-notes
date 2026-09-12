@@ -41,6 +41,7 @@ import { hashNormalizedText } from '../shared/hashText'
 import type { PreviewMarkdownBlock, PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
 import type { SectionHandle } from './sectionRegistry'
 import { buildPersistedBlockMap, restorePersistedBlockMap } from '../editor/persistedBlockMap'
+import { splitMarkdownIntoPreviewBlocksIncremental } from '../editor/PreviewBlockSplit'
 
 /** Same seed text as App.tsx's own NEW_NOTE_TEMPLATE (createNote) -- kept as its own local copy rather than a shared import to avoid a circular dependency (App.tsx is what mounts EditorSection). */
 const NEW_NOTE_TEMPLATE = '# '
@@ -771,13 +772,28 @@ export function EditorSection({
       previewBlockSplitCacheRef.current = restored.cache
       previewBlocksCacheRef.current = { text: hydratedText, blocks: restored.cache.blocks }
     } else if (previewBlockSplitCacheRef.current?.text !== hydratedText) {
-      // Only discard when what is in memory is for DIFFERENT text. Nulling
-      // regardless is what made the background prewarm pointless: a note is
-      // activated more than once per click, and the second activation threw
-      // away the split the first had just built -- after which nothing was
-      // carried out with the note and it parsed on every future visit.
-      previewBlockSplitCacheRef.current = null
-      previewBlocksCacheRef.current = null
+      // Nothing usable: no persisted record, and what is in memory is for
+      // DIFFERENT text. (Only then -- nulling regardless is what made the
+      // background prewarm pointless, since a note is activated more than
+      // once per click and the second activation threw away the split the
+      // first had just built.)
+      //
+      // So parse HERE, once, and keep the result. The parse is not new work:
+      // `buildEditRestoreSnapshotFromUiState` below has always done it
+      // implicitly when handed no blocks (EditRestoreMath.ts's `blocks ??
+      // splitMarkdownIntoPreviewBlocks(text)`) -- but that helper returns
+      // only the blocks and throws the RANGES away, so the result could not
+      // be published and the background prewarm had no way to know the
+      // document had just been parsed. It parsed it a second time.
+      //
+      // Measured on a 320KB note: 1.6s in the snapshot build, then another
+      // 1.7s in the prewarm half a second later. Same parse, twice, on the
+      // first open of every large note.
+      previewBlockSplitCacheRef.current = splitMarkdownIntoPreviewBlocksIncremental(hydratedText, null)
+      previewBlocksCacheRef.current = {
+        text: hydratedText,
+        blocks: previewBlockSplitCacheRef.current.blocks,
+      }
     }
     if (window.localStorage.getItem('thockdown:debug-input-lag') === '1') {
       console.log('[preview-block-cache] activation', {
@@ -786,7 +802,7 @@ export function EditorSection({
         memoryMatches: previewBlockSplitCacheRef.current?.text === hydratedText,
       })
     }
-    logStep('restore/clear preview block cache', cacheRestoreStart)
+    logStep('block map: restore, or parse when there is none', cacheRestoreStart)
 
     const fallbackViewport = latestEditViewportRef.current ?? latestViewportRef.current
     const restoreSnapshotStart = performance.now()
