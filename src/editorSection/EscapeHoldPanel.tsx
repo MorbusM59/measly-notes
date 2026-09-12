@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent } from 'react'
 import {
   buildContinuationPlan,
@@ -10,6 +10,8 @@ import {
 } from '../editor/ScrollCurvePlan'
 import { buildEscapeHoldRotationPlan, pixelsPerSlotAt } from './escapeHoldRotationCurve'
 import { computeEscapeHoldPointAtSlot } from './escapeHoldRingLayout'
+import { createWheelNotchState, resolveWheelEventUnits } from '../editor/wheelNotch'
+import { useNonPassiveWheel } from '../shared/useNonPassiveWheel'
 import type { EscapeHoldRingParams } from './escapeHoldRingLayout'
 import type { EscapeMenuContribution } from '../escapeMenu/escapeMenuContract'
 
@@ -240,6 +242,11 @@ interface PanelCell {
  * mode is up would put the same rule in two places and let them disagree,
  * so there is one rule for every consumer.
  *
+ * Losing focus does not close it -- but it does not strand it either: focus
+ * that lands on <body> (a click on something inert) is taken back, while
+ * focus a reader gave to a real control is left alone. See
+ * handleRingFocusOut.
+ *
  * Two earlier designs closed on blur and both were racy in the same way:
  * native focus-shift on mousedown fires inside the very dispatch that also
  * runs markSectionActive (EditorSection.tsx), so nothing this component can
@@ -339,11 +346,46 @@ export function EscapeHoldPanel({
   // object mutated in place) always gets the current value regardless of
   // which render's function is the one actually running.
   const cellsRef = useRef(cells)
-  useEffect(() => { cellsRef.current = cells }, [cells])
-  const ringGeometryParamsRef = useRef<EscapeHoldRingParams>({ borderRadiusRegularPx, spacingRegularPx })
-  useEffect(() => {
-    ringGeometryParamsRef.current = { borderRadiusRegularPx, spacingRegularPx }
-  }, [borderRadiusRegularPx, spacingRegularPx])
+  // Assigned during render, NOT in an effect. A passive effect runs after
+  // layout effects, and the reset layout effect below writes every cell's
+  // position to the DOM imperatively -- so on the commit where the cell set
+  // itself changes (a mode arriving with its own cells, or advancing to a
+  // step with a different number of them), a ref updated in a passive effect
+  // still held the PREVIOUS array. The reset then laid the ring out for the
+  // old cell count, and React never corrected it: its own virtual style for
+  // those buttons had not changed, so it had nothing to write. The ring came
+  // up with a cell in the wrong slot until the first input re-rendered it.
+  // Found from the positions, which moved for exactly one of three cells --
+  // a whole-ring geometry error would have moved all of them.
+  cellsRef.current = cells
+  // The ring element itself, for the native wheel listener below, and a
+  // mirror of `isOpen` the two imperative handlers can read.
+  const ringRef = useRef<HTMLDivElement | null>(null)
+  const isOpenRef = useRef(isOpen)
+  isOpenRef.current = isOpen
+  /**
+   * The ring's geometry, as a value the render actually uses -- NOT read
+   * back out of the mirror ref below.
+   *
+   * It was, and the ring came up misaligned until the first keypress. These
+   * props start at their defaults and change once the saved UI loadout
+   * loads; that changes them mid-session, so the panel re-renders -- but a
+   * ref written in an effect still holds the OLD value while that render is
+   * computing positions, and a ref write triggers no further render to
+   * correct them. The cells therefore sat at default-geometry positions
+   * until something unrelated re-rendered, which in practice meant the first
+   * arrow key. Reading the props directly is the fix; the ref exists only
+   * for the imperative rAF path, which cannot read render scope.
+   */
+  const ringGeometryParams = useMemo<EscapeHoldRingParams>(
+    () => ({ borderRadiusRegularPx, spacingRegularPx }),
+    [borderRadiusRegularPx, spacingRegularPx],
+  )
+  const ringGeometryParamsRef = useRef<EscapeHoldRingParams>(ringGeometryParams)
+  // Plain assignment during render, not an effect: the rAF chain can read
+  // this in the same frame the props change, and an effect would leave it a
+  // render behind there too.
+  ringGeometryParamsRef.current = ringGeometryParams
 
   // The live, possibly-fractional rotation position (in slots), driven by
   // the rAF loop below. Always equals `topIndex` exactly whenever nothing
@@ -664,6 +706,131 @@ export function EscapeHoldPanel({
     setFocusedIndex(next)
   }
 
+  /**
+   * ONE STEP OF THE DIAL, whatever asked for it -- an arrow key, or a notch
+   * of the wheel. Everything below this line is about the dial and nothing
+   * about the input that moved it, which is why the wheel gets identical
+   * motion (and identical splicing mid-animation) for free rather than a
+   * second, subtly different rotation path.
+   */
+  const rotateOneStep = (direction: 1 | -1) => {
+    if (reduceVisualEffects) {
+      stepSimple(direction)
+      return
+    }
+
+    const count = cellsRef.current.length
+    if (count === 0) return
+
+    // Also the throttle baseline a held arrow key measures from, so a wheel
+    // notch and a key repeat cannot both spend the same moment.
+    lastAcceptedKeyTimeMsRef.current = performance.now()
+
+    // Focus branch: advances by exactly one position on every accepted
+    // input, unconditionally -- independent of whether an animation is
+    // currently in flight. The functional updater reads the true current
+    // focusedIndex rather than the value closed over at render time, which
+    // matters here specifically because a second input landing mid-
+    // animation (see the animation branch below) needs to advance from
+    // wherever focus already is, not from topIndex/rotationOffsetRef (the
+    // animation's own reference, which lags behind on purpose).
+    setFocusedIndex((current) => ((current + direction) % count + count) % count)
+    // pendingTargetSlotRef is focusedIndex's own unwrapped counterpart --
+    // advanced unconditionally, in lockstep, on every accepted input, so
+    // it's always exactly the true destination regardless of anything the
+    // animation engine does or skips -- see its own doc comment.
+    pendingTargetSlotRef.current += direction
+
+    // Animation branch. Nothing in flight: play a fresh single-slot bell
+    // step exactly as before.
+    if (discreteRafIdRef.current === null) {
+      playDiscretePlan(direction, finalizeTopIndex)
+      return
+    }
+
+    // Something IS in flight: splice a smooth continuation instead of
+    // discarding this input outright (see playContinuationLeg and the
+    // component doc comment). The distance is always computed fresh from
+    // pendingTargetSlotRef against wherever the ring's raw, possibly-
+    // fractional position actually is right now -- not incrementally
+    // derived from whatever the currently-playing leg's own bookkeeping
+    // happens to say -- so this can never drift out of sync with the true
+    // destination; see pendingTargetSlotRef's own doc comment for the bug
+    // this fixes.
+    const distance = pendingTargetSlotRef.current - rotationOffsetRef.current
+    if (Math.abs(distance) > count) {
+      // Moved fast enough that the true destination has raced more than a
+      // full circle ahead of the currently-playing leg -- rather than
+      // splice an ever-more-elaborate multi-lap curve, just let it finish
+      // on its own; pendingTargetSlotRef is untouched by this skip, so the
+      // very next accepted input (or this leg's own completion) will
+      // recompute the correct distance fresh and catch up regardless.
+      return
+    }
+    playContinuationLeg(distance, finalizeTopIndex)
+  }
+  const rotateOneStepRef = useRef(rotateOneStep)
+  rotateOneStepRef.current = rotateOneStep
+
+  /**
+   * The wheel turns the dial: one notch up is one step anticlockwise, one
+   * notch down is one step clockwise -- exactly what ArrowLeft and
+   * ArrowRight do, through the same rotateOneStep, so the motion cannot
+   * drift apart from the keyboard's.
+   *
+   * What counts as a notch is not decided here: `resolveWheelEventUnits`
+   * already answers that for the whole app (editor/wheelNotch.ts), learning
+   * the device's real notch size instead of assuming one, and returning 0
+   * for a trackpad's sub-notch stream. A second answer to that question
+   * here is how the two panes drifted apart last time.
+   *
+   * Attached to the RING, never to the backdrop: the backdrop is inert, and
+   * a wheel over it belongs to whatever is behind it. Non-passive, because
+   * a wheel that turned the dial must not also scroll the page.
+   */
+  const wheelNotchStateRef = useRef(createWheelNotchState())
+  const handleRingWheel = useCallback((event: WheelEvent) => {
+    if (!isOpenRef.current) return
+    const units = resolveWheelEventUnits(event, wheelNotchStateRef.current, performance.now())
+    if (units === 0) return
+    event.preventDefault()
+
+    const count = cellsRef.current.length
+    if (count === 0) return
+    // A flick, or a page-mode device, can be worth more than a lap. Capping
+    // at one keeps the dial's own catch-up logic in its designed range
+    // rather than asking it to splice a multi-lap curve.
+    const steps = Math.min(Math.abs(units), count)
+    const direction = units < 0 ? -1 : 1
+    for (let step = 0; step < steps; step += 1) rotateOneStepRef.current(direction)
+  }, [])
+  useNonPassiveWheel(ringRef, handleRingWheel)
+
+  /**
+   * Focus that went NOWHERE comes back.
+   *
+   * The ring no longer closes when it loses focus (see the component doc
+   * comment), which left a real hole: clicking any inert part of the app
+   * moved focus to <body>, and from there the arrow keys did nothing, no
+   * cell read as selected, and there was no gesture that could get it back
+   * -- the only way out was to close the game and reopen it.
+   *
+   * The condition is deliberately narrow. <body> is not a destination
+   * anybody chose, so taking focus back from it steals nothing; a click on
+   * a real control (the sidebar, a toolbar button, a text field) lands on
+   * that control and is left alone, because the reader meant it. Switching
+   * sections is the same case: focus lands in the other section's ring, so
+   * this declines.
+   */
+  const handleRingFocusOut = () => {
+    window.setTimeout(() => {
+      if (!isOpenRef.current) return
+      const active = document.activeElement
+      if (active !== null && active !== document.body) return
+      ringRef.current?.querySelector<HTMLButtonElement>('button[tabindex="0"]')?.focus()
+    }, 0)
+  }
+
   const handleRingKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // Alt+ArrowLeft/Right is the app's global "switch active section"
     // shortcut (App.tsx) -- must pass through untouched, not get hijacked
@@ -673,11 +840,6 @@ export function EscapeHoldPanel({
     const direction = directionFromKey(event)
     if (direction === null) return
     event.preventDefault()
-
-    if (reduceVisualEffects) {
-      stepSimple(direction)
-      return
-    }
 
     // Native OS keyboard auto-repeat is throttled, not ignored outright --
     // see the component doc comment's CURRENT SCOPE paragraph and
@@ -691,58 +853,12 @@ export function EscapeHoldPanel({
     // recalculated/spliced curve -- so holding a key reads as the ring
     // advancing one position at that rate, not free-running continuous
     // rotation (that's the still-closed hold path -- see the doc comment).
-    const count = cellsRef.current.length
-    if (count === 0) return
-
-    const nowMs = performance.now()
     if (event.repeat) {
       const last = lastAcceptedKeyTimeMsRef.current
-      if (last !== null && nowMs - last < heldKeyRepeatThrottleMs()) return
-    }
-    lastAcceptedKeyTimeMsRef.current = nowMs
-
-    // Focus branch: advances by exactly one position on every genuine
-    // keydown, unconditionally -- independent of whether an animation is
-    // currently in flight. The functional updater reads the true current
-    // focusedIndex rather than the value closed over at render time, which
-    // matters here specifically because a second keydown landing mid-
-    // animation (see the animation branch below) needs to advance from
-    // wherever focus already is, not from topIndex/rotationOffsetRef (the
-    // animation's own reference, which lags behind on purpose).
-    setFocusedIndex((current) => ((current + direction) % count + count) % count)
-    // pendingTargetSlotRef is focusedIndex's own unwrapped counterpart --
-    // advanced unconditionally, in lockstep, on every accepted keydown, so
-    // it's always exactly the true destination regardless of anything the
-    // animation engine does or skips -- see its own doc comment.
-    pendingTargetSlotRef.current += direction
-
-    // Animation branch. Nothing in flight: play a fresh single-slot bell
-    // step exactly as before.
-    if (discreteRafIdRef.current === null) {
-      playDiscretePlan(direction, finalizeTopIndex)
-      return
+      if (last !== null && performance.now() - last < heldKeyRepeatThrottleMs()) return
     }
 
-    // Something IS in flight: splice a smooth continuation instead of
-    // discarding this keydown outright (see playContinuationLeg and the
-    // component doc comment). The distance is always computed fresh from
-    // pendingTargetSlotRef against wherever the ring's raw, possibly-
-    // fractional position actually is right now -- not incrementally
-    // derived from whatever the currently-playing leg's own bookkeeping
-    // happens to say -- so this can never drift out of sync with the true
-    // destination; see pendingTargetSlotRef's own doc comment for the bug
-    // this fixes.
-    const distance = pendingTargetSlotRef.current - rotationOffsetRef.current
-    if (Math.abs(distance) > count) {
-      // Tapped fast enough that the true destination has raced more than a
-      // full circle ahead of the currently-playing leg -- rather than
-      // splice an ever-more-elaborate multi-lap curve, just let it finish
-      // on its own; pendingTargetSlotRef is untouched by this skip, so the
-      // very next accepted tap (or this leg's own completion) will
-      // recompute the correct distance fresh and catch up regardless.
-      return
-    }
-    playContinuationLeg(distance, finalizeTopIndex)
+    rotateOneStep(direction)
   }
 
   // The ring's default is to close on activation: a quick action does its
@@ -765,10 +881,12 @@ export function EscapeHoldPanel({
 
   return (
     <div
+      ref={ringRef}
       className={`editor-escape-hold-ring${isOpen ? ' is-visible' : ''}`}
       role="toolbar"
       aria-label="Quick note actions"
       onKeyDown={handleRingKeyDown}
+      onBlur={handleRingFocusOut}
     >
       {/* Centered label of whichever cell is focused, or hovered while the
           mouse is over one -- see displayedLabel above. Sized/shaped in
@@ -786,7 +904,7 @@ export function EscapeHoldPanel({
         // active animation, applyRotationOffsetToDom overrides this
         // imperatively every frame -- see the component doc comment.
         const slot = index - topIndex
-        const point = computeEscapeHoldPointAtSlot(slot, cells.length, ringGeometryParamsRef.current)
+        const point = computeEscapeHoldPointAtSlot(slot, cells.length, ringGeometryParams)
         return (
           <button
             type="button"

@@ -139,8 +139,8 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 
 *A small on-editor grid for the note actions you reach for most, without leaving the keyboard.*
 
-- Keeps showing while you hold \`Esc\`; tapping \`Esc\` once more (or clicking outside it) dismisses it without doing anything.
-- Navigate with the arrow keys or \`Tab\`/\`Shift+Tab\`, then \`Enter\`/\`Space\` or a click to run the highlighted action. Running an action closes the menu -- unless it's something that carries on *inside* the menu, in which case the menu stays up and its cells change to whatever comes next.
+- Keeps showing while you hold \`Esc\`; tapping \`Esc\` once more dismisses it without doing anything. Clicking outside it does *not* -- the menu is only ever dismissed deliberately, so a stray click can't end something you were in the middle of.
+- Navigate with the arrow keys, \`Tab\`/\`Shift+Tab\`, or by rolling the mouse wheel while the pointer is over the menu -- one notch is one step, the same as one arrow press. Then \`Enter\`/\`Space\` or a click to run the highlighted action. Running an action closes the menu -- unless it's something that carries on *inside* the menu, in which case the menu stays up and its cells change to whatever comes next.
 - Currently wired up: New Note, New Chapter, Export, Export All, Help (opens this page -- see [The User Guide]($#the-user-guide)). New Note and Help always work; New Chapter and Export only appear with a note open (New Chapter not for a note that can't take one, like a read-only auto-generated chapter), and Export All only for a note that has chapters -- see [Export All]($#export-all). The remaining grid cells are reserved for future actions.
 
 ### [The User Guide](#the-user-guide)
@@ -153,7 +153,7 @@ const HELP_GUIDE_CHAPTER_CONTENTS: string[] = [
 - Opens exactly like clicking any note in the sidebar does -- as a temporary tab, replacing whatever that slot was showing. Leave it the same way too: pick another note, click a pinned tab, or open a different note from the sidebar. There's no dedicated close gesture any more.
 - Browsable with the same chapter bar every note with chapters uses -- click a chapter pill to jump to it, or the bookmark icon for a full table of contents.
 - Always render-only: nothing here can be edited, renamed, tagged, archived, or deleted.
-- **Right-click** this button and you get something else entirely: a small choose-your-path adventure. The button lights up and turns into a flame, the slot is set aside (whatever it was showing comes back afterwards), and the quick actions menu opens over the empty editor with your choices on it. Each cell is one choice and the menu stays up as you make them; where you are is written across the tab bar above, and how you're doing on the bar below. Leave with the \`X\` cell or by pressing the button again -- the run is saved where it stands, and right-clicking again drops you straight back into it. The flame cell starts a new one over the top.
+- **Right-click** this button and you get something else entirely: a small choose-your-path adventure. The button lights up and turns into a flame, the slot is set aside (whatever it was showing comes back afterwards), and the quick actions menu opens over the empty editor with your choices on it. Each cell is one choice and the menu stays up as you make them; where you are is written across the tab bar above, and how you're doing on the bar below. Leave with the \`X\` cell, by pressing \`Esc\`, or by pressing the button again -- the menu is the game here, so putting it away puts the game away with it. The run is saved where it stands, and right-clicking again drops you straight back into it. The flame cell starts a new one over the top.
 
 ### [Scrollbar Navigation](#scrollbar-navigation)
 

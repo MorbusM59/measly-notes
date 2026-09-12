@@ -350,7 +350,16 @@ export function SectionEditorArea({
               // only blurs what's behind the element it's set on, not its own
               // descendants -- see the empty-state box further down for why
               // that matters).
-              <div className="editor-escape-hold-backdrop" aria-hidden="true" />
+              <div
+                className="editor-escape-hold-backdrop"
+                aria-hidden="true"
+                // Swallows the focus a mousedown would otherwise move to
+                // <body>. The backdrop is inert -- it has nothing to focus
+                // -- so a click on it must leave focus exactly where it was,
+                // in the ring. Without this, clicking the dimmed area killed
+                // the ring's keyboard navigation with no way to get it back.
+                onMouseDown={(event) => event.preventDefault()}
+              />
             ) : null}
             <div className={`edit-container${isPreviewMode ? ' is-pane-hidden' : ''}`}>
               <div className="markdown-editor-texture" />
