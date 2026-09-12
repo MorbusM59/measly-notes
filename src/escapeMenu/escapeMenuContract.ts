@@ -112,6 +112,21 @@ export interface EscapeMenuMode {
   cells: EscapeMenuCell[]
   /** Everything that does not belong in the ring -- see above. */
   status?: EscapeMenuModeStatus
+  /**
+   * What it means for this mode when the RING GOES DOWN -- Escape, or a cell
+   * that does not keep the menu open.
+   *
+   * For an ordinary quick action, lowering the ring means nothing: the ring
+   * is a launcher and the app carries on. For a mode that IS its feature's
+   * whole interface, it means the feature is over -- and leaving the mode
+   * "running" behind a lowered ring is exactly how a slot ends up occupied
+   * with nothing visible in it and a toggle still lit.
+   *
+   * Optional, because a mode that survives its ring being lowered is a
+   * legitimate thing to be; it just has to say so by omission rather than by
+   * the host guessing.
+   */
+  onDismiss?: () => void
 }
 
 export interface EscapeMenuContribution {

@@ -229,24 +229,33 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.menu?.reviewFlagsVisibleBySection).toEqual({ sectionA: false })
   })
 
-  it('persists the guide overlay and undocked note overlay across a save -> fresh-instance load', async () => {
+  it('persists the slot overlay across a save -> fresh-instance load, and drops a malformed one', async () => {
     const writer = new StateService(dataRoot)
+    const overlay = { kind: 'undocked' as const, sectionId: 'section-1', previousNoteId: 'note-2', noteId: 'note-3' }
     await writer.saveAppState({
+      selectedNoteId: null,
+      menu: { sidebarMode: 'date', selectedMonths: [], selectedYears: [], searchQuery: '', slotOverlay: overlay },
+    })
+
+    const reader = new StateService(dataRoot)
+    expect((await reader.loadAppState()).menu?.slotOverlay).toEqual(overlay)
+
+    // An undocked overlay without its note is not an undocked overlay --
+    // keeping it would leave the renderer holding a return with nothing to
+    // return from.
+    const badWriter = new StateService(dataRoot)
+    await badWriter.saveAppState({
       selectedNoteId: null,
       menu: {
         sidebarMode: 'date',
         selectedMonths: [],
         selectedYears: [],
         searchQuery: '',
-        guideView: { sectionId: 'section-1', previousNoteId: 'note-2' },
-        undockedNote: { noteId: 'note-3', sectionId: 'section-1', previousNoteId: 'note-2' },
+        slotOverlay: { kind: 'undocked', sectionId: 'section-1', previousNoteId: null } as never,
       },
     })
-
-    const reader = new StateService(dataRoot)
-    const loaded = await reader.loadAppState()
-    expect(loaded.menu?.guideView).toEqual({ sectionId: 'section-1', previousNoteId: 'note-2' })
-    expect(loaded.menu?.undockedNote).toEqual({ noteId: 'note-3', sectionId: 'section-1', previousNoteId: 'note-2' })
+    const badReader = new StateService(dataRoot)
+    expect((await badReader.loadAppState()).menu?.slotOverlay).toBeUndefined()
   })
 
   it('persists a saved adventure across a save -> fresh-instance load, and drops a corrupt one', async () => {
@@ -296,7 +305,7 @@ describe('StateService app-state field round-trip', () => {
     const corruptReader = new StateService(dataRoot)
     expect((await corruptReader.loadAppState()).menu?.adventure).toBeNull()
 
-    // The view is a separate field from the save and is dropped just as
+    // The overlay is a separate field from the save and is dropped just as
     // silently if sanitizeMenu never learns about it -- which would restart
     // the app with the game intact but nowhere on screen.
     const viewWriter = new StateService(dataRoot)
@@ -308,11 +317,12 @@ describe('StateService app-state field round-trip', () => {
         selectedYears: [],
         searchQuery: '',
         adventure: save,
-        adventureView: { sectionId: 'default', previousNoteId: 'note-1' },
+        slotOverlay: { kind: 'adventure', sectionId: 'default', previousNoteId: 'note-1' },
       },
     })
     const viewReader = new StateService(dataRoot)
-    expect((await viewReader.loadAppState()).menu?.adventureView).toEqual({ sectionId: 'default', previousNoteId: 'note-1' })
+    expect((await viewReader.loadAppState()).menu?.slotOverlay)
+      .toEqual({ kind: 'adventure', sectionId: 'default', previousNoteId: 'note-1' })
   })
 
   it('persists the unified global spellcheck toggle across a save -> fresh-instance load', async () => {
@@ -397,8 +407,7 @@ describe('StateService app-state field round-trip', () => {
         selectedMonths: [3],
         selectedYears: [2024],
         searchQuery: 'stale query',
-        guideView: { sectionId: 'section-1', previousNoteId: 'note-2' },
-        undockedNote: { noteId: 'note-3', sectionId: 'section-1', previousNoteId: 'note-2' },
+        slotOverlay: { kind: 'guide', sectionId: 'section-1', previousNoteId: 'note-2' },
         debuggingEnabled: true,
       },
     })
@@ -410,8 +419,7 @@ describe('StateService app-state field round-trip', () => {
     expect(loaded.selectedNoteId).toBeNull()
     expect(loaded.menu?.sidebarMode).toBe('date')
     expect(loaded.menu?.searchQuery).toBe('')
-    expect(loaded.menu?.guideView).toBeUndefined()
-    expect(loaded.menu?.undockedNote).toBeUndefined()
+    expect(loaded.menu?.slotOverlay).toBeUndefined()
     expect(loaded.menu?.debuggingEnabled).toBe(false)
   })
 })

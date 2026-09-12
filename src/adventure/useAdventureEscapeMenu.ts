@@ -118,6 +118,10 @@ export function useAdventureEscapeMenu(options: AdventureEscapeMenuOptions): Esc
       id: 'adventure',
       stepKey: screen.screenKey,
       cells,
+      // The ring IS the game, so lowering it leaves the game. Anything else
+      // leaves the slot occupied by an empty editor with the toggle lit --
+      // a view the player can see the effects of but not reach.
+      onDismiss: onLeave,
       status: {
         // "Adventure" rather than the game's name: this pill says what KIND
         // of thing the slot is holding (its neighbour in that role is "User
@@ -129,7 +133,7 @@ export function useAdventureEscapeMenu(options: AdventureEscapeMenuOptions): Esc
         readouts: statusReadouts(save, CATALOG),
       },
     }
-  }, [isAdventureViewActive, save, handleChoice])
+  }, [isAdventureViewActive, save, handleChoice, onLeave])
 
   return useMemo<EscapeMenuContribution>(
     () => (activeMode ? { entryCells: [], activeMode } : EMPTY_ESCAPE_MENU_CONTRIBUTION),

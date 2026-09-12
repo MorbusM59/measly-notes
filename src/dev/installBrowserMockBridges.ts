@@ -42,6 +42,11 @@ import { normalizeChapterHeadings } from '../shared/markdownHeadings'
 import { resolveIdentityLabel } from '../shared/tabLabels'
 import { computeHeadingAnchors, formatHeadingAnchorFragment, formatOutlineEntryLine, formatOutlineRootTitleLine, parseMarkdownHeading, stripMarkdownInlineFormatting } from '../shared/tableOfContentsText'
 import { formatInternalNoteLink } from '../shared/internalNoteLinks'
+import {
+  HELP_GUIDE_ASSIGNED_ID,
+  HELP_GUIDE_CHAPTER_IDS,
+  HELP_GUIDE_ROOT_ID,
+} from '../shared/helpGuide'
 import { buildNextAutoAssignedId, normalizeAssignedIdInput } from '../shared/assignedIds'
 import { assembleOpenItemsText, buildOpenItemsGroupMarkdown, checklistStateChanged, findOpenItemSourceAtLine, parseOpenItemsGroups, toggleChecklistItemByText } from '../shared/openItemsText'
 
@@ -221,6 +226,86 @@ function stableStringify(value: unknown): string {
   return `{${entries.join(',')}}`
 }
 
+/**
+ * A stand-in User Guide family, so `dev:browser` can exercise the paths that
+ * involve it at all.
+ *
+ * The real guide is seeded by the main process (electron/help/helpGuideNote.ts)
+ * and so has never existed in browser mode -- which meant every guide
+ * behaviour (the window control's toggle, the tab bar's guide chrome, a
+ * `$HELP` link, the slot-overlay derivation in shared/slotOverlay.ts) could
+ * only ever be reasoned about here, never run. This is deliberately the
+ * SHAPE and not the content: the same fixed ids, sealed and timeless, one
+ * chapter rather than seventeen, and placeholder prose. Anything that reads
+ * the guide's actual text still needs the real app.
+ */
+function seedHelpGuideNotes(): NoteDocument[] {
+  // A fixed timestamp, like the real seed's: the guide must not sort into
+  // "today" and must be stable across reloads.
+  const seededAtMs = Date.UTC(2026, 6, 4)
+  const chapter = HELP_GUIDE_CHAPTER_IDS[0]
+
+  const root = normalizeDocument({
+    id: HELP_GUIDE_ROOT_ID,
+    fileName: `${HELP_GUIDE_ROOT_ID}.md`,
+    title: 'User Guide',
+    tags: [],
+    createdAtMs: seededAtMs,
+    updatedAtMs: seededAtMs,
+    sizeBytes: 0,
+    text: '# User Guide\n\nPlaceholder guide root for browser mode.\n',
+    chapterOnly: false,
+    isAutoToc: false,
+    isAutoOpenItems: false,
+    isTimeless: true,
+    chapterParentId: null,
+    chapterId: null,
+    detachedChapterParentId: null,
+  })
+  root.assignedId = HELP_GUIDE_ASSIGNED_ID
+
+  const first = normalizeDocument({
+    id: chapter.noteId,
+    fileName: `${chapter.noteId}.md`,
+    title: 'A chapter',
+    tags: [],
+    createdAtMs: seededAtMs,
+    updatedAtMs: seededAtMs,
+    sizeBytes: 0,
+    text: '# A chapter\n\nPlaceholder guide chapter for browser mode.\n',
+    chapterOnly: true,
+    isAutoToc: false,
+    isAutoOpenItems: false,
+    isTimeless: true,
+    chapterParentId: HELP_GUIDE_ROOT_ID,
+    chapterId: chapter.chapterId,
+    detachedChapterParentId: null,
+  })
+
+  // One ordinary note alongside it, because a real install always has the
+  // welcome note: with only the guide present the app opens the guide as its
+  // initial note, which is an artefact of the seed rather than of the app.
+  const ordinary = normalizeDocument({
+    id: '26-07-05_00-00_MOCKNOTE1',
+    fileName: '26-07-05_00-00_MOCKNOTE1.md',
+    title: 'A note',
+    tags: [],
+    createdAtMs: seededAtMs + 86_400_000,
+    updatedAtMs: seededAtMs + 86_400_000,
+    sizeBytes: 0,
+    text: '# A note\n\nAn ordinary note, so the guide is not the only thing to open.\n',
+    chapterOnly: false,
+    isAutoToc: false,
+    isAutoOpenItems: false,
+    isTimeless: false,
+    chapterParentId: null,
+    chapterId: null,
+    detachedChapterParentId: null,
+  })
+
+  return [root, first, ordinary]
+}
+
 function seedUiLoadoutEntries(): { entries: UiLoadoutEntry[]; lastCustomIdByMode: { light: number; dark: number } } {
   const now = Date.now()
   const entries: UiLoadoutEntry[] = []
@@ -250,7 +335,7 @@ function loadStore(): BrowserMockStore {
     if (!raw) {
       const seeded = seedUiLoadoutEntries()
       return {
-        notes: [],
+        notes: seedHelpGuideNotes(),
         noteUiStates: {},
         snapshotAnchors: {},
         appState: clone(DEFAULT_APP_STATE),
@@ -402,7 +487,7 @@ function loadStore(): BrowserMockStore {
   } catch {
     const seeded = seedUiLoadoutEntries()
     return {
-      notes: [],
+      notes: seedHelpGuideNotes(),
       noteUiStates: {},
       snapshotAnchors: {},
       appState: clone(DEFAULT_APP_STATE),

@@ -98,6 +98,19 @@ the replay test alone does not catch a roll in `present`, because a screen is
 not part of the save. (Verified by injecting one: it passes replay and fails
 the purity test.)
 
+## The ring is the game, so it cannot outlive it
+
+A mode may declare `onDismiss` (`src/escapeMenu/escapeMenuContract.ts`). The
+adventure wires it to leaving, because lowering the ring — Escape, or a cell
+that does not keep the menu open — otherwise left the slot occupied by an
+empty editor with the window control still lit: a view whose effects the
+player can see but which they cannot reach.
+
+Which slot is showing what is not the game's business at all. It is one
+record and one derivation, shared with the User Guide and undocked notes —
+see `src/shared/slotOverlay.ts`, whose invariant is that stored state may
+never contradict the screen.
+
 ## Two stores
 
 - **Content** (`content/`) ships with the app, is never written, and changes
@@ -211,5 +224,10 @@ These block a playable game and want answers rather than guesses.
     re-enters at the encounter hub rather than at the exact screen left,
     because leaving a game currently discards its stack rather than
     suspending it into its row.
-12. **Armor decay's curve.** "A chance based on luck" is specified; the curve
+12. **The ring after a game ends by other means.** Choosing a note while the
+    adventure is up correctly ends the game — but the ring stays raised, now
+    showing the ordinary quick actions over the newly loaded note. Nothing is
+    wrong with the state; it is just a transition nobody designed. Should a
+    mode disappearing take the ring down with it?
+13. **Armor decay's curve.** "A chance based on luck" is specified; the curve
     is not. `ARMOR_DECAY_TUNING` is a labelled placeholder, not a tuned value.

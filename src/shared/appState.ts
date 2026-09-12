@@ -1,4 +1,5 @@
 import type { GameSave } from '../adventure/model/gameState';
+import type { SlotOverlay } from './slotOverlay';
 import type { TextureMaterialsBySurface, TextureSurfaceKey } from '../textures/types';
 import type { GlazeSettings } from './glaze';
 
@@ -19,16 +20,6 @@ export interface PersistedSidebarViewState {
   collapsedSecondary?: string[];
 }
 
-export interface PersistedGuideView {
-  sectionId: string;
-  previousNoteId: string | null;
-}
-
-export interface PersistedUndockedNote {
-  noteId: string;
-  sectionId: string;
-  previousNoteId: string | null;
-}
 
 export interface PersistedMenuState {
   sidebarMode: SidebarMode;
@@ -226,10 +217,18 @@ export interface PersistedMenuState {
   chapterBarMode?: 'tags' | 'tabs';
   /** Whether the sidebar is visible (not part of layout widths). */
   isSidebarVisible?: boolean;
-  /** The active User Guide overlay, keyed to the section that is showing it. */
-  guideView?: PersistedGuideView | null;
-  /** The active undocked note overlay, keyed to the section that is showing it. */
-  undockedNote?: PersistedUndockedNote | null;
+  /**
+   * The one record of a slot given over to something that is not one of the
+   * reader's own notes -- the User Guide, the adventure, or an undocked
+   * note. Three separate fields used to live here, one per kind; see
+   * src/shared/slotOverlay.ts for why that shape produced orphaned toggles
+   * and why this one cannot.
+   *
+   * It is RETURN MEMORY, not a claim about what is on screen. What a slot is
+   * showing is derived from the slot itself on every read, so a record that
+   * has gone stale across a restart is inert rather than wrong.
+   */
+  slotOverlay?: SlotOverlay | null;
   /** Whether "double size" mode (2x page zoom + doubled window minimum) is on. See App.tsx's isDoubleSizeMode. */
   isDoubleSizeMode?: boolean;
   /**
@@ -260,13 +259,6 @@ export interface PersistedMenuState {
    * restore, since the browser-mode mock never calls sanitizeMenu at all.
    */
   adventure?: GameSave | null;
-  /**
-   * Which slot the adventure is currently given over to, and what that slot
-   * was showing before -- the same shape and lifecycle as `guideView`, for
-   * the same reason: a slot temporarily holding something that is not one
-   * of the reader's notes. Restored on launch, with the slot left empty.
-   */
-  adventureView?: PersistedGuideView | null;
 }
 
 // Persisted boundary/scroll position as integer line counts. See

@@ -14,7 +14,7 @@ import type { InlineStateLineCache } from '../editor/MarkdownContext'
 import type { UseSectionTabsResult } from '../tabBar/useSectionTabs'
 import type { NoteTabEntry } from '../shared/tabs'
 import { isAutoAssignedId } from '../shared/assignedIds'
-import { HELP_GUIDE_NOTE_IDS } from '../shared/helpGuide'
+import { occupancyOf, type SlotOccupancy, type SlotOverlay } from '../shared/slotOverlay'
 import { SectionTabBar } from '../tabBar/SectionTabBar'
 import { TagBar } from '../tabBar/TagBar'
 import { SectionEditorArea, type SectionEditorAreaProps } from './SectionEditorArea'
@@ -80,23 +80,41 @@ export interface EditorSectionProps extends Omit<SectionEditorAreaProps,
    * shortcut or quick-actions menu, belonging to no section yet. See App.tsx's
    * `undockedNote` and docs/user-workflow-design.md.
    */
-  undockedNoteId: string | null
+  /**
+   * The one record of a slot given over to something that is not a note
+   * (App.tsx, src/shared/slotOverlay.ts). Read here only to DERIVE what this
+   * slot is showing -- never trusted on its own.
+   */
+  slotOverlay: SlotOverlay | null
+  /**
+   * Tells App what this slot turns out to be showing. One direction: the
+   * slot is the authority on itself, and App only aggregates.
+   *
+   * `arrival` is non-null ONLY on the render where this slot's note actually
+   * changed, and carries what that change displaced. App needs it to record
+   * a RETURN for an overlay it did not open itself -- a `$HELP` link
+   * activates a guide note by the ordinary note route, and only this slot
+   * ever knew what was here first.
+   *
+   * It is a transition rather than a standing value on purpose. A snapshot
+   * cannot tell "the guide just arrived" from "the guide is on its way out",
+   * and closing the guide passes through exactly one render where the record
+   * has been cleared but the note has not yet changed -- on which a
+   * snapshot-driven App re-recorded the overlay it had just closed.
+   */
+  reportSlotOccupancy: (
+    sectionId: string,
+    occupancy: SlotOccupancy,
+    arrival: { displacedNoteId: string | null } | null,
+  ) => void
   /** Files the undocked note into an existing section picked from the section picker. */
   onDockUndockedNoteIntoSection: (candidateSectionId: string) => void
   /** Ends the undocked state -- called the moment a commit gesture is taken, not after its async work lands. */
   onDockUndockedNote: () => void
   /** Dismisses the undocked note and brings this slot's own section back. */
   onSetAsideUndockedNote: () => void
-  /** True while THIS slot is the one showing the User Guide (App.tsx's `guideView`). */
-  isShowingGuideSlot: boolean
-  /** Closes the guide and restores what this slot was showing before it opened. */
-  onCloseGuideView: () => void
-  /** Reports that this slot has moved on to something else, so the guide is no longer open anywhere -- distinct from closing it, which also restores. */
-  onGuideNoLongerShown: () => void
-  /** True while THIS slot is the one given over to the adventure (App.tsx's `adventureView`) -- which means it holds no note at all. */
-  isShowingAdventureSlot: boolean
-  /** Reports that a note has arrived in this slot, so the adventure view is over. Same distinction as onGuideNoLongerShown: no restore, the reader has already picked what they want here. */
-  onAdventureNoLongerShown: () => void
+  /** Closes whatever overlay is up and restores what its slot was showing before. */
+  onCloseSlotOverlay: () => void
   markSectionActive: (sectionId: string) => void
   isSidebarVisible: boolean
   toggleSidebarVisible: () => void
@@ -179,12 +197,9 @@ export interface EditorSectionProps extends Omit<SectionEditorAreaProps,
  */
 export function EditorSection({
   sectionId,
-  undockedNoteId,
-  isShowingGuideSlot,
-  isShowingAdventureSlot,
-  onAdventureNoLongerShown,
-  onCloseGuideView,
-  onGuideNoLongerShown,
+  slotOverlay,
+  reportSlotOccupancy,
+  onCloseSlotOverlay,
   onDockUndockedNote,
   onDockUndockedNoteIntoSection,
   onSetAsideUndockedNote,
@@ -1970,17 +1985,35 @@ export function EditorSection({
    * The bar goes blank for it -- no identity, no tabs, no prompt -- and the
    * ordinary section picker becomes the way to file it.
    */
-  const isShowingUndockedNote = undockedNoteId !== null && undockedNoteId === activeNoteId
-
   /**
-   * The User Guide, open in this slot as an undocked note.
+   * WHAT THIS SLOT IS SHOWING -- derived, every render, from the record plus
+   * this slot's own active note (src/shared/slotOverlay.ts). The single
+   * answer every consumer below reads, and the reason this component no
+   * longer carries a pair of "have I seen it yet" latches that watched the
+   * note and told App to retract a flag.
    *
-   * Matched against the guide's whole FAMILY rather than one note id, so
-   * clicking through its chapters keeps the guide open -- a chapter of the
+   * The guide is matched against its whole FAMILY rather than one note id,
+   * so clicking through its chapters keeps the guide open: a chapter of the
    * guide is still the guide, and the bar must not flip back to the
    * collection underneath halfway through reading.
    */
-  const isShowingGuide = isShowingGuideSlot && activeNoteId !== null && HELP_GUIDE_NOTE_IDS.has(activeNoteId)
+  const occupancy = useMemo(
+    () => occupancyOf(sectionId, activeNoteId, slotOverlay),
+    [sectionId, activeNoteId, slotOverlay],
+  )
+  const isShowingGuide = occupancy.kind === 'guide'
+  const isShowingUndockedNote = occupancy.kind === 'undocked'
+
+  // Reported rather than inferred by the parent, because this is the only
+  // place that knows this slot's active note as it changes. The note being
+  // displaced goes with it: see reportSlotOccupancy's doc comment.
+  const lastReportedNoteIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const switched = lastReportedNoteIdRef.current !== activeNoteId
+    const displacedNoteId = lastReportedNoteIdRef.current
+    lastReportedNoteIdRef.current = activeNoteId
+    reportSlotOccupancy(sectionId, occupancy, switched ? { displacedNoteId } : null)
+  }, [reportSlotOccupancy, sectionId, occupancy, activeNoteId])
 
   /** Files the undocked note into the section this slot already holds. */
   const handleDockUndockedNoteHere = useCallback(async () => {
@@ -1989,58 +2022,6 @@ export function EditorSection({
     onDockUndockedNote()
     await pinNoteAsRightmostTab(activeNoteId)
   }, [activeNoteId, closeSectionPicker, onDockUndockedNote, pinNoteAsRightmostTab])
-
-  /**
-   * Leaving the guide by any other route -- a sidebar click, a tab, a link out
-   * of it -- ends it just as much as closing it does. Without this the window
-   * control would keep claiming the guide is open, and pressing it would drag
-   * the reader back to whatever the slot held before, which they have already
-   * moved on from.
-   *
-   * Gated on having actually SEEN the guide in this slot first. Opening it is
-   * two steps -- the slot is marked, then the note is activated -- and in the
-   * gap between them the slot still shows the previous note. Without the gate
-   * this fires in that gap and cancels the open before it lands, leaving the
-   * guide to arrive as an ordinary temporary tab in the collection.
-   */
-  const hasShownGuideRef = useRef(false)
-  useEffect(() => {
-    if (!isShowingGuideSlot) {
-      hasShownGuideRef.current = false
-      return
-    }
-    if (isShowingGuide) {
-      hasShownGuideRef.current = true
-      return
-    }
-    if (!hasShownGuideRef.current) return
-    if (!activeNoteId) return
-    hasShownGuideRef.current = false
-    onGuideNoLongerShown()
-  }, [isShowingGuideSlot, isShowingGuide, activeNoteId, onGuideNoLongerShown])
-
-  /**
-   * The adventure holds an EMPTY slot, so any note arriving in it means the
-   * reader has moved on -- exactly the guide's case above, and gated the
-   * same way for the same reason. Opening the view is two steps (the slot is
-   * marked, then emptied), and in the gap between them the slot still shows
-   * the previous note; without waiting to have actually seen it empty, this
-   * fires in that gap and cancels the open before it lands.
-   */
-  const hasSeenAdventureEmptyRef = useRef(false)
-  useEffect(() => {
-    if (!isShowingAdventureSlot) {
-      hasSeenAdventureEmptyRef.current = false
-      return
-    }
-    if (activeNoteId === null) {
-      hasSeenAdventureEmptyRef.current = true
-      return
-    }
-    if (!hasSeenAdventureEmptyRef.current) return
-    hasSeenAdventureEmptyRef.current = false
-    onAdventureNoLongerShown()
-  }, [isShowingAdventureSlot, activeNoteId, onAdventureNoLongerShown])
 
   const handleIdentityClick = useCallback(() => {
     // The guide belongs to no collection and cannot be filed into one, so
@@ -2063,7 +2044,7 @@ export function EditorSection({
     // aside, because it is the same thing: an unpinned note leaving the slot
     // it borrowed.
     if (isShowingGuide) {
-      onCloseGuideView()
+      onCloseSlotOverlay()
       return
     }
     if (isShowingUndockedNote) {
@@ -2071,7 +2052,7 @@ export function EditorSection({
       return
     }
     startRenamingSection()
-  }, [isShowingGuide, onCloseGuideView, isShowingUndockedNote, onSetAsideUndockedNote, startRenamingSection])
+  }, [isShowingGuide, onCloseSlotOverlay, isShowingUndockedNote, onSetAsideUndockedNote, startRenamingSection])
 
   const handleSectionPickerCandidateClick = useCallback((candidateId: string) => {
     if (deletionPrimedSectionId === candidateId) {

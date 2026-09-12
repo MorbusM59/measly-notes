@@ -379,25 +379,27 @@ function sanitizeReviewGutterVisibleBySection(input: unknown): Record<string, bo
   return result;
 }
 
-function sanitizeGuideView(input: unknown): PersistedMenuState['guideView'] {
+/**
+ * The one slot-overlay record (src/shared/slotOverlay.ts). Structural only:
+ * whether the section it names still exists, or still shows what the record
+ * claims, is not this side's business -- the renderer derives what is on
+ * screen from the slot itself, so a record that survives here and turns out
+ * to be stale is inert rather than wrong.
+ */
+function sanitizeSlotOverlay(input: unknown): PersistedMenuState['slotOverlay'] {
   if (!input || typeof input !== 'object') return undefined;
-  const candidate = input as Partial<{ sectionId: unknown; previousNoteId: unknown }>;
+  const candidate = input as Partial<{ kind: unknown; sectionId: unknown; previousNoteId: unknown; noteId: unknown }>;
+  if (candidate.kind !== 'guide' && candidate.kind !== 'adventure' && candidate.kind !== 'undocked') return undefined;
   if (typeof candidate.sectionId !== 'string' || candidate.sectionId.length === 0) return undefined;
+  // An undocked overlay without its note is not an undocked overlay.
+  if (candidate.kind === 'undocked' && (typeof candidate.noteId !== 'string' || candidate.noteId.length === 0)) {
+    return undefined;
+  }
   return {
+    kind: candidate.kind,
     sectionId: candidate.sectionId,
     previousNoteId: typeof candidate.previousNoteId === 'string' ? candidate.previousNoteId : null,
-  };
-}
-
-function sanitizeUndockedNote(input: unknown): PersistedMenuState['undockedNote'] {
-  if (!input || typeof input !== 'object') return undefined;
-  const candidate = input as Partial<{ noteId: unknown; sectionId: unknown; previousNoteId: unknown }>;
-  if (typeof candidate.noteId !== 'string' || candidate.noteId.length === 0) return undefined;
-  if (typeof candidate.sectionId !== 'string' || candidate.sectionId.length === 0) return undefined;
-  return {
-    noteId: candidate.noteId,
-    sectionId: candidate.sectionId,
-    previousNoteId: typeof candidate.previousNoteId === 'string' ? candidate.previousNoteId : null,
+    ...(typeof candidate.noteId === 'string' ? { noteId: candidate.noteId } : {}),
   };
 }
 
@@ -563,11 +565,7 @@ function sanitizeMenu(input: Partial<PersistedMenuState> | undefined): Persisted
     // names still EXIST is decided in the renderer, where content lives --
     // see src/adventure/save.ts's module comment.
     adventure: sanitizeGameSave(input?.adventure),
-    // Same shape as guideView (a section id plus what it was showing), so
-    // the same sanitizer -- see PersistedMenuState.adventureView.
-    adventureView: sanitizeGuideView(input?.adventureView),
-    guideView: sanitizeGuideView(input?.guideView),
-    undockedNote: sanitizeUndockedNote(input?.undockedNote),
+    slotOverlay: sanitizeSlotOverlay(input?.slotOverlay),
     // Was missing entirely until this line -- sanitizeMenu (routed through
     // by both loadAppState and saveAppState) silently dropped this field on
     // every real read/write, so it could never actually round-trip no

@@ -181,7 +181,13 @@ import { useAdventureEscapeMenu } from './adventure/useAdventureEscapeMenu'
 import { sanitizeGameSave } from './adventure/save'
 import type { GameSave } from './adventure/model/gameState'
 import { ESCAPE_HOLD_MS } from './shared/escapeHold'
-import { planSlotViewOpen, type SlotViewKind, type SlotViewsSnapshot } from './shared/slotViews'
+import {
+  planOverlayClose,
+  planOverlayOpen,
+  type SlotOccupancy,
+  type SlotOverlay,
+  type SlotOverlayKind,
+} from './shared/slotOverlay'
 import { HELP_GUIDE_NOTE_IDS, HELP_GUIDE_ROOT_ID } from './shared/helpGuide'
 import {
   deriveRenderScrollDynamicFromResponsiveness,
@@ -2191,6 +2197,11 @@ function App() {
     clearEscapeHoldTimer()
     escapeHoldTriggeredRef.current = false
     escapeFreshCycleWhilePanelOpenRef.current = false
+    // A mode that IS its feature's whole interface goes down with the ring.
+    // Without this, lowering the adventure's ring left its slot occupied,
+    // empty and its toggle lit -- a view with no way back into it. See
+    // EscapeMenuMode.onDismiss.
+    escapeMenuModeRef.current?.onDismiss?.()
   }, [clearEscapeHoldTimer])
   // "Double size" mode: 2x page zoom paired with a doubled window minimum --
   // see the window-control:double-size-mode handler in electron/main.ts.
@@ -2266,8 +2277,6 @@ function App() {
   const [editorSections, setEditorSections] = useState<EditorSectionEntry[]>(() => [
     { id: DEFAULT_EDITOR_SECTION_ID, name: null, position: 0, widthFraction: null, fixedWidthPx: null, lastActiveNoteId: null, noteSlotInitialized: false },
   ])
-  /** Which slot is currently showing the User Guide and what it was showing before. */
-  const [guideView, setGuideView] = useState<{ sectionId: string; previousNoteId: string | null } | null>(null)
   /**
    * The saved adventure run, if any (src/adventure). Lives here rather than
    * inside the game module because it is persisted app state like
@@ -2276,26 +2285,112 @@ function App() {
    */
   const [adventureSave, setAdventureSave] = useState<GameSave | null>(null)
   /**
-   * Which slot is currently GIVEN OVER to the adventure, and what it was
-   * showing first -- the same shape, and the same lifecycle, as guideView
-   * above, because it is the same kind of thing: a slot temporarily showing
-   * something that is not one of the reader's notes. The slot is emptied
-   * while this is set, so the game plays over a blank editor rather than
-   * over whatever the reader had open; the escape-hold ring, raised there,
-   * is its interface (see useAdventureEscapeMenu.ts).
+   * The ONE record of a slot being given over to something that is not one
+   * of the reader's own notes -- the User Guide, the adventure, or an
+   * undocked note. Three separate nullable fields used to live here, one per
+   * kind, and that shape is what produced every orphaned-toggle defect in
+   * this area: see src/shared/slotOverlay.ts, which owns the rule.
+   *
+   * READ IT FOR THE RETURN, NOT FOR WHAT IS ON SCREEN. What a slot is
+   * actually showing is `occupancyBySectionId` below, reported by the
+   * section that owns the slot. This record can be stale; it can never
+   * therefore be wrong about the screen, because nothing asks it.
    */
-  const [adventureView, setAdventureView] = useState<{ sectionId: string; previousNoteId: string | null } | null>(null)
-  /** The note currently shown as an undocked overlay in a section slot. */
-  const [undockedNote, setUndockedNote] = useState<{
-    noteId: string
-    sectionId: string
-    previousNoteId: string | null
-  } | null>(null)
+  const [slotOverlay, setSlotOverlay] = useState<SlotOverlay | null>(null)
+  /**
+   * What each slot reports it is actually showing (shared/slotOverlay.ts's
+   * `occupancyOf`, evaluated by the section itself, which is the only thing
+   * that knows its own active note reactively).
+   *
+   * One direction of flow, and that is the point: the section reports, App
+   * aggregates. Nothing here ever corrects a section, and no effect watches
+   * a section in order to retract a flag -- the two that used to do exactly
+   * that are gone with this map.
+   */
+  const [occupancyBySectionId, setOccupancyBySectionId] = useState<Record<string, SlotOccupancy>>({})
+
+  /**
+   * A section telling us what its slot is showing. Guarded against writing
+   * an unchanged value, because this is called from the section's render
+   * path: an unconditional set would re-render every section on every
+   * keystroke.
+   */
+  const reportSlotOccupancy = useCallback((
+    sectionId: string,
+    occupancy: SlotOccupancy,
+    arrival: { displacedNoteId: string | null } | null,
+  ) => {
+    setOccupancyBySectionId((previous) => {
+      const existing = previous[sectionId]
+      const sameNote =
+        (existing && 'noteId' in existing ? existing.noteId : null) ===
+        ('noteId' in occupancy ? occupancy.noteId : null)
+      if (existing && existing.kind === occupancy.kind && sameNote) return previous
+      return { ...previous, [sectionId]: occupancy }
+    })
+
+    // A guide that ARRIVED without us opening it -- a `$HELP` link, a link
+    // from another note -- still owes the slot its note back. It is already
+    // displayed correctly, because the guide is derived rather than declared
+    // (shared/slotOverlay.ts); what it lacks is the return, and this is the
+    // one moment anything knows what it displaced.
+    //
+    // Gated on `arrival` and not merely on the occupancy: closing the guide
+    // passes through one render where the record has been cleared but the
+    // note has not yet changed, and acting on the snapshot there re-recorded
+    // the overlay that had just been closed. Confirmed live before this gate
+    // existed -- the persisted record survived every close.
+    //
+    // This is the ONE observer left in this design, and it is safe where the
+    // reconcilers it replaced were not: it writes RETURN MEMORY, never
+    // display truth. Its worst failure is sending the reader back to the
+    // wrong note; it cannot make the app claim something the screen
+    // contradicts.
+    if (!arrival || occupancy.kind !== 'guide') return
+    setSlotOverlay((previous) => {
+      if (previous?.kind === 'guide' && previous.sectionId === sectionId) return previous
+      const overlay: SlotOverlay = { kind: 'guide', sectionId, previousNoteId: arrival.displacedNoteId }
+      void persistMenuStateNowRef.current({ slotOverlay: overlay })
+      return overlay
+    })
+  }, [])
+
+  /** Which slot, if any, is showing a given kind of overlay right now. */
+  const sectionShowingOverlay = useCallback((kind: SlotOverlayKind): string | null => {
+    for (const [sectionId, occupancy] of Object.entries(occupancyBySectionId)) {
+      if (occupancy.kind === kind) return sectionId
+    }
+    return null
+  }, [occupancyBySectionId])
+
+  const guideSectionId = sectionShowingOverlay('guide')
+  const adventureSectionId = sectionShowingOverlay('adventure')
+  /**
+   * The undocked note, when one is genuinely on screen. Read from the record
+   * but only ever believed alongside the slot's own report -- the record on
+   * its own is return memory, not evidence.
+   */
+  // Memoized rather than derived inline: a fresh object each render would
+  // change the identity of every callback that depends on it, and several
+  // of those are passed down into both editor sections.
+  const undockedNote = useMemo(
+    () => (slotOverlay?.kind === 'undocked' && slotOverlay.noteId
+      ? { noteId: slotOverlay.noteId, sectionId: slotOverlay.sectionId, previousNoteId: slotOverlay.previousNoteId }
+      : null),
+    [slotOverlay],
+  )
   // Which note each section should activate once it first mounts and
   // registers -- populated by bootstrap, drained by the effect below as
   // each section's registry entry appears. Not app state: this is one-shot
   // bootstrap wiring, not something that should trigger a re-render itself.
   const initialNoteIdBySectionIdRef = useRef<Map<string, string>>(new Map())
+  /**
+   * The slot a restored ADVENTURE overlay names, waiting for that section to
+   * register so it can be emptied and made active. One-shot bootstrap
+   * wiring, exactly like initialNoteIdBySectionIdRef above -- see the effect
+   * that drains it for why it must not be a standing reconciler.
+   */
+  const pendingAdventureSlotRef = useRef<string | null>(null)
   // Same one-shot hand-off pattern, for forcing a section's bar mode right
   // after it mounts -- used so a section swapped in via the tab-bar-mode
   // picker doesn't revert to its own fresh default of 'tags'. Drained by
@@ -4242,6 +4337,14 @@ function App() {
   // what TDZ forbids here -- a ref sidesteps the whole problem instead of
   // fighting it.
   const persistMenuStateNowRef = useRef<(overrides?: Parameters<typeof buildMenuStateSnapshot>[0]) => Promise<void> | undefined>(() => undefined)
+  /**
+   * The escape ring's current mode, for handleEscapeHoldPanelClose -- which
+   * is declared far above the contribution it needs to consult. Same
+   * ref-proxy technique, and the same TDZ reason, as the refs above; a
+   * dependency array cannot list something declared later in the file, and
+   * would silently pin this to a first-render closure if it tried.
+   */
+  const escapeMenuModeRef = useRef<{ onDismiss?: () => void } | null>(null)
 
   const queueAppStateSaveStable = useCallback((selectedNoteId: string | null) => queueAppStateSaveRef.current(selectedNoteId), [])
   const updateActiveNoteTitlePreviewStable = useCallback((nextText: string) => updateActiveNoteTitlePreviewRef.current(nextText), [])
@@ -4254,13 +4357,11 @@ function App() {
     sidebarMode?: SidebarMode
     sidebarViewStateByMode?: SidebarViewStateByMode
     isSidebarVisible?: boolean
-    guideView?: { sectionId: string; previousNoteId: string | null } | null
-    undockedNote?: { noteId: string; sectionId: string; previousNoteId: string | null } | null
+    slotOverlay?: SlotOverlay | null
     isDoubleSizeMode?: boolean
     reviewGutterVisibleBySection?: Record<string, boolean>
     reviewFlagsVisibleBySection?: Record<string, boolean>
     adventure?: GameSave | null
-    adventureView?: { sectionId: string; previousNoteId: string | null } | null
   }): PersistedMenuState => {
     const effectiveViewStateByMode = overrides?.sidebarViewStateByMode ?? sidebarViewStateByMode
 
@@ -4389,13 +4490,11 @@ function App() {
       // the User Guide persisted it as still open, and the next launch
       // reopened it. See TODO.md's entry, and buildMenuStateSnapshot's own
       // note on why an override exists at all.
-      guideView: overrides && 'guideView' in overrides ? overrides.guideView ?? null : guideView,
-      undockedNote: overrides && 'undockedNote' in overrides ? overrides.undockedNote ?? null : undockedNote,
+      slotOverlay: overrides && 'slotOverlay' in overrides ? overrides.slotOverlay ?? null : slotOverlay,
       isDoubleSizeMode: overrides?.isDoubleSizeMode ?? isDoubleSizeMode,
       reviewGutterVisibleBySection: overrides?.reviewGutterVisibleBySection ?? reviewGutterVisibleBySection,
       reviewFlagsVisibleBySection: overrides?.reviewFlagsVisibleBySection ?? reviewFlagsVisibleBySection,
       adventure: overrides && 'adventure' in overrides ? overrides.adventure ?? null : adventureSave,
-      adventureView: overrides && 'adventureView' in overrides ? overrides.adventureView ?? null : adventureView,
       // Machine-level performance prefs, deliberately NOT part of
       // UiLayoutLoadout -- these must survive switching between layouts
       // rather than being reset to whatever each layout last had stored.
@@ -4480,10 +4579,8 @@ function App() {
     viewSpacing,
     viewLetterSpacingEm,
     viewStyle,
-    guideView,
-    undockedNote,
+    slotOverlay,
     adventureSave,
-    adventureView,
   ])
 
   /**
@@ -5783,79 +5880,73 @@ ${markdownHtml}
     void selectNote(noteId, { forceReload: true })
   }, [selectNote])
 
-  // The User Guide -- entered from the escape-hold quick-actions panel's
-  // Help button, per HelpModeOverlay.tsx's removal now just an ordinary
-  // (timeless) note loaded through the exact same selectNote path a
-  // sidebar click uses, not a dedicated overlay component. No dedicated
-  // close action any more either -- leaving it works exactly like leaving
-  // any other note (pick another one from the sidebar, switch tabs, ...).
-  const closeGuideView = useCallback(async () => {
-    const pending = guideView
-    if (!pending) return
-    setGuideView(null)
-    persistMenuStateNow({ guideView: null, undockedNote })
-    const handle = sectionRegistryRef.current.get(pending.sectionId)
-    if (!handle) return
-    // A slot that was EMPTY before must go back to empty, not keep the guide
-    // as a leftover temporary tab. Returning early here (there being no note
-    // to restore) left the guide loaded while the toggle said closed -- which
-    // then let the next press open a second copy in another slot.
-    if (pending.previousNoteId) {
-      await handle.activateNote(pending.previousNoteId).catch(() => undefined)
-      return
-    }
-    await handle.clearActiveNote().catch(() => undefined)
-    // undockedNote is READ above and passed through as an override, and
-    // persistMenuStateNow closes over buildMenuStateSnapshot, which reads it
-    // too. A closure that only refreshed when guideView changed would write
-    // back whatever undockedNote was when the guide opened -- silently
-    // reverting a note undocked since, on the next restart. Both are declared
-    // above this point, so they can be depended on directly (see
-    // persistMenuStateNowRef for the case where they cannot).
-  }, [guideView, persistMenuStateNow, undockedNote])
-
   /**
-   * Applies a slot-view open plan (shared/slotViews.ts): sets all three view
-   * fields to the planned state, persists them in ONE write, and hands back
-   * any slot a displaced view was holding elsewhere. What the newly opened
-   * view then LOADS into the slot is the caller's business -- the guide
-   * loads its note, the adventure empties the slot -- and is the only part
-   * that differs between the two.
+   * Opens an overlay in the active slot: records where it is and what the
+   * slot owes back, and hands any OTHER slot the overlay was holding its own
+   * note back (a view can be lit in a slot the reader has since navigated
+   * away from). What the newly opened overlay then puts IN the slot is the
+   * caller's business -- the guide loads its note, the adventure empties it
+   * -- and is the only part that differs between them.
    *
-   * Everything about mutual exclusion lives in the planner, not here. Two
-   * openers agreeing about it by copying each other is what produced the
-   * bug that module documents.
+   * The arithmetic of what to remember lives in shared/slotOverlay.ts, not
+   * here: two openers agreeing about a rule that fiddly by copying each
+   * other is what produced the original defect that module documents.
    */
-  const applySlotViewOpen = useCallback((kind: SlotViewKind): { sectionId: string } | null => {
+  const openOverlayHere = useCallback((kind: SlotOverlayKind, noteId?: string | null): { sectionId: string } | null => {
     const targetSectionId = activeSectionId
     if (!targetSectionId) return null
-    const current: SlotViewsSnapshot = { guideView, adventureView, undockedNote }
-    const plan = planSlotViewOpen(kind, targetSectionId, getActiveSection()?.activeNoteId ?? null, current)
 
-    setGuideView(plan.next.guideView)
-    setAdventureView(plan.next.adventureView)
-    setUndockedNote(plan.next.undockedNote)
-    persistMenuStateNow({
-      guideView: plan.next.guideView,
-      adventureView: plan.next.adventureView,
-      undockedNote: plan.next.undockedNote,
-    })
+    const plan = planOverlayOpen(kind, targetSectionId, getActiveSection()?.activeNoteId ?? null, slotOverlay, noteId)
+    setSlotOverlay(plan.overlay)
+    persistMenuStateNow({ slotOverlay: plan.overlay })
 
-    for (const handback of plan.handbacks) {
-      const handle = sectionRegistryRef.current.get(handback.sectionId)
-      if (!handle) continue
-      if (handback.noteId) void handle.activateNote(handback.noteId).catch(() => undefined)
-      else void handle.clearActiveNote().catch(() => undefined)
+    if (plan.handback) {
+      const handle = sectionRegistryRef.current.get(plan.handback.sectionId)
+      if (handle) {
+        if (plan.handback.noteId) void handle.activateNote(plan.handback.noteId).catch(() => undefined)
+        else void handle.clearActiveNote().catch(() => undefined)
+      }
     }
 
     return { sectionId: targetSectionId }
-  }, [activeSectionId, adventureView, getActiveSection, guideView, persistMenuStateNow, undockedNote])
+  }, [activeSectionId, getActiveSection, persistMenuStateNow, slotOverlay])
 
-  /** Loads the guide into whichever slot is active, remembering what that slot was showing. */
+  /**
+   * Closes whatever overlay is up and gives its slot back what it remembers.
+   * The one way out, for all three kinds -- there is nothing kind-specific
+   * about handing a slot back.
+   *
+   * A slot that was EMPTY before must go back to empty, not keep the guide
+   * as a leftover temporary tab: returning early when there is no note to
+   * restore left the guide loaded while the toggle said closed, which then
+   * let the next press open a second copy in another slot.
+   */
+  const closeOverlay = useCallback(async (): Promise<void> => {
+    const plan = planOverlayClose(slotOverlay)
+    if (!plan.restore) return
+    setSlotOverlay(null)
+    persistMenuStateNow({ slotOverlay: null })
+
+    const handle = sectionRegistryRef.current.get(plan.restore.sectionId)
+    if (!handle) return
+    if (plan.restore.noteId) {
+      await handle.activateNote(plan.restore.noteId).catch(() => undefined)
+      return
+    }
+    await handle.clearActiveNote().catch(() => undefined)
+  }, [persistMenuStateNow, slotOverlay])
+
+  /**
+   * The User Guide: an ordinary (timeless) note loaded through the exact
+   * same selectNote path a sidebar click uses, not a dedicated overlay
+   * component. Nothing marks it as "the guide" -- being one of its notes IS
+   * being the guide (shared/slotOverlay.ts), so this records only the return
+   * and then loads the note.
+   */
   const openGuideViewHere = useCallback(async () => {
-    if (!applySlotViewOpen('guide')) return
+    if (!openOverlayHere('guide')) return
     await selectNote(HELP_GUIDE_ROOT_ID, { forceReload: true })
-  }, [applySlotViewOpen, selectNote])
+  }, [openOverlayHere, selectNote])
 
   /**
    * Writes a save through the one correct immediate-persist path
@@ -5871,47 +5962,36 @@ ${markdownHtml}
   }, [persistMenuStateNow])
 
   /**
-   * Gives the active slot over to the adventure, remembering what it was
-   * showing, and EMPTIES it -- the game plays over a blank editor, not on
-   * top of somebody's note. Mirrors openGuideViewHere in every respect
-   * except the last step: the guide loads a note into the slot, this one
-   * clears it.
+   * Gives the active slot over to the adventure and EMPTIES it -- the game
+   * plays over a blank editor, not on top of somebody's note. Mirrors
+   * openGuideViewHere in every respect except the last step.
    *
    * Raises the escape-hold ring on the way in, because the ring IS the
    * game's interface: arriving at a blank editor and having to discover a
-   * hold gesture would be a puzzle the game never intended to pose. Lowering
-   * it afterwards (Escape, or a click outside) leaves the view up -- the
-   * slot still says what it is holding, and holding Escape brings the ring
-   * straight back to the same step.
+   * hold gesture would be a puzzle the game never intended to pose.
    */
   const openAdventureViewHere = useCallback(async () => {
     const handle = getActiveSection()
-    if (!applySlotViewOpen('adventure')) return
+    if (!openOverlayHere('adventure')) return
     setIsEscapeHoldPanelOpen(true)
     await handle?.clearActiveNote().catch(() => undefined)
-  }, [applySlotViewOpen, getActiveSection])
+  }, [getActiveSection, openOverlayHere])
 
   /**
-   * Ends the view and gives the slot back what it held. The SAVE is
-   * untouched: leaving is not losing, and the same gesture that opened this
-   * drops straight back into the same screen -- which is the whole point of
-   * persisting the director's stack rather than just the game's numbers
-   * (src/adventure/model/gameState.ts).
+   * Leaving the adventure. The SAVE is untouched: leaving is not losing, and
+   * the same gesture that opened this drops straight back into the same
+   * screen.
+   *
+   * Lowering the ring is part of leaving rather than a separate act, because
+   * the ring is the whole game: a lowered ring over an empty slot is a lit
+   * toggle with nothing behind it, which is precisely the orphan this work
+   * exists to make unreachable. Dismissing the ring therefore comes back
+   * here too -- see the mode's `onDismiss` below.
    */
   const closeAdventureView = useCallback(async (): Promise<void> => {
-    const pending = adventureView
-    if (!pending) return
-    setAdventureView(null)
     setIsEscapeHoldPanelOpen(false)
-    persistMenuStateNow({ adventureView: null })
-    const handle = sectionRegistryRef.current.get(pending.sectionId)
-    if (!handle) return
-    if (pending.previousNoteId) {
-      await handle.activateNote(pending.previousNoteId).catch(() => undefined)
-      return
-    }
-    await handle.clearActiveNote().catch(() => undefined)
-  }, [adventureView, persistMenuStateNow])
+    await closeOverlay()
+  }, [closeOverlay])
 
   /**
    * The User Guide window control's other half. Left click is the guide
@@ -5926,12 +6006,12 @@ ${markdownHtml}
    * exactly once.
    */
   const handleHelpGuideContextMenu = useCallback(async () => {
-    if (adventureView) {
+    if (adventureSectionId) {
       await closeAdventureView()
       return
     }
     await openAdventureViewHere()
-  }, [adventureView, closeAdventureView, openAdventureViewHere])
+  }, [adventureSectionId, closeAdventureView, openAdventureViewHere])
 
   /**
    * The escape-hold ring's takeover by the adventure game, plus the status
@@ -5949,11 +6029,15 @@ ${markdownHtml}
   }, [closeAdventureView])
 
   const escapeMenuContribution = useAdventureEscapeMenu({
-    isAdventureViewActive: adventureView !== null,
+    isAdventureViewActive: adventureSectionId !== null,
     save: adventureSave,
     onCommitSave: commitAdventureSave,
     onLeave: handleAdventureLeave,
   })
+  // Plain assignment every render, like persistMenuStateNowRef's -- a
+  // conditional or effect-based one would let the handler above read a stale
+  // mode for a frame, which for a dismissal is a frame that matters.
+  escapeMenuModeRef.current = escapeMenuContribution.activeMode
 
   /**
    * The window control is a TOGGLE, and a toggle that is lit always goes out
@@ -5968,16 +6052,16 @@ ${markdownHtml}
     // than opening the guide behind it. Anything else would mean the button
     // sometimes stays lit after being pressed, which is the one thing a
     // toggle promises never to do.
-    if (adventureView) {
+    if (adventureSectionId) {
       await closeAdventureView()
       return
     }
-    if (guideView) {
-      await closeGuideView()
+    if (guideSectionId) {
+      await closeOverlay()
       return
     }
     await openGuideViewHere()
-  }, [adventureView, closeAdventureView, guideView, closeGuideView, openGuideViewHere])
+  }, [adventureSectionId, closeAdventureView, guideSectionId, closeOverlay, openGuideViewHere])
 
   /**
    * The quick-actions menu is an OPEN, not a toggle: it says "User Guide", and
@@ -5985,10 +6069,11 @@ ${markdownHtml}
    * closing it wherever it was -- there is only ever one.
    */
   const handleHelpModeOpen = useCallback(async () => {
-    if (guideView?.sectionId === activeSectionId) return
-    if (guideView) await closeGuideView()
+    if (guideSectionId === activeSectionId) return
+    // openOverlayHere hands the other slot its note back on its own, so the
+    // guide never needs closing first -- moving IS closing, there.
     await openGuideViewHere()
-  }, [guideView, activeSectionId, closeGuideView, openGuideViewHere])
+  }, [guideSectionId, activeSectionId, openGuideViewHere])
 
   const isAllowedNonEditorFocusTarget = useCallback((target: EventTarget | null): boolean => {
     if (!(target instanceof HTMLElement)) return false
@@ -6067,8 +6152,8 @@ ${markdownHtml}
   const handleSetAsideUndockedNote = useCallback(async () => {
     const pending = undockedNote
     if (!pending) return
-    setUndockedNote(null)
-    persistMenuStateNow({ guideView, undockedNote: null })
+    setSlotOverlay(null)
+    persistMenuStateNow({ slotOverlay: null })
 
     const handle = sectionRegistryRef.current.get(pending.sectionId)
     // Discard only when the note is genuinely still the untouched template,
@@ -6097,10 +6182,10 @@ ${markdownHtml}
       })
       await refreshNotes()
     }
-    // guideView and persistMenuStateNow for the same reason closeGuideView
-    // needs undockedNote: this reads the other half of the pair and passes it
-    // through, so a stale closure writes back a stale guide position.
-  }, [undockedNote, refreshNotes, guideView, persistMenuStateNow])
+    // One record now, so there is no other half to read and pass through:
+    // clearing the overlay cannot revert a sibling field, because there is
+    // no sibling field.
+  }, [undockedNote, refreshNotes, persistMenuStateNow])
 
   /**
    * handleSwapSection is declared much further down this file, so depending on
@@ -6127,10 +6212,10 @@ ${markdownHtml}
       console.error('Failed to pin an undocked note into its chosen section', error)
     })
     await window.thockdownSections?.setActiveNote(candidateSectionId, pending.noteId).catch(() => undefined)
-    setUndockedNote(null)
-    persistMenuStateNow({ guideView, undockedNote: null })
+    setSlotOverlay(null)
+    persistMenuStateNow({ slotOverlay: null })
     await handleSwapSectionRef.current?.(pending.sectionId, candidateSectionId)
-  }, [guideView, persistMenuStateNow, undockedNote])
+  }, [persistMenuStateNow, undockedNote])
 
   const createNote = useCallback(async (initialText = NEW_NOTE_TEMPLATE) => {
     if (!window.thockdownNotes) return
@@ -6158,9 +6243,14 @@ ${markdownHtml}
       // Born undocked: this path never pins, so the note is genuinely absent
       // from every section's tab list rather than hidden from one.
       if (activeSectionId) {
-        const nextUndockedNote = { noteId: created.id, sectionId: activeSectionId, previousNoteId }
-        setUndockedNote(nextUndockedNote)
-        persistMenuStateNow({ guideView, undockedNote: nextUndockedNote })
+        const overlay: SlotOverlay = {
+          kind: 'undocked',
+          sectionId: activeSectionId,
+          previousNoteId,
+          noteId: created.id,
+        }
+        setSlotOverlay(overlay)
+        persistMenuStateNow({ slotOverlay: overlay })
       }
       setSidebarMode('date')
     } catch (error) {
@@ -6168,7 +6258,7 @@ ${markdownHtml}
     } finally {
       noteTransitionLockRef.current = false
     }
-  }, [activeSectionId, getActiveSection, guideView, persistenceReady, persistMenuStateNow, refreshNotes])
+  }, [activeSectionId, getActiveSection, persistenceReady, persistMenuStateNow, refreshNotes])
 
   const createNoteFromClipboardTitle = useCallback(async () => {
     let title = FALLBACK_NEW_NOTE_TITLE
@@ -6473,9 +6563,7 @@ ${markdownHtml}
           const appState = window.thockdownState ? await window.thockdownState.loadAppState() : { selectedNoteId: null }
           if (disposed) return
 
-          let restoredAdventureView: { sectionId: string; previousNoteId: string | null } | null = null
-          let restoredGuideView: { sectionId: string; previousNoteId: string | null } | null = null
-          let restoredUndockedNote: { noteId: string; sectionId: string; previousNoteId: string | null } | null = null
+          let restoredOverlay: SlotOverlay | null = null
 
           if (appState.menu) {
             const loadedSidebarViewState: SidebarViewStateByMode = {
@@ -6494,18 +6582,12 @@ ${markdownHtml}
             // adventure", not to a crash on launch.
             const restoredSave = sanitizeGameSave(appState.menu.adventure)
             setAdventureSave(restoredSave)
-            // The view comes back whether or not a save did: with no save,
-            // the game opens on its welcome screen, which is a perfectly
-            // legible thing to find in a slot. (It was previously withheld
-            // because a missing run left the ring with nothing to show at
-            // all -- no longer true now that the welcome screen exists
-            // outside of any game.)
-            restoredAdventureView = appState.menu.adventureView ?? null
-            setAdventureView(restoredAdventureView)
-            restoredGuideView = appState.menu.guideView ?? null
-            restoredUndockedNote = appState.menu.undockedNote ?? null
-            setGuideView(restoredGuideView)
-            setUndockedNote(restoredUndockedNote)
+            // The adventure's overlay comes back whether or not a save did:
+            // with no save, the game opens on its welcome screen, which is a
+            // perfectly legible thing to find in a slot.
+            restoredOverlay = appState.menu.slotOverlay ?? null
+            setSlotOverlay(restoredOverlay)
+            if (restoredOverlay?.kind === 'adventure') pendingAdventureSlotRef.current = restoredOverlay.sectionId
 
             setSidebarViewStateByMode(loadedSidebarViewState)
             setSidebarMode(appState.menu.sidebarMode)
@@ -6795,7 +6877,7 @@ ${markdownHtml}
             // The adventure's slot comes back EMPTY, the way it was left --
             // restoring its remembered note here would put a note under the
             // game, which is precisely what the view exists to avoid.
-            if (entry.id === restoredAdventureView?.sectionId) return
+            if (restoredOverlay?.kind === 'adventure' && entry.id === restoredOverlay.sectionId) return
             const persistedNoteId = (
               entry.lastActiveNoteId && listed.some((note) => note.id === entry.lastActiveNoteId)
             ) ? entry.lastActiveNoteId : null
@@ -6809,7 +6891,7 @@ ${markdownHtml}
           })
           setEditorSections(resolvedSections)
           setActiveSectionId((previous) => {
-            const preferredSectionId = restoredAdventureView?.sectionId ?? restoredGuideView?.sectionId ?? restoredUndockedNote?.sectionId ?? previous
+            const preferredSectionId = restoredOverlay?.sectionId ?? previous
             return resolvedSections.some((entry) => entry.id === preferredSectionId)
               ? preferredSectionId
               : (resolvedSections.some((entry) => entry.id === previous) ? previous : resolvedSections[0].id)
@@ -6891,43 +6973,31 @@ ${markdownHtml}
     }
   }, [editorSections])
 
+  /**
+   * The restored overlay's slot, drained ONCE -- the same one-shot pattern
+   * as initialNoteIdBySectionIdRef above, and deliberately not a standing
+   * effect that keeps forcing the slot to match the record.
+   *
+   * A standing one is what the old design had, and it is the App-to-section
+   * half of the two-way reconciliation this work removed: with the record
+   * as a dependency it would re-fire on any unrelated section change and
+   * drag a reader who had navigated away back into a view they had left.
+   *
+   * Only the ADVENTURE needs draining at all. A restored guide or undocked
+   * note is simply the note its section already persisted as its own active
+   * note, so it comes back by the ordinary route with nothing special done
+   * for it -- which is what deriving those two from the slot bought.
+   */
   useEffect(() => {
     if (!persistenceReady) return
-
-    // Emptying, not loading: this is the same effect the guide and the
-    // undocked note use to make a restored view's slot show the right
-    // thing, and for the adventure the right thing is nothing at all.
-    const pendingAdventureView = adventureView
-    if (pendingAdventureView) {
-      const handle = getActiveSectionHandle(sectionRegistryRef, pendingAdventureView.sectionId)
-      if (!handle) return
-      markSectionActive(pendingAdventureView.sectionId)
-      if (handle.activeNoteId !== null) {
-        void handle.clearActiveNote()
-      }
-      return
-    }
-
-    const pendingGuideView = guideView
-    if (pendingGuideView) {
-      const handle = getActiveSectionHandle(sectionRegistryRef, pendingGuideView.sectionId)
-      if (!handle) return
-      markSectionActive(pendingGuideView.sectionId)
-      if (handle.activeNoteId !== HELP_GUIDE_ROOT_ID) {
-        void handle.activateNote(HELP_GUIDE_ROOT_ID)
-      }
-      return
-    }
-
-    const pendingUndockedNote = undockedNote
-    if (!pendingUndockedNote) return
-    const handle = getActiveSectionHandle(sectionRegistryRef, pendingUndockedNote.sectionId)
+    const pending = pendingAdventureSlotRef.current
+    if (!pending) return
+    const handle = getActiveSectionHandle(sectionRegistryRef, pending)
     if (!handle) return
-    markSectionActive(pendingUndockedNote.sectionId)
-    if (handle.activeNoteId !== pendingUndockedNote.noteId) {
-      void handle.activateNote(pendingUndockedNote.noteId)
-    }
-  }, [adventureView, editorSections, guideView, markSectionActive, persistenceReady, undockedNote])
+    pendingAdventureSlotRef.current = null
+    markSectionActive(pending)
+    if (handle.activeNoteId !== null) void handle.clearActiveNote()
+  }, [editorSections, markSectionActive, persistenceReady])
 
   // Same drain pattern as above, for pendingChapterBarModeBySectionIdRef.
   useEffect(() => {
@@ -7512,7 +7582,7 @@ ${markdownHtml}
       })
       await window.thockdownSections?.setActiveNote(created.id, undockedNoteId).catch(() => undefined)
       initialNoteIdBySectionIdRef.current.set(created.id, undockedNoteId)
-      setUndockedNote(null)
+      setSlotOverlay(null)
     }
 
     applyResolvedSections(updated)
@@ -8131,6 +8201,15 @@ ${markdownHtml}
     const activeNoteId = section?.menuIdentityNoteId
     const activeNoteSummary = section?.menuIdentityNoteSummary
     if (!activeNoteId || !activeNoteSummary) return
+
+    // The User Guide's family is excluded from every sidebar list, upstream
+    // of all of them, so there is nowhere for this to reveal it TO -- and
+    // the clearing below would wipe the reader's month/year filters and
+    // search to go looking for a note that can never be listed. That is
+    // exactly what "the date view broke" was, reached through the guide
+    // appearing as an ordinary tab. The tab is gone with the orphan that
+    // produced it; this holds the rule where the rule actually lives.
+    if (HELP_GUIDE_NOTE_IDS.has(activeNoteId)) return
 
     // Clear only whichever filter is actually hiding the note -- never one
     // that isn't in the way.
@@ -10162,22 +10241,27 @@ ${markdownHtml}
                       split button; maximize/restore moved down to the bottom arm. */}
                   <button
                     type="button"
-                    className={`window-control-btn btn-icon window-maximize-split-btn help-guide${guideView || adventureView ? ' is-active' : ''}`}
+                    // Lit from what the SLOTS report they are showing, never
+                    // from the overlay record: a record that has gone stale
+                    // must not be able to light a toggle over a view that is
+                    // not there. That inversion is the whole of
+                    // shared/slotOverlay.ts.
+                    className={`window-control-btn btn-icon window-maximize-split-btn help-guide${guideSectionId || adventureSectionId ? ' is-active' : ''}`}
                     data-tooltip={
-                      adventureView
+                      adventureSectionId
                         ? 'Leave the adventure'
-                        : guideView
+                        : guideSectionId
                         ? 'Close the User Guide\nRight click: an adventure'
                         : 'User Guide\nRight click: an adventure'
                     }
                     aria-label={
-                      adventureView
+                      adventureSectionId
                         ? 'Leave the adventure'
-                        : guideView
+                        : guideSectionId
                         ? 'Close the User Guide'
                         : 'Open the User Guide'
                     }
-                    aria-pressed={guideView !== null || adventureView !== null}
+                    aria-pressed={guideSectionId !== null || adventureSectionId !== null}
                     onClick={() => void handleHelpGuideToggle()}
                     onContextMenu={(event) => {
                       event.preventDefault()
@@ -10189,7 +10273,7 @@ ${markdownHtml}
                         button, because they are the same promise -- a lit
                         toggle goes out when pressed, whichever press lit
                         it. */}
-                    <span className={adventureView ? 'fa-solid fa-fire' : 'fa-solid fa-graduation-cap'} aria-hidden="true" />
+                    <span className={adventureSectionId ? 'fa-solid fa-fire' : 'fa-solid fa-graduation-cap'} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -10295,25 +10379,16 @@ ${markdownHtml}
                   setNotes={setNotes}
                   notesRef={notesRef}
                   activeSectionId={activeSectionId}
-                  undockedNoteId={undockedNote?.sectionId === entry.id ? undockedNote.noteId : null}
-                  isShowingGuideSlot={guideView?.sectionId === entry.id}
-                  isShowingAdventureSlot={adventureView?.sectionId === entry.id}
-                  onAdventureNoLongerShown={() => {
-                    // The slot has moved on to a real note (a sidebar click,
-                    // a tab, a link) -- which ends the adventure view just as
-                    // much as leaving it does, minus the restore, since the
-                    // reader has already chosen what they want here instead.
-                    setAdventureView(null)
-                    persistMenuStateNow({ adventureView: null })
-                  }}
-                  onCloseGuideView={() => void closeGuideView()}
-                  onGuideNoLongerShown={() => {
-                    setGuideView(null)
-                    persistMenuStateNow({ guideView: null, undockedNote })
-                  }}
+                  // The section derives what its own slot is showing from the
+                  // record plus its own active note, and reports it back. No
+                  // "no longer shown" callbacks: a slot that has moved on
+                  // simply reports `note`, and every consumer reads that.
+                  slotOverlay={slotOverlay}
+                  reportSlotOccupancy={reportSlotOccupancy}
+                  onCloseSlotOverlay={() => void closeOverlay()}
                   onDockUndockedNote={() => {
-                    setUndockedNote(null)
-                    persistMenuStateNow({ guideView, undockedNote: null })
+                    setSlotOverlay(null)
+                    persistMenuStateNow({ slotOverlay: null })
                   }}
                   onDockUndockedNoteIntoSection={(candidateId) => void handleDockUndockedNoteIntoSection(candidateId)}
                   onSetAsideUndockedNote={() => void handleSetAsideUndockedNote()}
@@ -10360,7 +10435,7 @@ ${markdownHtml}
                   onEscapeHoldExportPdf={handleExportPdf}
                   onEscapeHoldExportMd={handleExportMd}
                   onEscapeHoldOpenHelp={() => void handleHelpModeOpen()}
-                  escapeMenu={adventureView?.sectionId === entry.id ? escapeMenuContribution : null}
+                  escapeMenu={adventureSectionId === entry.id ? escapeMenuContribution : null}
                   isExportingPdf={isExportingPdf}
                   isExportingMd={isExportingMd}
                   borderRadiusRegularPx={borderRadiusRegularPx}
