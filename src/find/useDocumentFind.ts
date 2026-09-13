@@ -157,8 +157,23 @@ export function useDocumentFind(options: UseDocumentFindOptions): UseDocumentFin
    * been told the wrong thing, and on a large note they would be told it for
    * a long time.
    */
-  const [previewHits, setPreviewHits] = useState<DocumentFindHit[]>([])
-  const [isSearchingPreview, setIsSearchingPreview] = useState(false)
+  /**
+   * The worker's last answer, WITH the question it answers.
+   *
+   * Storing the question alongside the hits is what makes "still searching"
+   * a derived fact rather than a flag someone has to remember to raise and
+   * lower. A separate boolean was the first attempt and it lied for exactly
+   * one frame: the render in which the query changed had an empty hit list
+   * and a not-yet-raised flag, so the sidebar said "No matches in the
+   * current note" before it said "Searching this note...". Caught in a
+   * packaged build, not in a test -- which is the argument for deriving it.
+   */
+  const [previewAnswer, setPreviewAnswer] = useState<{
+    text: string
+    query: string
+    caseSensitive: boolean
+    hits: DocumentFindHit[]
+  } | null>(null)
 
   const editModeHits = useMemo<DocumentFindHit[]>(() => {
     if (isPreviewMode) return []
@@ -166,23 +181,17 @@ export function useDocumentFind(options: UseDocumentFindOptions): UseDocumentFin
   }, [sourceText, documentFindDirective.findText, effectiveCaseSensitive, isPreviewMode])
 
   useEffect(() => {
-    if (!isPreviewMode) {
-      setPreviewHits([])
-      setIsSearchingPreview(false)
-      return
-    }
-    if (!documentFindDirective.findText) {
-      setPreviewHits([])
-      setIsSearchingPreview(false)
-      return
-    }
+    if (!isPreviewMode || !documentFindDirective.findText) return
     let cancelled = false
-    setIsSearchingPreview(true)
     void requestPreviewFindHits(sourceText, documentFindDirective.findText, effectiveCaseSensitive)
       .then((hits: DocumentFindHit[]) => {
         if (cancelled) return
-        setPreviewHits(hits)
-        setIsSearchingPreview(false)
+        setPreviewAnswer({
+          text: sourceText,
+          query: documentFindDirective.findText,
+          caseSensitive: effectiveCaseSensitive,
+          hits,
+        })
       })
     // An answer the reader has already typed past is not worth showing, and
     // showing it would make the list flicker backwards through superseded
@@ -190,7 +199,20 @@ export function useDocumentFind(options: UseDocumentFindOptions): UseDocumentFin
     return () => { cancelled = true }
   }, [sourceText, documentFindDirective.findText, effectiveCaseSensitive, isPreviewMode])
 
-  const documentFindHits = isPreviewMode ? previewHits : editModeHits
+  const previewAnswerIsCurrent = previewAnswer !== null
+    && previewAnswer.text === sourceText
+    && previewAnswer.query === documentFindDirective.findText
+    && previewAnswer.caseSensitive === effectiveCaseSensitive
+
+  const isSearchingPreview = isPreviewMode
+    && documentFindDirective.findText !== ''
+    && !previewAnswerIsCurrent
+
+  const documentFindHits = !isPreviewMode
+    ? editModeHits
+    : previewAnswerIsCurrent
+      ? previewAnswer.hits
+      : []
 
   return {
     documentFindQuery,
