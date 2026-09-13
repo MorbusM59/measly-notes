@@ -483,3 +483,64 @@ deleted without answering it.
 
 **Noticed.** Threading a real `offsetPx` through the same options object while
 rebuilding the landing arithmetic.
+
+### `blockSplitClient`'s main-thread fallback may have no reachable trigger
+
+**What.** `ensureWorker()` in `src/editor/blockSplitClient.ts` catches a failed
+construction and installs an `onerror` handler; both routes resolve every
+pending request with `splitMarkdownIntoPreviewBlocksIncremental(text, null)` --
+a full remark parse, on the main thread, of the whole document.
+
+**Why it is suspect.** It is now the ONLY remaining way a full parse can reach
+the main thread, and `previewBlockSplit.contract.test.ts` has to carve out an
+explicit exception for this file to allow it. Its documented triggers are "an
+environment without workers, a bundler that did not emit the chunk, a CSP that
+refuses it". The app ships as Electron only; the chunk's emission is verified
+in the production build; and the one plausible refusal -- Chromium blocking a
+module worker over `file://`, which production does use -- was PROBED against
+a packaged build during the 26-second-first-open round and the worker
+constructed and replied normally. If nothing can trigger it, the exception in
+the contract test is protecting a path that cannot run, and a 16-second
+main-thread freeze is the thing being kept alive just in case.
+
+**What would have to be true to remove it.** That no shipped configuration can
+fail to construct this worker (Electron only, asar and unpacked, portable
+build included -- the portable build resolves resources differently and was
+not probed), and that a worker that dies mid-session has somewhere better to
+go than a synchronous parse. "Somewhere better" is the real question: the
+honest replacement is probably to leave the request unresolved and let the
+pane stay in its PENDING state, which is already a real state that renders
+correctly -- a note whose blocks never arrive is a note you can still read and
+edit, whereas a 16-second freeze is not. Decide that before deleting anything.
+
+**Noticed.** Making the split asynchronous end to end, where this became the
+last exception to a rule the rest of the codebase now holds by construction.
+
+### `hiddenSplitText`'s reasoning predates the split having a producer
+
+**What.** `usePreviewMarkdownRendering` keeps `hiddenSplitText`, a frozen copy
+of the text to split while the render pane is hidden, so that typing in edit
+mode does not drive the split. Its long doc comment argues the case from a
+measurement -- ~1 second per Enter on list-structured markdown -- taken when
+the split ran synchronously in render on every keystroke.
+
+**Why it is suspect.** That is no longer how the split is obtained. A cold
+split now goes to the worker and the pane waits; only a warm incremental
+update runs here, which is sub-millisecond by construction. The freeze the
+mechanism was built to prevent is prevented twice over, and the mechanism has
+a cost of its own: it is why the pane's split source can lag the document,
+and it interacts with the async producer in a way nobody has thought through
+(the seeded initial value is already an exception, now documented in place).
+
+**What would have to be true to remove it.** That the incremental path really
+is cheap for every keystroke shape on a large list-dense document -- the
+original measurement said the split was pathologically slow there *whatever
+the delta*, which if still true would mean the incremental path is not the
+cheap thing this assumes, and that is worth re-measuring on its own before
+touching anything. If it is cheap, `splitSourceText` collapses to
+`renderedDisplayText` and the state, its effect and the seeding exception all
+go.
+
+**Noticed.** Making the split asynchronous, where the seeded initial value
+turned out to be why a freshly-mounted section splits its first note even in
+edit mode.
