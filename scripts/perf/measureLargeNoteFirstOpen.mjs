@@ -194,9 +194,14 @@ async function measureFirstOpen(page, targetChars, label, mode, view) {
   )
   const firstText = Date.now() - started
   await page.waitForTimeout(500)
+  // Stop profiling BEFORE waiting out the arrival curve. The curve can take a
+  // minute on a large note, and a minute of sampling is both a much slower
+  // aggregation and a heavier perturbation of the thing being measured than
+  // the open it is supposed to describe.
+  const { totalMs, entries, raw } = await profile.stop()
   const marks = await page.evaluate(() => {
     const w = window
-    const deadline = Date.now() + 120_000
+    const deadline = Date.now() + 60_000
     return new Promise((resolve) => {
       const check = () => {
         if (w.__firstOpenMarks?.done || Date.now() > deadline) resolve(w.__firstOpenMarks)
@@ -205,7 +210,6 @@ async function measureFirstOpen(page, targetChars, label, mode, view) {
       check()
     })
   })
-  const { totalMs, entries, raw } = await profile.stop()
 
   console.log(`\ntarget=${label} chars=${targetChars} view=${view} mode=${mode}`)
   console.log(`time to first text: ${firstText}ms   (profiled ${Math.round(totalMs)}ms total)`)

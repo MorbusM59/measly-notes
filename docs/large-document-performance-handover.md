@@ -4126,9 +4126,11 @@ than an absence.
 | --- | --- | --- |
 | before | 26,305ms | 26,710ms |
 | after the render-phase fix | 528ms | 16,000ms (still, after first text) |
-| after all seven | **445ms** | **980ms** |
+| after all seven | **445-455ms** | **960-980ms** |
 
-No remark frame appears anywhere in the profile now.
+No remark frame appears anywhere in the profile now. (Two runs, hence the
+ranges; the container's own variance is larger than anything left on this
+path.)
 
 ### Progressive delivery: the top of the document first
 

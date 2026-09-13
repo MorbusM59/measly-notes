@@ -615,9 +615,17 @@ export function usePreviewMarkdownRendering({
    * the mode flips in -- never a frame later, so the toggle cannot show a
    * stale pane.
    *
-   * While the pane is HIDDEN the split does not run at all. Nothing on screen
-   * derives from these blocks in edit mode, and the split is the single most
-   * expensive thing a keystroke can trigger.
+   * While the pane is HIDDEN the split does not run at all -- with one
+   * exception worth naming, since the sentence above read as absolute and is
+   * not: `hiddenSplitText` is SEEDED with the text present at mount, so the
+   * first note a freshly-mounted section shows does get split even in edit
+   * mode. That is not waste (the map is wanted anyway -- for the anchor, for
+   * the toggle, and to persist) and it is not on the main thread, but it is
+   * why a cold start requests a split the phrasing here would not lead you
+   * to expect. Every note switch AFTER that leaves this text alone, which is
+   * the part that matters: nothing on screen derives from these blocks in
+   * edit mode, and the split is the single most expensive thing a keystroke
+   * can trigger.
    *
    * It was first tried as a short settle (recompute ~180ms after typing
    * stops), on the reasoning that the incremental split is only cheap because

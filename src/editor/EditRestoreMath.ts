@@ -158,6 +158,17 @@ export function resolveEditSourceAnchorLineFromUiState(
   // below the top and therefore genuinely needs the map; making it say so in
   // the type is what stops a fourth site from quietly parsing on the main
   // thread.
+  // An empty map with a real anchor is the one combination that fails
+  // SILENTLY: resolveSourceLineForAnchorBlockIndex answers 0, so the note
+  // opens at the top and nothing says why. Callers are meant to fetch the map
+  // exactly when the anchor is above zero, which is an agreement between two
+  // separate pieces of code -- so say so out loud in dev rather than trust it.
+  if (import.meta.env.DEV && blocks.length === 0 && text.length > 0) {
+    console.warn(
+      `[EditRestoreMath] anchorBlockIndex ${uiState.anchorBlockIndex} needs the block map and was given none -- this note will restore to the top. Whoever called this should have awaited requestFullBlockSplit.`,
+    )
+  }
+
   const totalLines = Math.max(1, text.split('\n').length)
   const sourceLine = resolveSourceLineForAnchorBlockIndex(blocks, Math.round(uiState.anchorBlockIndex))
   return Math.min(Math.max(0, sourceLine), totalLines - 1)
