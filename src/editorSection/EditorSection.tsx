@@ -41,7 +41,7 @@ import { hashNormalizedText } from '../shared/hashText'
 import type { PreviewMarkdownBlock, PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
 import type { SectionHandle } from './sectionRegistry'
 import { buildPersistedBlockMap, restorePersistedBlockMap } from '../editor/persistedBlockMap'
-import { requestFullBlockSplit } from '../editor/blockSplitClient'
+import { requestFullBlockSplit } from '../editor/documentFactsClient'
 
 /** Same seed text as App.tsx's own NEW_NOTE_TEMPLATE (createNote) -- kept as its own local copy rather than a shared import to avoid a circular dependency (App.tsx is what mounts EditorSection). */
 const NEW_NOTE_TEMPLATE = '# '
@@ -797,7 +797,7 @@ export function EditorSection({
       // the first time -- is the one case that needs nothing at all.
       //
       // When it is needed, the parse happens OFF THE MAIN THREAD
-      // (editor/blockSplitClient.ts) and is awaited here: `activateNote` is
+      // (editor/documentFactsClient.ts) and is awaited here: `activateNote` is
       // already async and already behind the render view's fade, so the wait
       // costs the same wall time and spends none of it frozen.
       //
@@ -1533,6 +1533,7 @@ export function EditorSection({
     preserveCase,
     documentFindDirective,
     documentFindHits,
+    isDocumentFindSearching,
   } = useDocumentFind({
     sectionId,
     sourceText: currentEditorText,
@@ -1571,7 +1572,7 @@ export function EditorSection({
   // see usePreviewScrollbar's own note on why it is not the scroller.
   const previewBridgeHostRef = useRef<HTMLDivElement | null>(null)
 
-  const { previewMarkdownElement } = usePreviewMarkdownRendering({
+  const { previewMarkdownElement, previewBlockCount } = usePreviewMarkdownRendering({
     notes,
     activeNoteId,
     activeNoteText,
@@ -1646,6 +1647,7 @@ export function EditorSection({
     replaceDocumentFindHit,
     replaceAllDocumentFindHits,
   } = useDocumentFindNavigation({
+    previewBlockCount,
     previewScrollRef,
     previewScrollToSourceLineRef: editorSectionMountRest.previewScrollToSourceLineRef,
     previewDocumentPositionRef,
@@ -1945,6 +1947,7 @@ export function EditorSection({
     preserveCase,
     documentFindDirective,
     documentFindHits,
+    isDocumentFindSearching,
     visibleDocumentFindHitRange,
     handleJumpToDocumentFindHit,
     replaceDocumentFindHit,

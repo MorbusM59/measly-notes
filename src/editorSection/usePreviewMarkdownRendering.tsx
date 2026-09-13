@@ -25,7 +25,7 @@ import { normalizeInternalText } from '../editor/TextPolicy'
 import { findHeadingAnchorLine, parseHeadingAnchorFragment } from '../shared/tableOfContentsText'
 import type { ParsedInternalNoteLink } from '../shared/internalNoteLinks'
 import { splitPreviewBlocksWithoutFullParse, type PreviewBlockSplitCache } from '../editor/PreviewBlockSplit'
-import { requestFullBlockSplit } from '../editor/blockSplitClient'
+import { requestFullBlockSplit } from '../editor/documentFactsClient'
 import { resolvePreviewBlockIndexForSourceLine } from '../editor/PreviewBlockIndex'
 import { isNonQuantizedSmoothScrollActive, scrollToNonQuantizedSmooth } from '../editor/NonQuantizedSmoothScroll'
 import { traceScroll } from '../editor/scrollTrace'
@@ -285,6 +285,12 @@ export interface UsePreviewMarkdownRenderingOptions {
 
 export interface UsePreviewMarkdownRenderingResult {
   previewMarkdownElement: ReactNode
+  /**
+   * How many blocks the pane currently has -- see the return statement's own
+   * note. Zero is an ordinary early state, not an error: the split arrives
+   * progressively.
+   */
+  previewBlockCount: number
 }
 
 interface PreviewMarkdownBlockProps {
@@ -2001,5 +2007,20 @@ export function usePreviewMarkdownRendering({
     // mounts a moving run of it, the continuous pane mounts all of it. Neither
     // estimates anything.
     previewMarkdownElement: isWindowed ? previewWindow.element : previewMarkdownElement,
+    /**
+     * How many blocks this pane currently has, which is the one fact that
+     * decides whether it can answer a question about itself at all --
+     * `readVisibleSourceLineRange` returns null at zero, and the split now
+     * arrives progressively, so zero is an ordinary early state rather than
+     * an error.
+     *
+     * Exposed as a VALUE, not a readiness boolean or a callback, so a
+     * consumer can simply depend on it: an effect that needs the pane to be
+     * able to answer re-runs when that changes, instead of asking early,
+     * failing, and retrying on a timer until it gives up. One consumer did
+     * exactly that and went silently blind on large notes once the split
+     * stopped being synchronous.
+     */
+    previewBlockCount: previewBlocks.length,
   }
 }

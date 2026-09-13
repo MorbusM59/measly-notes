@@ -4,8 +4,8 @@ import type { DocumentFindDirective, DocumentFindHit } from '../editor/FindRepla
 import {
   resolveDocumentFindDirective,
   buildDocumentFindHits,
-  buildPreviewVisibleDocumentFindHits,
 } from '../editor/FindReplaceEngine'
+import { requestPreviewFindHits } from '../editor/documentFactsClient'
 
 export interface UseDocumentFindOptions {
   /**
@@ -56,6 +56,17 @@ export interface UseDocumentFindResult {
   preserveCase: boolean
   documentFindDirective: DocumentFindDirective
   documentFindHits: DocumentFindHit[]
+  /**
+   * A render-view search is running on the worker and this list is not the
+   * answer yet.
+   *
+   * Only ever true in render view: an edit-mode search is an indexOf scan
+   * that has already finished by the time anyone can read this. It exists
+   * because "no hits yet" and "no such text" look identical in an empty
+   * list, and on a large note the reader would be shown the wrong one of
+   * those for several seconds.
+   */
+  isDocumentFindSearching: boolean
 }
 
 /**
@@ -127,12 +138,59 @@ export function useDocumentFind(options: UseDocumentFindOptions): UseDocumentFin
     return resolveDocumentFindDirective(debouncedFindQuery, documentReplaceQuery, isDocumentReplaceMode)
   }, [debouncedFindQuery, documentReplaceQuery, isDocumentReplaceMode])
 
-  const documentFindHits = useMemo<DocumentFindHit[]>(() => {
-    if (isPreviewMode) {
-      return buildPreviewVisibleDocumentFindHits(sourceText, documentFindDirective.findText, effectiveCaseSensitive)
-    }
+  /**
+   * The hits, which render-view searches WAIT for rather than compute.
+   *
+   * This was one `useMemo` covering both views. In edit mode that is right
+   * and stays: `buildDocumentFindHits` is an indexOf scan over the raw text,
+   * cheap enough to run in render and needed in the same frame as the query.
+   *
+   * In render view it was a full remark parse of the whole document, run
+   * synchronously during React's render phase -- the same shape, in a third
+   * module, as the two found the day before. Measured on a 2MB note in a
+   * packaged build: 115 SECONDS on the first query, then instant for every
+   * later term (the projection is memoized), then frozen again after
+   * switching notes and back, because that memo held exactly one document.
+   *
+   * So preview hits come from the worker. `isSearching` is a real state,
+   * not an absence: a reader who typed a query and sees an empty list has
+   * been told the wrong thing, and on a large note they would be told it for
+   * a long time.
+   */
+  const [previewHits, setPreviewHits] = useState<DocumentFindHit[]>([])
+  const [isSearchingPreview, setIsSearchingPreview] = useState(false)
+
+  const editModeHits = useMemo<DocumentFindHit[]>(() => {
+    if (isPreviewMode) return []
     return buildDocumentFindHits(sourceText, documentFindDirective.findText, effectiveCaseSensitive)
   }, [sourceText, documentFindDirective.findText, effectiveCaseSensitive, isPreviewMode])
+
+  useEffect(() => {
+    if (!isPreviewMode) {
+      setPreviewHits([])
+      setIsSearchingPreview(false)
+      return
+    }
+    if (!documentFindDirective.findText) {
+      setPreviewHits([])
+      setIsSearchingPreview(false)
+      return
+    }
+    let cancelled = false
+    setIsSearchingPreview(true)
+    void requestPreviewFindHits(sourceText, documentFindDirective.findText, effectiveCaseSensitive)
+      .then((hits: DocumentFindHit[]) => {
+        if (cancelled) return
+        setPreviewHits(hits)
+        setIsSearchingPreview(false)
+      })
+    // An answer the reader has already typed past is not worth showing, and
+    // showing it would make the list flicker backwards through superseded
+    // queries on a slow note.
+    return () => { cancelled = true }
+  }, [sourceText, documentFindDirective.findText, effectiveCaseSensitive, isPreviewMode])
+
+  const documentFindHits = isPreviewMode ? previewHits : editModeHits
 
   return {
     documentFindQuery,
@@ -147,5 +205,6 @@ export function useDocumentFind(options: UseDocumentFindOptions): UseDocumentFin
     preserveCase,
     documentFindDirective,
     documentFindHits,
+    isDocumentFindSearching: isPreviewMode && isSearchingPreview,
   }
 }

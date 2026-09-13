@@ -9818,9 +9818,17 @@ ${markdownHtml}
                         })}
                         {(activeSection?.documentFindHits.length ?? 0) === 0 ? (
                           <div className="notes-empty-state">
-                            {(activeSection?.documentFindQuery ?? '')
-                              ? 'No matches in the current note.'
-                              : 'Type in the search field to find text in the current note.'}
+                            {/* Three states, not two. A render-view search
+                                runs on the worker, so an empty list can mean
+                                "still looking" as well as "nothing there" --
+                                and on a large note it means the former for
+                                long enough that saying the latter would be a
+                                lie the reader acts on. */}
+                            {activeSection?.isDocumentFindSearching
+                              ? 'Searching this note...'
+                              : (activeSection?.documentFindQuery ?? '')
+                                ? 'No matches in the current note.'
+                                : 'Type in the search field to find text in the current note.'}
                           </div>
                         ) : null}
                       </div>

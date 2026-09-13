@@ -4,7 +4,7 @@
 //
 // The parse is no longer on this path at all (block zero is line zero, and
 // the map is built later on a worker -- see EditRestoreMath.ts and
-// blockSplitClient.ts), so what remains is mounting the document. This
+// documentFactsClient.ts), so what remains is mounting the document. This
 // attributes that remainder, because "chunk the mount" is only the right fix
 // if the mount is where the time is.
 //

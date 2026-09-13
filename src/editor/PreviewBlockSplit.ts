@@ -497,7 +497,7 @@ export function splitPreviewBlocksWithoutFullParse(
  * render, which is how a first open of a large note came to cost 26s. The
  * partial function above exists so the main thread has an entry point that
  * cannot do this: it returns null instead, and null means "ask the worker"
- * (blockSplitClient.ts). `previewBlockSplit.contract.test.ts` is what keeps
+ * (documentFactsClient.ts). `previewBlockSplit.contract.test.ts` is what keeps
  * that true, because the rule was already stated once and four separate
  * call sites did not hold it.
  */

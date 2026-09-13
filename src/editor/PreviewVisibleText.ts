@@ -128,21 +128,43 @@ export function buildPreviewVisibleTextProjection(markdown: string): PreviewVisi
   return { visibleText, segments }
 }
 
-// Single-entry memo keyed by the exact text. The projection is a full remark
-// parse of the whole document -- affordable once per note, not once per
-// keystroke -- and every caller here asks for the same document repeatedly
-// (hit list, then a jump per clicked card). Preview mode is also the only
-// caller, where the text is not being typed into.
-let cachedProjectionText: string | null = null
-let cachedProjection: PreviewVisibleTextProjection | null = null
+/**
+ * Memo keyed by exact text, holding the last few documents.
+ *
+ * The projection is a full remark parse of the whole document -- affordable
+ * once per note, not once per search -- and every caller asks for the same
+ * document repeatedly (hit list, then a jump per clicked card).
+ *
+ * It held exactly ONE document, and that was reported as a bug before it was
+ * understood as one: the first search in render view froze the app, every
+ * later term was instant, and switching to another note and back froze it
+ * again, because the single slot then held the other note. Two notes
+ * alternated with each other evicted the cache on every switch, which is the
+ * common case (compare a document against its own history, or against the
+ * one you are writing from).
+ *
+ * Runs in the worker only, so the memory this holds is not the renderer's --
+ * but a projection of a 2MB note is still a megabyte-scale string plus a
+ * segment per text node, so this is a handful of entries, not a cache.
+ */
+const PROJECTION_MEMO_SIZE = 3
+const projectionMemo = new Map<string, PreviewVisibleTextProjection>()
 
 export function getPreviewVisibleTextProjection(markdown: string): PreviewVisibleTextProjection {
-  if (cachedProjectionText === markdown && cachedProjection) {
-    return cachedProjection
+  const cached = projectionMemo.get(markdown)
+  if (cached) {
+    // Re-inserted so the least RECENTLY used entry is the one evicted, not
+    // the oldest by insertion: alternating between two notes must keep both.
+    projectionMemo.delete(markdown)
+    projectionMemo.set(markdown, cached)
+    return cached
   }
   const projection = buildPreviewVisibleTextProjection(markdown)
-  cachedProjectionText = markdown
-  cachedProjection = projection
+  projectionMemo.set(markdown, projection)
+  if (projectionMemo.size > PROJECTION_MEMO_SIZE) {
+    const oldest = projectionMemo.keys().next()
+    if (!oldest.done) projectionMemo.delete(oldest.value)
+  }
   return projection
 }
 

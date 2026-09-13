@@ -26,7 +26,13 @@
 // is what keeps this testable without a worker harness.
 
 import { splitMarkdownIntoPreviewBlocksIncremental, restorePreviewBlockSplitCacheFromRanges, type PreviewBlockSplitCache } from './PreviewBlockSplit'
-import type { PreviewBlockSplitRangesMessage, PreviewBlockSplitRequest } from './blockSplitMessages'
+import type {
+  DocumentFactsRequest,
+  DocumentFactsResponse,
+  SplitRangesMessage,
+  PreviewFindHitsMessage,
+} from './documentFactsMessages'
+import { buildPreviewVisibleDocumentFindHits, type DocumentFindHit } from './FindReplaceEngine'
 import type { PersistedPreviewBlockCache } from '../shared/noteLifecycle'
 
 type PartialListener = (cache: PreviewBlockSplitCache) => void
@@ -45,9 +51,18 @@ type Pending = {
   listeners: Set<PartialListener>
 }
 
+/**
+ * A find query awaiting its answer. Kept separately from split requests
+ * because the two are not variants of one thing: a split has instalments and
+ * is shared by text between callers, a find is one question with one answer
+ * and is superseded by the next question rather than joined.
+ */
+type PendingFind = { resolve: (hits: DocumentFindHit[]) => void }
+
 let worker: Worker | null | undefined
 let nextRequestId = 1
 const pending = new Map<number, Pending>()
+const pendingFinds = new Map<number, PendingFind>()
 // One parse per TEXT, not per asker. Two independent callers now want the
 // same map for the same note -- the background prewarm and the preview pane
 // itself -- and parsing a 2MB document twice because two of them asked is
@@ -59,9 +74,17 @@ const pendingByText = new Map<string, Pending>()
 function ensureWorker(): Worker | null {
   if (worker !== undefined) return worker
   try {
-    const created = new Worker(new URL('./blockSplit.worker.ts', import.meta.url), { type: 'module' })
-    created.onmessage = (event: MessageEvent<PreviewBlockSplitRangesMessage>) => {
-      const { id, ranges, done } = event.data
+    const created = new Worker(new URL('./documentFacts.worker.ts', import.meta.url), { type: 'module' })
+    created.onmessage = (event: MessageEvent<DocumentFactsResponse>) => {
+      if (event.data.kind === 'find') {
+        const { id, hits } = event.data as PreviewFindHitsMessage
+        const waiting = pendingFinds.get(id)
+        if (!waiting) return
+        pendingFinds.delete(id)
+        waiting.resolve(hits)
+        return
+      }
+      const { id, ranges, done } = event.data as SplitRangesMessage
       const request = pending.get(id)
       if (!request) return
       if (ranges.length > 0) request.ranges.push(...ranges)
@@ -85,6 +108,8 @@ function ensureWorker(): Worker | null {
       pending.clear()
       pendingByText.clear()
       inFlightByText.clear()
+      for (const [, waiting] of pendingFinds) waiting.resolve([])
+      pendingFinds.clear()
       worker = null
     }
     worker = created
@@ -131,9 +156,42 @@ export function requestFullBlockSplit(
     entry.resolve = resolve
     pending.set(id, entry)
     pendingByText.set(text, entry)
-    const request: PreviewBlockSplitRequest = { id, text }
+    const request: DocumentFactsRequest = { kind: 'split', id, text }
     active.postMessage(request)
   })
   inFlightByText.set(text, answer)
   return answer
+}
+
+/**
+ * Find hits against what the RENDERED pane shows, computed off the main
+ * thread.
+ *
+ * This used to run inside a `useMemo` in `useDocumentFind` -- a full remark
+ * parse of the document, synchronously, during React's render phase, which
+ * is the third time that exact shape has been found in this codebase. On a
+ * 2MB note it froze the app for a minute or more on the first search, went
+ * instant for every later term (a single-entry memo on the projection), and
+ * froze again the moment the reader switched notes and came back, because
+ * that one entry then held the other note.
+ *
+ * Not deduplicated by query, and deliberately: a find is one question with
+ * one answer, superseded by the next keystroke's question rather than joined
+ * by it. The caller drops answers it no longer wants.
+ */
+export function requestPreviewFindHits(
+  text: string,
+  query: string,
+  caseSensitive: boolean,
+): Promise<DocumentFindHit[]> {
+  const active = ensureWorker()
+  if (!active) return Promise.resolve(buildPreviewVisibleDocumentFindHits(text, query, caseSensitive))
+
+  const id = nextRequestId
+  nextRequestId += 1
+  return new Promise<DocumentFindHit[]>((resolve) => {
+    pendingFinds.set(id, { resolve })
+    const request: DocumentFactsRequest = { kind: 'find', id, text, query, caseSensitive }
+    active.postMessage(request)
+  })
 }

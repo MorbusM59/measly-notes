@@ -56,7 +56,7 @@ import { traceSettle } from './previewSettleTrace'
 import { createDocumentCommitCoalescer } from './documentCommitCoalescer'
 import { buildPersistedBlockMap } from '../editor/persistedBlockMap'
 import type { NoteUiStatePayload } from '../shared/noteLifecycle'
-import { requestFullBlockSplit } from '../editor/blockSplitClient'
+import { requestFullBlockSplit } from '../editor/documentFactsClient'
 
 /**
  * Throwaway checkpoint logger for the commit-to-paint input-lag

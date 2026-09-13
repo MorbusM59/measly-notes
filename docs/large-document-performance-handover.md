@@ -3983,7 +3983,7 @@ every large note. Now 1.6s once, then ~8ms forever.
 
 ### The cold parse is off the main thread (done)
 
-`editor/blockSplit.worker.ts` + `blockSplitClient.ts`. Text in, line ranges
+`editor/documentFacts.worker.ts` + `documentFactsClient.ts`. Text in, line ranges
 out — the split was already pure, so nothing had to be made safe to move it.
 Both cold-parse callers use it: `activateNote` (which awaits it, already
 being async and already behind the render view's fade) and the background
@@ -4015,7 +4015,7 @@ the whole app, so the worker inherited the browser resolution. It is aliased
 in `vite.config.ts` to the pure build for every thread, because the rule
 worth stating is that the markdown parser does not depend on the DOM — not
 that one worker needs a special resolution. Verified in the production build
-too: `blockSplit.worker-*.js` is emitted and no bundle contains the DOM
+too: `documentFacts.worker-*.js` is emitted and no bundle contains the DOM
 decoder.
 
 **Still open:** nothing chunks the parse itself. A document large enough will

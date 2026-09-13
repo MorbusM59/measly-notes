@@ -58,6 +58,13 @@ export interface UseDocumentFindNavigationOptions {
   documentFindHits: DocumentFindHit[]
   effectiveCaseSensitive: boolean
   preserveCase: boolean
+  /**
+   * How many blocks the rendered pane has. Not used for anything except as a
+   * DEPENDENCY: it is what decides whether the pane can answer which source
+   * lines are on screen, and it changes as the progressively-delivered split
+   * arrives.
+   */
+  previewBlockCount: number
   currentEditorText: string
   syncPreviewCustomScrollbar: () => void
   isPreviewMode: boolean
@@ -91,6 +98,7 @@ export interface UseDocumentFindNavigationResult {
  * all replace actions for the document-find bar.
  */
 export function useDocumentFindNavigation({
+  previewBlockCount,
   previewScrollRef,
   previewScrollToSourceLineRef,
   previewDocumentPositionRef,
@@ -196,19 +204,28 @@ export function useDocumentFindNavigation({
     }
 
     let frameId: number | null = null
-    // Opening find can beat the pane's own first measurement, and nothing
-    // would mark until the reader happened to scroll. A short retry covers
-    // that one frame or two without polling for the rest of the session.
-    let attemptsLeft = 30
 
+    /**
+     * Asked ONCE per commit that could change the answer, a frame later so
+     * the layout this reads has happened.
+     *
+     * This used to retry for 30 frames when the pane could not answer, and
+     * then give up for the rest of the session -- nothing in this effect's
+     * dependencies changed when the pane became able to answer, so the cards
+     * simply never lit up until the reader happened to scroll. That was
+     * survivable only while the block split was synchronous, so the pane
+     * always could answer by the time find ran. Once the split started
+     * arriving progressively, half a second of retries stopped being enough
+     * on a large note and the marking went reliably blind.
+     *
+     * `previewBlockCount` is the dependency that replaces the retry: the
+     * pane cannot answer with no blocks, and when it gets some, this effect
+     * runs again. Wait until the information is there, rather than asking
+     * repeatedly in the hope that it has arrived.
+     */
     const recompute = () => {
       frameId = null
       const lines = readRange()
-      if (lines === null && attemptsLeft > 0) {
-        attemptsLeft -= 1
-        frameId = requestAnimationFrame(recompute)
-        return
-      }
       const next = lines === null
         ? null
         : (() => {
@@ -226,7 +243,6 @@ export function useDocumentFindNavigation({
 
     const schedule = () => {
       if (frameId !== null) return
-      attemptsLeft = 30
       frameId = requestAnimationFrame(recompute)
     }
 
@@ -263,8 +279,10 @@ export function useDocumentFindNavigation({
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
     // documentFindHits is a dependency because a new hit list re-indexes
-    // everything; currentEditorText reaches this through hitSourceLines.
-  }, [isPreviewMode, documentFindHits, lowerBound, previewScrollRef, previewDocumentPositionRef, adapterRef])
+    // everything; currentEditorText reaches this through hitSourceLines;
+    // previewBlockCount because it is what makes the pane answerable at all
+    // (see recompute).
+  }, [isPreviewMode, documentFindHits, previewBlockCount, lowerBound, previewScrollRef, previewDocumentPositionRef, adapterRef])
 
   /**
    * The match this card refers to, set in small caps where it stands.

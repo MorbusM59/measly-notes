@@ -484,9 +484,9 @@ deleted without answering it.
 **Noticed.** Threading a real `offsetPx` through the same options object while
 rebuilding the landing arithmetic.
 
-### `blockSplitClient`'s main-thread fallback may have no reachable trigger
+### `documentFactsClient`'s main-thread fallback may have no reachable trigger
 
-**What.** `ensureWorker()` in `src/editor/blockSplitClient.ts` catches a failed
+**What.** `ensureWorker()` in `src/editor/documentFactsClient.ts` catches a failed
 construction and installs an `onerror` handler; both routes resolve every
 pending request with `splitMarkdownIntoPreviewBlocksIncremental(text, null)` --
 a full remark parse, on the main thread, of the whole document.
