@@ -79,13 +79,37 @@ export interface PreviewVisibleTextProjection {
 export function buildPreviewVisibleTextProjection(markdown: string): PreviewVisibleTextProjection {
   const root = visibleTextProcessor.parse(markdown) as MdastAstNode
 
-  let visibleText = ''
+  /**
+   * The projection is assembled in PIECES and joined once, and the two facts
+   * the assembly needs about what came before -- how long it is, and whether
+   * it already ends in a newline -- are tracked alongside rather than asked
+   * of the string.
+   *
+   * It used to be one `visibleText` built with `+=`, with
+   * `visibleText.endsWith('\n')` consulted once per block. V8 keeps a chain
+   * of `+=` as a rope and does not flatten it until something needs the
+   * characters in order -- and `endsWith` is exactly that. So every block
+   * boundary flattened a string that grew to 1.8MB, ~58,000 times: quadratic,
+   * and measured at 142 SECONDS on a 2MB note against ~16s for the block
+   * split's parse of the same document. The parse was never the expensive
+   * part; the bookkeeping around it was.
+   */
+  const parts: string[] = []
+  let visibleLength = 0
+  let endsWithNewline = false
   const segments: PreviewVisibleTextSegment[] = []
 
+  const append = (value: string) => {
+    if (value.length === 0) return
+    parts.push(value)
+    visibleLength += value.length
+    endsWithNewline = value.charCodeAt(value.length - 1) === 10
+  }
+
   const appendBlockSeparator = () => {
-    if (visibleText.length === 0) return
-    if (visibleText.endsWith('\n')) return
-    visibleText += '\n'
+    if (visibleLength === 0) return
+    if (endsWithNewline) return
+    append('\n')
   }
 
   const walk = (node: MdastAstNode) => {
@@ -100,12 +124,12 @@ export function buildPreviewVisibleTextProjection(markdown: string): PreviewVisi
       const sourceEnd = node.position?.end?.offset
       if (typeof sourceStart === 'number' && node.value.length > 0) {
         segments.push({
-          visibleStart: visibleText.length,
-          visibleEnd: visibleText.length + node.value.length,
+          visibleStart: visibleLength,
+          visibleEnd: visibleLength + node.value.length,
           sourceStart,
           sourceEnd: typeof sourceEnd === 'number' ? sourceEnd : sourceStart + node.value.length,
         })
-        visibleText += node.value
+        append(node.value)
       }
       if (isBlock) appendBlockSeparator()
       return
@@ -114,7 +138,7 @@ export function buildPreviewVisibleTextProjection(markdown: string): PreviewVisi
     // A hard line break renders as <br>, so it separates words the same way
     // a block boundary does -- without being one.
     if (node.type === 'break') {
-      if (!visibleText.endsWith('\n')) visibleText += '\n'
+      if (!endsWithNewline) append('\n')
       return
     }
 
@@ -125,7 +149,7 @@ export function buildPreviewVisibleTextProjection(markdown: string): PreviewVisi
 
   root.children?.forEach(walk)
 
-  return { visibleText, segments }
+  return { visibleText: parts.join(''), segments }
 }
 
 /**
